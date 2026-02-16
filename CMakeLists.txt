@@ -161,3 +161,23 @@ target_link_libraries(SampleWranglerCatalogDbTests PRIVATE
 )
 
 add_test(NAME SampleWrangler.CatalogDb COMMAND SampleWranglerCatalogDbTests)
+
+add_executable(SampleWranglerScannerAppleLoopTests
+    Tests/ScannerAppleLoopTests.cpp
+    Source/Pipeline/Scanner.cpp
+    Source/Pipeline/JobQueue.cpp
+    Source/Catalog/CatalogDb.cpp
+    Source/Catalog/CatalogSchema.cpp
+)
+
+target_include_directories(SampleWranglerScannerAppleLoopTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source
+)
+
+target_link_libraries(SampleWranglerScannerAppleLoopTests PRIVATE
+    sqlite3
+    juce::juce_core
+    juce::juce_audio_formats
+)
+
+add_test(NAME SampleWrangler.ScannerAppleLoop COMMAND SampleWranglerScannerAppleLoopTests)

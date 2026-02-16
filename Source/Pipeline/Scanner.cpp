@@ -1,5 +1,5 @@
 #include "Scanner.h"
-#include <JuceHeader.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <filesystem>
 #include <algorithm>
 #include <cctype>
@@ -10,6 +10,7 @@
 #include <cmath>
 #include <optional>
 #include <vector>
+#include <unordered_map>
 
 namespace fs = std::filesystem;
 
@@ -37,6 +38,27 @@ namespace sw
             return static_cast<uint16_t>(
                 static_cast<uint16_t>(data[offset]) |
                 static_cast<uint16_t>(static_cast<uint16_t>(data[offset + 1]) << 8));
+        }
+
+        std::optional<uint32_t> readU32BE(const uint8_t *data, size_t size, size_t offset)
+        {
+            if (offset + 4 > size)
+                return std::nullopt;
+
+            return (static_cast<uint32_t>(data[offset]) << 24) |
+                   (static_cast<uint32_t>(data[offset + 1]) << 16) |
+                   (static_cast<uint32_t>(data[offset + 2]) << 8) |
+                   static_cast<uint32_t>(data[offset + 3]);
+        }
+
+        std::optional<uint16_t> readU16BE(const uint8_t *data, size_t size, size_t offset)
+        {
+            if (offset + 2 > size)
+                return std::nullopt;
+
+            return static_cast<uint16_t>(
+                (static_cast<uint16_t>(data[offset]) << 8) |
+                static_cast<uint16_t>(data[offset + 1]));
         }
 
         std::optional<float> readF32LE(const uint8_t *data, size_t size, size_t offset)
@@ -193,6 +215,146 @@ namespace sw
                 }
             }
         }
+
+        void parseAiffAppleLoopMetadata(const std::filesystem::path &path, FileRecord &rec)
+        {
+            std::ifstream in(path, std::ios::binary);
+            if (!in)
+                return;
+
+            std::array<char, 12> formHeader{};
+            in.read(formHeader.data(), static_cast<std::streamsize>(formHeader.size()));
+            if (in.gcount() != static_cast<std::streamsize>(formHeader.size()))
+                return;
+
+            if (std::memcmp(formHeader.data(), "FORM", 4) != 0)
+                return;
+
+            const bool isAiff = std::memcmp(formHeader.data() + 8, "AIFF", 4) == 0 ||
+                                std::memcmp(formHeader.data() + 8, "AIFC", 4) == 0;
+            if (!isAiff)
+                return;
+
+            std::unordered_map<uint16_t, int64_t> markerIdToSample;
+            std::optional<uint16_t> sustainLoopBeginMarkerId;
+            std::optional<uint16_t> sustainLoopEndMarkerId;
+            std::optional<int> rootMidiNote;
+            bool hasAppleApplicationChunk = false;
+
+            while (in)
+            {
+                std::array<char, 8> chunkHeader{};
+                in.read(chunkHeader.data(), static_cast<std::streamsize>(chunkHeader.size()));
+                if (in.gcount() != static_cast<std::streamsize>(chunkHeader.size()))
+                    break;
+
+                const char *chunkId = chunkHeader.data();
+                const uint32_t chunkSize = (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[4])) << 24) |
+                                           (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[5])) << 16) |
+                                           (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[6])) << 8) |
+                                           static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[7]));
+
+                std::vector<uint8_t> chunkData(chunkSize);
+                if (chunkSize > 0)
+                {
+                    in.read(reinterpret_cast<char *>(chunkData.data()), static_cast<std::streamsize>(chunkSize));
+                    if (in.gcount() != static_cast<std::streamsize>(chunkSize))
+                        break;
+                }
+
+                if ((chunkSize & 1u) != 0u)
+                    in.seekg(1, std::ios::cur);
+
+                if (std::memcmp(chunkId, "INST", 4) == 0)
+                {
+                    if (chunkData.size() >= 20)
+                    {
+                        rootMidiNote = static_cast<int>(chunkData[0]);
+
+                        const auto sustainPlayMode = readU16BE(chunkData.data(), chunkData.size(), 8);
+                        const auto beginMarkerId = readU16BE(chunkData.data(), chunkData.size(), 10);
+                        const auto endMarkerId = readU16BE(chunkData.data(), chunkData.size(), 12);
+
+                        if (sustainPlayMode.has_value() && *sustainPlayMode != 0 &&
+                            beginMarkerId.has_value() && endMarkerId.has_value() &&
+                            *beginMarkerId > 0 && *endMarkerId > 0)
+                        {
+                            sustainLoopBeginMarkerId = beginMarkerId;
+                            sustainLoopEndMarkerId = endMarkerId;
+                        }
+                    }
+                }
+                else if (std::memcmp(chunkId, "MARK", 4) == 0)
+                {
+                    const auto markerCount = readU16BE(chunkData.data(), chunkData.size(), 0);
+                    if (!markerCount.has_value() || *markerCount == 0)
+                        continue;
+
+                    size_t offset = 2;
+                    for (uint16_t markerIndex = 0; markerIndex < *markerCount; ++markerIndex)
+                    {
+                        if (offset + 7 > chunkData.size())
+                            break;
+
+                        const auto markerId = readU16BE(chunkData.data(), chunkData.size(), offset);
+                        const auto markerPosition = readU32BE(chunkData.data(), chunkData.size(), offset + 2);
+                        if (!markerId.has_value() || !markerPosition.has_value())
+                            break;
+
+                        markerIdToSample[*markerId] = static_cast<int64_t>(*markerPosition);
+
+                        const size_t markerNameLengthOffset = offset + 6;
+                        const uint8_t markerNameLength = chunkData[markerNameLengthOffset];
+                        size_t markerRecordSize = static_cast<size_t>(2 + 4 + 1 + markerNameLength);
+                        if ((markerRecordSize & 1u) != 0u)
+                            ++markerRecordSize;
+
+                        offset += markerRecordSize;
+                    }
+                }
+                else if (std::memcmp(chunkId, "APPL", 4) == 0)
+                {
+                    if (chunkData.size() >= 4)
+                    {
+                        if (std::memcmp(chunkData.data(), "stoc", 4) == 0 ||
+                            std::memcmp(chunkData.data(), "AAPL", 4) == 0)
+                        {
+                            hasAppleApplicationChunk = true;
+                        }
+                    }
+                }
+            }
+
+            if (rootMidiNote.has_value() && *rootMidiNote >= 0 && *rootMidiNote <= 127)
+            {
+                rec.acidRootNote = *rootMidiNote;
+                if (!rec.key.has_value())
+                {
+                    const auto noteName = midiNoteName(*rootMidiNote);
+                    if (noteName.isNotEmpty())
+                        rec.key = noteName.toStdString();
+                }
+            }
+
+            if (sustainLoopBeginMarkerId.has_value() && sustainLoopEndMarkerId.has_value())
+            {
+                const auto beginIt = markerIdToSample.find(*sustainLoopBeginMarkerId);
+                const auto endIt = markerIdToSample.find(*sustainLoopEndMarkerId);
+                if (beginIt != markerIdToSample.end() && endIt != markerIdToSample.end())
+                {
+                    const int64_t loopStart = std::min(beginIt->second, endIt->second);
+                    const int64_t loopEnd = std::max(beginIt->second, endIt->second);
+                    if (loopEnd > loopStart)
+                    {
+                        rec.loopStartSample = loopStart;
+                        rec.loopEndSample = loopEnd;
+                    }
+                }
+            }
+
+            if (hasAppleApplicationChunk || rec.acidRootNote.has_value() || rec.loopStartSample.has_value())
+                rec.loopType = std::string("apple-loop");
+        }
     }
 
     Scanner::Scanner(CatalogDb &db, JobQueue &queue)
@@ -300,6 +462,8 @@ namespace sw
 
                             if (ext == "wav")
                                 parseWavAcidAndLoopMetadata(path, rec);
+                            else if (ext == "aif" || ext == "aiff")
+                                parseAiffAppleLoopMetadata(path, rec);
                         }
                     }
 

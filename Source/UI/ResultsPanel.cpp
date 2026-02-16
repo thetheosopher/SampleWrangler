@@ -2,6 +2,16 @@
 
 namespace
 {
+    bool isAcidizedLoop(const sw::FileRecord &item)
+    {
+        return item.loopType.has_value() && *item.loopType == "acidized";
+    }
+
+    bool isAppleLoop(const sw::FileRecord &item)
+    {
+        return item.loopType.has_value() && *item.loopType == "apple-loop";
+    }
+
     juce::String formatDuration(const std::optional<double> &durationSec)
     {
         if (!durationSec.has_value() || *durationSec < 0.0)
@@ -48,7 +58,7 @@ namespace
                                 "  Samples: " + totalSamples +
                                 "  Codec/Enc: " + codec;
 
-        if (item.loopType.has_value() && *item.loopType == "acidized")
+        if (isAcidizedLoop(item) || isAppleLoop(item))
         {
             const juce::String acidRoot = item.acidRootNote.has_value() ? midiNoteToName(*item.acidRootNote) : juce::String("--");
             const juce::String acidBeats = item.acidBeats.has_value() ? juce::String(*item.acidBeats) : juce::String("--");
@@ -56,10 +66,12 @@ namespace
             const juce::String loopStart = item.loopStartSample.has_value() ? juce::String(*item.loopStartSample) : juce::String("--");
             const juce::String loopEnd = item.loopEndSample.has_value() ? juce::String(*item.loopEndSample) : juce::String("--");
 
-            metadata += "  Acid: yes";
+            metadata += isAcidizedLoop(item) ? "  Acid: yes" : "  Apple Loop: yes";
             metadata += "  Root: " + acidRoot;
-            metadata += "  Beats: " + acidBeats;
-            metadata += "  Tempo: " + acidBpm;
+            if (isAcidizedLoop(item))
+                metadata += "  Beats: " + acidBeats;
+            if (item.bpm.has_value())
+                metadata += "  Tempo: " + acidBpm;
             metadata += "  Loop: " + loopStart + "-" + loopEnd;
         }
 
@@ -201,15 +213,18 @@ namespace sw
         const juce::String rightText = juce::String(item.relativePath) + (item.indexOnly ? "  [index-only]" : "");
         g.drawText(rightText, width / 2, 0, width / 2 - 8, 18, juce::Justification::centredRight);
 
-        if (item.loopType.has_value() && *item.loopType == "acidized")
+        if (isAcidizedLoop(item) || isAppleLoop(item))
         {
-            const juce::String badgeText = "Acidized";
-            const int badgeWidth = 64;
+            const juce::String badgeText = isAcidizedLoop(item) ? "Acidized" : "Apple Loop";
+            const int badgeWidth = isAcidizedLoop(item) ? 64 : 76;
             const int badgeHeight = 14;
             const int badgeX = juce::jmax(8, (width / 2) - badgeWidth - 4);
             const int badgeY = 2;
 
-            g.setColour(darkModeEnabled ? juce::Colour(0xff2f8f5b) : juce::Colour(0xff2f9f61));
+            const auto badgeColour = isAcidizedLoop(item)
+                                         ? (darkModeEnabled ? juce::Colour(0xff2f8f5b) : juce::Colour(0xff2f9f61))
+                                         : (darkModeEnabled ? juce::Colour(0xff3465a4) : juce::Colour(0xff3a78bf));
+            g.setColour(badgeColour);
             g.fillRoundedRectangle(static_cast<float>(badgeX), static_cast<float>(badgeY),
                                    static_cast<float>(badgeWidth), static_cast<float>(badgeHeight), 4.0f);
 

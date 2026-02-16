@@ -15,6 +15,14 @@ namespace sw
 
     namespace
     {
+        bool hasEmbeddedLoopMetadata(const FileRecord &file)
+        {
+            if (!file.loopType.has_value())
+                return false;
+
+            return *file.loopType == "acidized" || *file.loopType == "apple-loop";
+        }
+
         constexpr int kToolbarHeight = 36;
         constexpr int kStatusBarHeight = 24;
         constexpr int kSplitterThickness = 5;
@@ -1002,14 +1010,14 @@ namespace sw
         persistLastSelectedFile(file);
         currentSelectedFile = file;
 
-        const bool isAcidized = file.loopType.has_value() && *file.loopType == "acidized";
-        const bool hasValidAcidLoopRegion = isAcidized && file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
-                                            *file.loopEndSample > *file.loopStartSample;
+        const bool hasLoopMetadata = hasEmbeddedLoopMetadata(file);
+        const bool hasValidEmbeddedLoopRegion = hasLoopMetadata && file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
+                                                *file.loopEndSample > *file.loopStartSample;
         const bool hasSampleLength = file.totalSamples.has_value() && *file.totalSamples > 1;
 
-        audioEngine.setPreviewRootMidiNote(isAcidized && file.acidRootNote.has_value() ? *file.acidRootNote : 60);
+        audioEngine.setPreviewRootMidiNote(hasLoopMetadata && file.acidRootNote.has_value() ? *file.acidRootNote : 60);
 
-        if (isAcidized && hasValidAcidLoopRegion)
+        if (hasLoopMetadata && hasValidEmbeddedLoopRegion)
         {
             audioEngine.setPreviewLoopRegionSamples(*file.loopStartSample, *file.loopEndSample);
 
@@ -1018,7 +1026,7 @@ namespace sw
                 previewPanel.setLoopEnabled(true);
             }
         }
-        else if (isAcidized && hasSampleLength)
+        else if (hasLoopMetadata && hasSampleLength)
         {
             audioEngine.setPreviewLoopRegionSamples(0, *file.totalSamples - 1);
 
@@ -1149,7 +1157,7 @@ namespace sw
         }
 
         const auto &file = *currentSelectedFile;
-        if (file.loopType.has_value() && *file.loopType == "acidized" &&
+        if (hasEmbeddedLoopMetadata(file) &&
             file.totalSamples.has_value() && *file.totalSamples > 1 &&
             file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
             *file.loopEndSample > *file.loopStartSample)
@@ -1165,7 +1173,7 @@ namespace sw
             }
         }
 
-        if (file.loopType.has_value() && *file.loopType == "acidized" &&
+        if (hasEmbeddedLoopMetadata(file) &&
             file.totalSamples.has_value() && *file.totalSamples > 1)
         {
             waveformPanel.setLoopRegionNormalized(0.0f, 1.0f);

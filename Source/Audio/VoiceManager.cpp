@@ -1,6 +1,10 @@
 #include "VoiceManager.h"
 #include <cmath>
 
+#if SW_HAVE_RUBBERBAND
+#include <rubberband/RubberBandLiveShifter.h>
+#endif
+
 namespace sw
 {
 
@@ -14,6 +18,10 @@ namespace sw
     void VoiceManager::prepareToPlay(int /*samplesPerBlockExpected*/, double sampleRate)
     {
         currentSampleRate = sampleRate;
+#if SW_HAVE_RUBBERBAND
+        initialiseRubberBandIfNeeded();
+        resetRubberBandState();
+#endif
     }
 
     void VoiceManager::releaseResources()
@@ -46,7 +54,15 @@ namespace sw
 
         double pos = playbackPos.load(std::memory_order_relaxed);
         double rate = playbackRate.load(std::memory_order_relaxed) * (bufferSampleRate / currentSampleRate);
+#if SW_HAVE_RUBBERBAND
+        const double currentPitchRatio = pitchRatio.load(std::memory_order_relaxed);
+#endif
         const bool preserveLength = preserveLengthEnabled.load(std::memory_order_relaxed) && std::abs(rate - 1.0) > 0.0001;
+#if SW_HAVE_RUBBERBAND
+        const bool useRubberBandHq = preserveLength && stretchHighQualityEnabled.load(std::memory_order_relaxed) && rubberBandInitialized;
+#else
+        constexpr bool useRubberBandHq = false;
+#endif
 
         auto wrapReadPosition = [&](double readPos)
         {
@@ -86,7 +102,12 @@ namespace sw
         };
 
         if (granularResetRequested.exchange(false, std::memory_order_acq_rel))
+        {
             grainSamplesRemaining = 0;
+#if SW_HAVE_RUBBERBAND
+            resetRubberBandState();
+#endif
+        }
 
         constexpr int grainLengthSamples = 256;
         constexpr double grainSpacingSamples = 128.0;
@@ -118,6 +139,69 @@ namespace sw
 
             if (preserveLength)
             {
+                if (useRubberBandHq)
+                {
+#if SW_HAVE_RUBBERBAND
+                    if (rubberBandLiveShifter != nullptr)
+                        rubberBandLiveShifter->setPitchScale(currentPitchRatio);
+
+                    for (int ch = 0; ch < numOutChannels; ++ch)
+                    {
+                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                        rubberBandInput[static_cast<size_t>(ch)][static_cast<size_t>(rubberBandInputFill)] =
+                            readInterpolatedSample(srcCh, pos);
+                    }
+
+                    ++rubberBandInputFill;
+
+                    if (rubberBandInputFill >= rubberBandBlockSize)
+                    {
+                        for (int ch = 0; ch < kRubberBandMaxChannels; ++ch)
+                        {
+                            rubberBandInputPtrs[static_cast<size_t>(ch)] = rubberBandInput[static_cast<size_t>(ch)].data();
+                            rubberBandOutputPtrs[static_cast<size_t>(ch)] = rubberBandOutput[static_cast<size_t>(ch)].data();
+                        }
+
+                        rubberBandLiveShifter->shift(rubberBandInputPtrs.data(), rubberBandOutputPtrs.data());
+                        rubberBandInputFill = 0;
+                        rubberBandOutputRead = 0;
+                        rubberBandOutputAvailable = rubberBandBlockSize;
+                    }
+
+                    float outSampleLeft = 0.0f;
+                    float outSampleRight = 0.0f;
+                    bool outputProduced = false;
+
+                    while (rubberBandOutputAvailable > 0 && rubberBandStartDelayRemaining > 0)
+                    {
+                        ++rubberBandOutputRead;
+                        --rubberBandOutputAvailable;
+                        --rubberBandStartDelayRemaining;
+                    }
+
+                    if (rubberBandOutputAvailable > 0)
+                    {
+                        const int rbIndex = rubberBandOutputRead;
+                        outSampleLeft = rubberBandOutput[0][static_cast<size_t>(rbIndex)];
+                        outSampleRight = rubberBandOutput[1][static_cast<size_t>(rbIndex)];
+                        ++rubberBandOutputRead;
+                        --rubberBandOutputAvailable;
+                        outputProduced = true;
+                    }
+
+                    for (int ch = 0; ch < numOutChannels; ++ch)
+                    {
+                        const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
+                        info.buffer->setSample(ch, info.startSample + i, sample);
+                    }
+
+                    // Only advance position when we're actually outputting audio (past startup delay)
+                    if (outputProduced || rubberBandStartDelayRemaining == 0)
+                        pos += (bufferSampleRate / currentSampleRate);
+                    continue;
+#endif
+                }
+
                 if (grainSamplesRemaining <= 0)
                 {
                     grainReadPosA = pos;
@@ -183,6 +267,10 @@ namespace sw
         bufferSampleRate = fileSampleRate;
         sampleBuffer.store(ownedBuffer.get(), std::memory_order_release);
         playbackPos.store(0.0, std::memory_order_relaxed);
+#if SW_HAVE_RUBBERBAND
+        initialiseRubberBandIfNeeded();
+        resetRubberBandState();
+#endif
     }
 
     void VoiceManager::play()
@@ -204,6 +292,7 @@ namespace sw
         // Resample-style: ratio = 2^(semitones/12)
         double ratio = std::pow(2.0, semitones / 12.0);
         playbackRate.store(ratio, std::memory_order_relaxed);
+        pitchRatio.store(ratio, std::memory_order_relaxed);
         granularResetRequested.store(true, std::memory_order_release);
     }
 
@@ -216,6 +305,30 @@ namespace sw
     bool VoiceManager::isPreserveLengthEnabled() const noexcept
     {
         return preserveLengthEnabled.load(std::memory_order_relaxed);
+    }
+
+    void VoiceManager::setStretchHighQualityEnabled(bool enabled)
+    {
+#if SW_HAVE_RUBBERBAND
+        stretchHighQualityEnabled.store(enabled, std::memory_order_relaxed);
+        granularResetRequested.store(true, std::memory_order_release);
+#else
+        (void)enabled;
+#endif
+    }
+
+    bool VoiceManager::isStretchHighQualityEnabled() const noexcept
+    {
+        return stretchHighQualityEnabled.load(std::memory_order_relaxed);
+    }
+
+    bool VoiceManager::isStretchHighQualityAvailable() const noexcept
+    {
+#if SW_HAVE_RUBBERBAND
+        return true;
+#else
+        return false;
+#endif
     }
 
     void VoiceManager::setLoopEnabled(bool enabled)
@@ -274,5 +387,56 @@ namespace sw
         playbackPos.store(clamped * static_cast<double>(length), std::memory_order_relaxed);
         granularResetRequested.store(true, std::memory_order_release);
     }
+
+#if SW_HAVE_RUBBERBAND
+    void VoiceManager::initialiseRubberBandIfNeeded()
+    {
+        if (rubberBandInitialized)
+            return;
+
+        const auto options = RubberBand::RubberBandLiveShifter::OptionWindowMedium |
+                             RubberBand::RubberBandLiveShifter::OptionChannelsTogether |
+                             RubberBand::RubberBandLiveShifter::OptionFormantPreserved;
+
+        rubberBandLiveShifter = std::make_unique<RubberBand::RubberBandLiveShifter>(
+            static_cast<size_t>(juce::jlimit(8000, 192000, static_cast<int>(std::round(currentSampleRate)))),
+            static_cast<size_t>(kRubberBandMaxChannels),
+            options);
+
+        rubberBandLiveShifter->setDebugLevel(0);
+        rubberBandLiveShifter->setPitchScale(playbackRate.load(std::memory_order_relaxed));
+
+        rubberBandBlockSize = static_cast<int>(rubberBandLiveShifter->getBlockSize());
+        if (rubberBandBlockSize <= 0 || rubberBandBlockSize > kRubberBandMaxBlockSize)
+        {
+            rubberBandLiveShifter.reset();
+            rubberBandInitialized = false;
+            return;
+        }
+
+        rubberBandInitialized = true;
+        resetRubberBandState();
+    }
+
+    void VoiceManager::resetRubberBandState()
+    {
+        if (rubberBandLiveShifter == nullptr)
+            return;
+
+        rubberBandLiveShifter->reset();
+        rubberBandLiveShifter->setPitchScale(playbackRate.load(std::memory_order_relaxed));
+
+        rubberBandInputFill = 0;
+        rubberBandOutputRead = 0;
+        rubberBandOutputAvailable = 0;
+        rubberBandStartDelayRemaining = static_cast<int>(rubberBandLiveShifter->getStartDelay());
+
+        for (int ch = 0; ch < kRubberBandMaxChannels; ++ch)
+        {
+            std::fill(rubberBandInput[static_cast<size_t>(ch)].begin(), rubberBandInput[static_cast<size_t>(ch)].end(), 0.0f);
+            std::fill(rubberBandOutput[static_cast<size_t>(ch)].begin(), rubberBandOutput[static_cast<size_t>(ch)].end(), 0.0f);
+        }
+    }
+#endif
 
 } // namespace sw

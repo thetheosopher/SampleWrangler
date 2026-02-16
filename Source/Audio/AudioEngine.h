@@ -52,6 +52,9 @@ namespace sw
         void setPitchSemitones(double semitones);
         void setPreserveLengthEnabled(bool enabled);
         bool isPreserveLengthEnabled() const noexcept;
+        void setStretchHighQualityEnabled(bool enabled);
+        bool isStretchHighQualityEnabled() const noexcept;
+        bool isStretchHighQualityAvailable() const noexcept;
 
         /// Enable/disable loop playback for preview.
         void setLoopEnabled(bool enabled);

@@ -19,31 +19,31 @@ namespace sw
         /// Handle spacebar for play/stop toggle.
         bool keyPressed(const juce::KeyPress &key) override;
 
-        juce::MidiKeyboardState &getKeyboardState() noexcept { return keyboardState; }
         void setPitchSemitones(double semitones);
         void setDarkMode(bool enabled);
         void setAvailableOutputDeviceTypes(const juce::StringArray &typeNames, const juce::String &currentTypeName);
         void setAvailableOutputDevices(const juce::StringArray &deviceNames, const juce::String &currentDeviceName);
-        void setAvailableMidiInputDevices(const juce::Array<juce::MidiDeviceInfo> &devices,
-                                          const juce::String &currentDeviceIdentifier);
         void setPlaybackActive(bool playing);
 
         std::function<void()> onPlayRequested;
         std::function<void()> onStopRequested;
         std::function<void(bool enabled)> onAutoPlaybackChanged;
         std::function<void(bool enabled)> onLoopPlaybackChanged;
-        std::function<void(bool enabled)> onPreserveLengthChanged;
+        std::function<void(bool enabled)> onStretchChanged;
+        std::function<void(bool enabled)> onStretchHighQualityChanged;
         std::function<void(double semitones)> onPitchChanged;
-        std::function<void(const juce::String &typeName)> onApplyOutputDeviceTypeRequested;
-        std::function<void(const juce::String &deviceName)> onApplyOutputDeviceRequested;
-        std::function<void(const juce::String &deviceIdentifier)> onMidiInputDeviceSelected;
+        std::function<void(const juce::String &typeName)> onOutputDeviceTypeChanged;
+        std::function<void(const juce::String &deviceName)> onOutputDeviceChanged;
 
         void setAutoPlayEnabled(bool enabled);
         bool isAutoPlayEnabled() const noexcept;
         void setLoopEnabled(bool enabled);
         bool isLoopEnabled() const noexcept;
-        void setPreserveLengthEnabled(bool enabled);
-        bool isPreserveLengthEnabled() const noexcept;
+        void setStretchEnabled(bool enabled);
+        bool isStretchEnabled() const noexcept;
+        void setStretchHighQualityEnabled(bool enabled);
+        bool isStretchHighQualityEnabled() const noexcept;
+        void setStretchHighQualityAvailable(bool available);
         void updatePlaybackButtonStates();
 
         class PitchValueField final : public juce::Label
@@ -59,6 +59,22 @@ namespace sw
             int dragStartScreenX = 0;
         };
 
+        class FixedFontLookAndFeel : public juce::LookAndFeel_V4
+        {
+        public:
+            void drawToggleButton(juce::Graphics &g, juce::ToggleButton &button,
+                                  bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override
+            {
+                // Call parent to draw everything
+                juce::LookAndFeel_V4::drawToggleButton(g, button, shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+            }
+
+            juce::Font getTextButtonFont(juce::TextButton &, int) override
+            {
+                return juce::FontOptions(12.0f);
+            }
+        };
+
     private:
         void updatePitchValueFieldText();
 
@@ -66,18 +82,14 @@ namespace sw
         juce::TextButton stopButton{"Stop"};
         juce::ToggleButton autoPlayButton{"Auto"};
         juce::ToggleButton loopButton{"Loop"};
-        juce::ToggleButton preserveLengthButton{"Preserve Length"};
+        juce::ToggleButton stretchButton{"Stretch"};
+        juce::ToggleButton stretchHighQualityButton{"HQ"};
+        FixedFontLookAndFeel fixedFontLookAndFeel;
         juce::Slider pitchSlider;
         juce::Label transposeLabel{"TransposeLabel", "Transpose"};
         PitchValueField pitchValueField;
         juce::ComboBox outputDeviceTypeCombo;
-        juce::TextButton applyOutputDeviceTypeButton{"Apply"};
         juce::ComboBox outputDeviceCombo;
-        juce::TextButton applyOutputDeviceButton{"Apply"};
-        juce::ComboBox midiInputCombo;
-        juce::StringArray midiInputDeviceIdentifiers;
-        juce::MidiKeyboardState keyboardState;
-        juce::MidiKeyboardComponent keyboard;
         bool isPlaying = false;
         bool darkModeEnabled = false;
         double pitchScrubStartValue = 0.0;

@@ -117,7 +117,7 @@ namespace sw
         grabKeyboardFocus();
 
         const auto rowIndex = rootRowIndexForY(event.y);
-        if (!rowIndex.has_value())
+        if (!rowIndex.has_value() || *rowIndex >= static_cast<int>(roots.size()))
             return;
 
         const auto clickedRootId = roots[static_cast<size_t>(*rowIndex)].id;
@@ -134,7 +134,7 @@ namespace sw
     void BrowserPanel::mouseMove(const juce::MouseEvent &event)
     {
         const auto rowIndex = rootRowIndexForY(event.y);
-        if (!rowIndex.has_value())
+        if (!rowIndex.has_value() || *rowIndex >= static_cast<int>(roots.size()))
         {
             setTooltip({});
             return;

@@ -25,16 +25,20 @@ namespace sw
 
         constexpr int kToolbarHeight = 36;
         constexpr int kStatusBarHeight = 24;
+        constexpr int kUiTimerHz = 60;
+        constexpr int kMidiDeviceRefreshIntervalTicks = kUiTimerHz;
         constexpr int kSplitterThickness = 5;
         constexpr int kMinLeftPanelWidth = 180;
         constexpr int kMinRightPanelWidth = 320;
         constexpr int kMinResultsHeight = 120;
-        constexpr int kMinBottomHeight = 120;
+        constexpr int kMinWaveformHeight = 120;
+        constexpr int kMinBottomHeight = 96;
         constexpr int kMinPreviewWidth = 220;
-        constexpr int kMinWaveformWidth = 220;
+        constexpr int kMinKeyboardWidth = 200;
         constexpr float kDefaultLeftPanelRatio = 0.24f;
-        constexpr float kDefaultBottomPanelRatio = 0.24f;
-        constexpr float kDefaultPreviewPanelRatio = 0.377f;
+        constexpr float kDefaultWaveformPanelRatio = 0.435f;
+        constexpr float kDefaultBottomPanelRatio = 0.13f;
+        constexpr float kDefaultPreviewPanelRatio = 0.45f;
 
         juce::String formatClockHmsMs(double seconds)
         {
@@ -197,10 +201,29 @@ namespace sw
         addAndMakeVisible(browserPanel);
         addAndMakeVisible(leftRightSplitter);
         addAndMakeVisible(resultsPanel);
-        addAndMakeVisible(resultsBottomSplitter);
+        addAndMakeVisible(resultsWaveformSplitter);
         addAndMakeVisible(waveformPanel);
+        addAndMakeVisible(waveformBottomSplitter);
         addAndMakeVisible(previewPanel);
-        addAndMakeVisible(previewWaveformSplitter);
+        addAndMakeVisible(previewKeyboardSplitter);
+        addAndMakeVisible(keyboard);
+
+        keyboard.setAvailableRange(36, 96); // C2–C7 range for preview
+
+        midiInputCombo.setTextWhenNoChoicesAvailable("No MIDI inputs");
+        midiInputCombo.onChange = [this]
+        {
+            const int index = midiInputCombo.getSelectedItemIndex();
+            if (index >= 0 && index < midiInputDeviceIdentifiers.size())
+            {
+                applyMidiInputSelection(midiInputDeviceIdentifiers[index], true);
+            }
+            else
+            {
+                applyMidiInputSelection({}, true);
+            }
+        };
+        addAndMakeVisible(midiInputCombo);
 
         leftRightSplitter.onDragged = [this](int deltaPixels)
         {
@@ -224,7 +247,7 @@ namespace sw
             persistLayoutSettings();
         };
 
-        resultsBottomSplitter.onDragged = [this](int deltaPixels)
+        resultsWaveformSplitter.onDragged = [this](int deltaPixels)
         {
             auto content = getLocalBounds();
             content.removeFromTop(kToolbarHeight);
@@ -240,23 +263,23 @@ namespace sw
             juce::Rectangle<int> rightArea = content;
             rightArea.removeFromLeft(leftWidth + kSplitterThickness);
 
-            const int totalHeight = rightArea.getHeight() - kSplitterThickness;
-            if (totalHeight <= (kMinResultsHeight + kMinBottomHeight))
+            const int totalHeight = rightArea.getHeight() - kSplitterThickness * 2;
+            if (totalHeight <= (kMinResultsHeight + kMinWaveformHeight + kMinBottomHeight))
                 return;
 
-            int currentBottomHeight = static_cast<int>(bottomPanelRatio * static_cast<float>(totalHeight));
-            int nextBottomHeight = currentBottomHeight - deltaPixels;
-            nextBottomHeight = juce::jlimit(kMinBottomHeight, totalHeight - kMinResultsHeight, nextBottomHeight);
+            int currentWaveformHeight = static_cast<int>(waveformPanelRatio * static_cast<float>(totalHeight));
+            int nextWaveformHeight = currentWaveformHeight - deltaPixels;
+            nextWaveformHeight = juce::jlimit(kMinWaveformHeight, totalHeight - kMinResultsHeight - kMinBottomHeight, nextWaveformHeight);
 
-            bottomPanelRatio = static_cast<float>(nextBottomHeight) / static_cast<float>(totalHeight);
+            waveformPanelRatio = static_cast<float>(nextWaveformHeight) / static_cast<float>(totalHeight);
             resized();
         };
-        resultsBottomSplitter.onDragEnded = [this]
+        resultsWaveformSplitter.onDragEnded = [this]
         {
             persistLayoutSettings();
         };
 
-        previewWaveformSplitter.onDragged = [this](int deltaPixels)
+        waveformBottomSplitter.onDragged = [this](int deltaPixels)
         {
             auto content = getLocalBounds();
             content.removeFromTop(kToolbarHeight);
@@ -272,28 +295,60 @@ namespace sw
             juce::Rectangle<int> rightArea = content;
             rightArea.removeFromLeft(leftWidth + kSplitterThickness);
 
-            const int totalHeight = rightArea.getHeight() - kSplitterThickness;
-            if (totalHeight <= (kMinResultsHeight + kMinBottomHeight))
+            const int totalHeight = rightArea.getHeight() - kSplitterThickness * 2;
+            if (totalHeight <= (kMinResultsHeight + kMinWaveformHeight + kMinBottomHeight))
+                return;
+
+            int currentBottomHeight = static_cast<int>(bottomPanelRatio * static_cast<float>(totalHeight));
+            int nextBottomHeight = currentBottomHeight - deltaPixels;
+            nextBottomHeight = juce::jlimit(kMinBottomHeight, totalHeight - kMinResultsHeight - kMinWaveformHeight, nextBottomHeight);
+
+            bottomPanelRatio = static_cast<float>(nextBottomHeight) / static_cast<float>(totalHeight);
+            resized();
+        };
+        waveformBottomSplitter.onDragEnded = [this]
+        {
+            persistLayoutSettings();
+        };
+
+        previewKeyboardSplitter.onDragged = [this](int deltaPixels)
+        {
+            auto content = getLocalBounds();
+            content.removeFromTop(kToolbarHeight);
+            content.removeFromBottom(kStatusBarHeight);
+
+            const int totalWidth = content.getWidth() - kSplitterThickness;
+            if (totalWidth <= (kMinLeftPanelWidth + kMinRightPanelWidth))
+                return;
+
+            int leftWidth = static_cast<int>(leftPanelRatio * static_cast<float>(totalWidth));
+            leftWidth = juce::jlimit(kMinLeftPanelWidth, totalWidth - kMinRightPanelWidth, leftWidth);
+
+            juce::Rectangle<int> rightArea = content;
+            rightArea.removeFromLeft(leftWidth + kSplitterThickness);
+
+            const int totalHeight = rightArea.getHeight() - kSplitterThickness * 2;
+            if (totalHeight <= (kMinResultsHeight + kMinWaveformHeight + kMinBottomHeight))
                 return;
 
             int bottomHeight = static_cast<int>(bottomPanelRatio * static_cast<float>(totalHeight));
-            bottomHeight = juce::jlimit(kMinBottomHeight, totalHeight - kMinResultsHeight, bottomHeight);
+            bottomHeight = juce::jlimit(kMinBottomHeight, totalHeight - kMinResultsHeight - kMinWaveformHeight, bottomHeight);
 
             juce::Rectangle<int> bottomArea = rightArea;
-            bottomArea.removeFromTop(rightArea.getHeight() - bottomHeight);
+            bottomArea.removeFromTop(totalHeight - bottomHeight);
 
             const int splitWidth = bottomArea.getWidth() - kSplitterThickness;
-            if (splitWidth <= (kMinPreviewWidth + kMinWaveformWidth))
+            if (splitWidth <= (kMinPreviewWidth + kMinKeyboardWidth))
                 return;
 
             int currentPreviewWidth = static_cast<int>(previewPanelRatio * static_cast<float>(splitWidth));
             int nextPreviewWidth = currentPreviewWidth + deltaPixels;
-            nextPreviewWidth = juce::jlimit(kMinPreviewWidth, splitWidth - kMinWaveformWidth, nextPreviewWidth);
+            nextPreviewWidth = juce::jlimit(kMinPreviewWidth, splitWidth - kMinKeyboardWidth, nextPreviewWidth);
 
             previewPanelRatio = static_cast<float>(nextPreviewWidth) / static_cast<float>(splitWidth);
             resized();
         };
-        previewWaveformSplitter.onDragEnded = [this]
+        previewKeyboardSplitter.onDragEnded = [this]
         {
             persistLayoutSettings();
         };
@@ -435,13 +490,19 @@ namespace sw
             persistPreviewPitch(semitones);
         };
 
-        previewPanel.onPreserveLengthChanged = [this](bool enabled)
+        previewPanel.onStretchChanged = [this](bool enabled)
         {
             audioEngine.setPreserveLengthEnabled(enabled);
-            persistPreviewPreserveLengthEnabled(enabled);
+            persistPreviewStretchEnabled(enabled);
         };
 
-        previewPanel.onApplyOutputDeviceTypeRequested = [this](const juce::String &typeName)
+        previewPanel.onStretchHighQualityChanged = [this](bool enabled)
+        {
+            audioEngine.setStretchHighQualityEnabled(enabled);
+            persistPreviewStretchHighQualityEnabled(enabled);
+        };
+
+        previewPanel.onOutputDeviceTypeChanged = [this](const juce::String &typeName)
         {
             juce::String error;
             if (!audioEngine.setCurrentOutputDeviceType(typeName, &error))
@@ -459,7 +520,7 @@ namespace sw
             refreshOutputDeviceList();
         };
 
-        previewPanel.onApplyOutputDeviceRequested = [this](const juce::String &deviceName)
+        previewPanel.onOutputDeviceChanged = [this](const juce::String &deviceName)
         {
             juce::String error;
             if (!audioEngine.setCurrentOutputDevice(deviceName, &error))
@@ -475,12 +536,8 @@ namespace sw
             refreshOutputDeviceList();
         };
 
-        previewPanel.onMidiInputDeviceSelected = [this](const juce::String &deviceIdentifier)
-        {
-            applyMidiInputSelection(deviceIdentifier, true);
-        };
-
         audioEngine.initialiseDeviceManager();
+        previewPanel.setStretchHighQualityAvailable(audioEngine.isStretchHighQualityAvailable());
         restoreAudioDeviceSettings();
         restorePreviewSettings();
         restoreMidiInputSettings();
@@ -522,7 +579,7 @@ namespace sw
             }
 
             audioEngine.handleMidiMessage(message); });
-        midiRouter.attachKeyboardState(previewPanel.getKeyboardState());
+        midiRouter.attachKeyboardState(keyboardState);
 
         refreshMidiInputDeviceList(true);
 
@@ -530,7 +587,7 @@ namespace sw
         refreshResults();
         restoreScanSummaryStatus();
         updateToolbarScanState(false);
-        startTimerHz(30);
+        startTimerHz(kUiTimerHz);
 
         setSize(1200, 800);
     }
@@ -559,6 +616,12 @@ namespace sw
         auto contentBounds = getLocalBounds();
         auto toolbarBounds = contentBounds.removeFromTop(kToolbarHeight);
         auto statusBarBounds = contentBounds.removeFromBottom(kStatusBarHeight);
+
+        // Fill the entire content area so bare regions (keyboard pane) get
+        // the correct background instead of the default dark LookAndFeel colour.
+        g.setColour(darkModeEnabled ? juce::Colour(0xff333333) : juce::Colour(0xfff4f4f4));
+        g.fillRect(contentBounds);
+
         g.setColour(darkModeEnabled ? juce::Colour(0xff272c33) : juce::Colour(0xffe8eaee));
         g.fillRect(toolbarBounds);
 
@@ -731,7 +794,27 @@ namespace sw
             applyMidiInputSelection(selectedMidiInputIdentifier, false);
         }
 
-        previewPanel.setAvailableMidiInputDevices(devices, selectedMidiInputIdentifier);
+        // Update combo box
+        midiInputCombo.clear(juce::dontSendNotification);
+        midiInputDeviceIdentifiers.clear();
+
+        int id = 1;
+        int selectedIndex = -1;
+        for (const auto &device : devices)
+        {
+            midiInputCombo.addItem(device.name, id++);
+            midiInputDeviceIdentifiers.add(device.identifier);
+
+            if (device.identifier == selectedMidiInputIdentifier)
+                selectedIndex = midiInputDeviceIdentifiers.size() - 1;
+        }
+
+        if (selectedIndex >= 0)
+            midiInputCombo.setSelectedItemIndex(selectedIndex, juce::dontSendNotification);
+        else if (devices.isEmpty())
+            midiInputCombo.setText("", juce::dontSendNotification);
+        else
+            midiInputCombo.setSelectedItemIndex(0, juce::dontSendNotification);
     }
 
     void MainComponent::applyMidiInputSelection(const juce::String &deviceIdentifier, bool persistSelection)
@@ -745,7 +828,28 @@ namespace sw
         if (persistSelection)
             persistMidiInputSelection(selectedMidiInputIdentifier);
 
-        previewPanel.setAvailableMidiInputDevices(juce::MidiInput::getAvailableDevices(), selectedMidiInputIdentifier);
+        // Update combo box to reflect current selection
+        const auto devices = juce::MidiInput::getAvailableDevices();
+        midiInputCombo.clear(juce::dontSendNotification);
+        midiInputDeviceIdentifiers.clear();
+
+        int id = 1;
+        int selectedIndex = -1;
+        for (const auto &device : devices)
+        {
+            midiInputCombo.addItem(device.name, id++);
+            midiInputDeviceIdentifiers.add(device.identifier);
+
+            if (device.identifier == selectedMidiInputIdentifier)
+                selectedIndex = midiInputDeviceIdentifiers.size() - 1;
+        }
+
+        if (selectedIndex >= 0)
+            midiInputCombo.setSelectedItemIndex(selectedIndex, juce::dontSendNotification);
+        else if (devices.isEmpty())
+            midiInputCombo.setText("", juce::dontSendNotification);
+        else
+            midiInputCombo.setSelectedItemIndex(0, juce::dontSendNotification);
     }
 
     void MainComponent::restoreAudioDeviceSettings()
@@ -803,14 +907,25 @@ namespace sw
         if (const auto savedAuto = catalogDb.getAppSetting("preview.autoPlayEnabled"))
             autoPlayEnabled = (*savedAuto == "1" || *savedAuto == "true" || *savedAuto == "True");
 
-        bool preserveLengthEnabled = false;
-        if (const auto savedPreserveLength = catalogDb.getAppSetting("preview.preserveLengthEnabled"))
-            preserveLengthEnabled = (*savedPreserveLength == "1" || *savedPreserveLength == "true" || *savedPreserveLength == "True");
+        bool stretchEnabled = false;
+        if (const auto savedStretch = catalogDb.getAppSetting("preview.stretchEnabled"))
+            stretchEnabled = (*savedStretch == "1" || *savedStretch == "true" || *savedStretch == "True");
+        else if (const auto savedPreserveLength = catalogDb.getAppSetting("preview.preserveLengthEnabled"))
+            stretchEnabled = (*savedPreserveLength == "1" || *savedPreserveLength == "true" || *savedPreserveLength == "True");
+
+        bool stretchHighQualityEnabled = false;
+        if (const auto savedStretchHq = catalogDb.getAppSetting("preview.stretchHighQualityEnabled"))
+            stretchHighQualityEnabled = (*savedStretchHq == "1" || *savedStretchHq == "true" || *savedStretchHq == "True");
+
+        if (!audioEngine.isStretchHighQualityAvailable())
+            stretchHighQualityEnabled = false;
 
         previewPanel.setAutoPlayEnabled(autoPlayEnabled);
         previewPanel.setLoopEnabled(loopEnabled);
-        previewPanel.setPreserveLengthEnabled(preserveLengthEnabled);
-        audioEngine.setPreserveLengthEnabled(preserveLengthEnabled);
+        previewPanel.setStretchEnabled(stretchEnabled);
+        previewPanel.setStretchHighQualityEnabled(stretchHighQualityEnabled);
+        audioEngine.setPreserveLengthEnabled(stretchEnabled);
+        audioEngine.setStretchHighQualityEnabled(stretchHighQualityEnabled);
         applyEffectiveLoopPlaybackMode();
     }
 
@@ -841,9 +956,15 @@ namespace sw
         catalogDb.setAppSetting("preview.loopEnabled", enabled ? "1" : "0");
     }
 
-    void MainComponent::persistPreviewPreserveLengthEnabled(bool enabled)
+    void MainComponent::persistPreviewStretchEnabled(bool enabled)
     {
+        catalogDb.setAppSetting("preview.stretchEnabled", enabled ? "1" : "0");
         catalogDb.setAppSetting("preview.preserveLengthEnabled", enabled ? "1" : "0");
+    }
+
+    void MainComponent::persistPreviewStretchHighQualityEnabled(bool enabled)
+    {
+        catalogDb.setAppSetting("preview.stretchHighQualityEnabled", enabled ? "1" : "0");
     }
 
     void MainComponent::persistThemeMode(bool darkMode)
@@ -863,8 +984,35 @@ namespace sw
         previewPanel.setDarkMode(darkModeEnabled);
         waveformPanel.setDarkMode(darkModeEnabled);
         leftRightSplitter.setDarkMode(darkModeEnabled);
-        resultsBottomSplitter.setDarkMode(darkModeEnabled);
-        previewWaveformSplitter.setDarkMode(darkModeEnabled);
+        resultsWaveformSplitter.setDarkMode(darkModeEnabled);
+        waveformBottomSplitter.setDarkMode(darkModeEnabled);
+        previewKeyboardSplitter.setDarkMode(darkModeEnabled);
+
+        // Apply dark mode colors to keyboard
+        if (darkModeEnabled)
+        {
+            keyboard.setColour(juce::MidiKeyboardComponent::ColourIds::whiteNoteColourId, juce::Colour(0xff34383c));
+            keyboard.setColour(juce::MidiKeyboardComponent::ColourIds::blackNoteColourId, juce::Colour(0xff1c1e20));
+            keyboard.setColour(juce::MidiKeyboardComponent::ColourIds::mouseOverKeyOverlayColourId, juce::Colour(0x4fffffff));
+            keyboard.setColour(juce::MidiKeyboardComponent::ColourIds::keyDownOverlayColourId, juce::Colour(0xcc3f7fb5));
+        }
+        else
+        {
+            keyboard.setColour(juce::MidiKeyboardComponent::ColourIds::whiteNoteColourId, juce::Colours::white);
+            keyboard.setColour(juce::MidiKeyboardComponent::ColourIds::blackNoteColourId, juce::Colours::black);
+            keyboard.setColour(juce::MidiKeyboardComponent::ColourIds::mouseOverKeyOverlayColourId, juce::Colour(0x4f000000));
+            keyboard.setColour(juce::MidiKeyboardComponent::ColourIds::keyDownOverlayColourId, juce::Colour(0xcc3f7fb5));
+        }
+
+        // Apply dark mode colors to MIDI input combo (match audio device combo styling)
+        const auto controlBg = darkModeEnabled ? juce::Colour(0xff2b2b2b) : juce::Colour(0xffffffff);
+        const auto textColour = darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020);
+        const auto outline = darkModeEnabled ? juce::Colour(0xff4d4d4d) : juce::Colour(0xffb8b8b8);
+        const auto arrowColour = darkModeEnabled ? juce::Colour(0xffcccccc) : juce::Colour(0xff606060);
+        midiInputCombo.setColour(juce::ComboBox::backgroundColourId, controlBg);
+        midiInputCombo.setColour(juce::ComboBox::textColourId, textColour);
+        midiInputCombo.setColour(juce::ComboBox::outlineColourId, outline);
+        midiInputCombo.setColour(juce::ComboBox::arrowColourId, arrowColour);
 
         addRootToolbarButton.setImages(createFolderIcon(normalIconColour).release(),
                                        createFolderIcon(hoverIconColour).release());
@@ -903,6 +1051,17 @@ namespace sw
             }
         }
 
+        if (const auto value = catalogDb.getAppSetting("layout.waveformPanelRatio"))
+        {
+            try
+            {
+                waveformPanelRatio = juce::jlimit(0.30f, 0.70f, std::stof(*value));
+            }
+            catch (const std::exception &)
+            {
+            }
+        }
+
         if (const auto value = catalogDb.getAppSetting("layout.bottomPanelRatio"))
         {
             try
@@ -929,6 +1088,7 @@ namespace sw
     void MainComponent::persistLayoutSettings()
     {
         catalogDb.setAppSetting("layout.leftPanelRatio", juce::String(leftPanelRatio, 4).toStdString());
+        catalogDb.setAppSetting("layout.waveformPanelRatio", juce::String(waveformPanelRatio, 4).toStdString());
         catalogDb.setAppSetting("layout.bottomPanelRatio", juce::String(bottomPanelRatio, 4).toStdString());
         catalogDb.setAppSetting("layout.previewPanelRatio", juce::String(previewPanelRatio, 4).toStdString());
     }
@@ -1189,7 +1349,7 @@ namespace sw
     void MainComponent::timerCallback()
     {
         ++midiDeviceRefreshCounter;
-        if (midiDeviceRefreshCounter >= 30)
+        if (midiDeviceRefreshCounter >= kMidiDeviceRefreshIntervalTicks)
         {
             midiDeviceRefreshCounter = 0;
             refreshMidiInputDeviceList(false);
@@ -1493,6 +1653,7 @@ namespace sw
     void MainComponent::resetLayout()
     {
         leftPanelRatio = kDefaultLeftPanelRatio;
+        waveformPanelRatio = kDefaultWaveformPanelRatio;
         bottomPanelRatio = kDefaultBottomPanelRatio;
         previewPanelRatio = kDefaultPreviewPanelRatio;
         resized();
@@ -1535,21 +1696,35 @@ namespace sw
         leftRightSplitter.setBounds(area.removeFromLeft(kSplitterThickness));
 
         auto rightArea = area;
-        const int totalHeight = rightArea.getHeight() - kSplitterThickness;
+        const int totalHeight = rightArea.getHeight() - kSplitterThickness * 2;
+        int waveformHeight = static_cast<int>(waveformPanelRatio * static_cast<float>(totalHeight));
+        waveformHeight = juce::jlimit(kMinWaveformHeight, juce::jmax(kMinWaveformHeight, totalHeight - kMinResultsHeight - kMinBottomHeight), waveformHeight);
         int bottomHeight = static_cast<int>(bottomPanelRatio * static_cast<float>(totalHeight));
-        bottomHeight = juce::jlimit(kMinBottomHeight, juce::jmax(kMinBottomHeight, totalHeight - kMinResultsHeight), bottomHeight);
+        bottomHeight = juce::jlimit(kMinBottomHeight, juce::jmax(kMinBottomHeight, totalHeight - kMinResultsHeight - kMinWaveformHeight), bottomHeight);
+        int resultsHeight = totalHeight - waveformHeight - bottomHeight;
 
-        resultsPanel.setBounds(rightArea.removeFromTop(rightArea.getHeight() - bottomHeight));
-        resultsBottomSplitter.setBounds(rightArea.removeFromTop(kSplitterThickness));
+        resultsPanel.setBounds(rightArea.removeFromTop(resultsHeight));
+        resultsWaveformSplitter.setBounds(rightArea.removeFromTop(kSplitterThickness));
+        waveformPanel.setBounds(rightArea.removeFromTop(waveformHeight));
+        waveformBottomSplitter.setBounds(rightArea.removeFromTop(kSplitterThickness));
 
         auto bottomArea = rightArea;
         const int bottomWidth = bottomArea.getWidth() - kSplitterThickness;
         int previewWidth = static_cast<int>(previewPanelRatio * static_cast<float>(bottomWidth));
-        previewWidth = juce::jlimit(kMinPreviewWidth, juce::jmax(kMinPreviewWidth, bottomWidth - kMinWaveformWidth), previewWidth);
+        previewWidth = juce::jlimit(kMinPreviewWidth, juce::jmax(kMinPreviewWidth, bottomWidth - kMinKeyboardWidth), previewWidth);
 
         previewPanel.setBounds(bottomArea.removeFromLeft(previewWidth));
-        previewWaveformSplitter.setBounds(bottomArea.removeFromLeft(kSplitterThickness));
-        waveformPanel.setBounds(bottomArea);
+        previewKeyboardSplitter.setBounds(bottomArea.removeFromLeft(kSplitterThickness));
+
+        // Keyboard pane: MIDI selector on top, keyboard below
+        auto keyboardArea = bottomArea;
+        constexpr int midiComboHeight = 24;
+        constexpr int midiComboMargin = 3;
+        constexpr int midiKeyboardPadding = 6;
+        auto midiComboArea = keyboardArea.removeFromTop(midiComboHeight + midiComboMargin * 2).reduced(midiComboMargin);
+        midiInputCombo.setBounds(midiComboArea);
+        keyboardArea.removeFromTop(midiKeyboardPadding);
+        keyboard.setBounds(keyboardArea);
     }
 
 } // namespace sw

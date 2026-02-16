@@ -92,6 +92,21 @@ namespace sw
         return voiceManager.isPreserveLengthEnabled();
     }
 
+    void AudioEngine::setStretchHighQualityEnabled(bool enabled)
+    {
+        voiceManager.setStretchHighQualityEnabled(enabled);
+    }
+
+    bool AudioEngine::isStretchHighQualityEnabled() const noexcept
+    {
+        return voiceManager.isStretchHighQualityEnabled();
+    }
+
+    bool AudioEngine::isStretchHighQualityAvailable() const noexcept
+    {
+        return voiceManager.isStretchHighQualityAvailable();
+    }
+
     void AudioEngine::setLoopEnabled(bool enabled)
     {
         voiceManager.setLoopEnabled(enabled);

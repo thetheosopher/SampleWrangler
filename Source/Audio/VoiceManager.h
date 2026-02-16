@@ -2,7 +2,15 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <array>
 #include <memory>
+
+#if SW_HAVE_RUBBERBAND
+namespace RubberBand
+{
+    class RubberBandLiveShifter;
+}
+#endif
 
 namespace sw
 {
@@ -35,6 +43,9 @@ namespace sw
         void setPitchSemitones(double semitones);
         void setPreserveLengthEnabled(bool enabled);
         bool isPreserveLengthEnabled() const noexcept;
+        void setStretchHighQualityEnabled(bool enabled);
+        bool isStretchHighQualityEnabled() const noexcept;
+        bool isStretchHighQualityAvailable() const noexcept;
 
         void setLoopEnabled(bool enabled);
         bool isLoopEnabled() const noexcept;
@@ -66,14 +77,36 @@ namespace sw
         std::atomic<int> previewRootMidiNote{60};
         std::atomic<double> playbackPos{0.0};
         std::atomic<double> playbackRate{1.0}; // ratio: 1.0 = original pitch
+        std::atomic<double> pitchRatio{1.0};   // ratio from semitone setting
         std::atomic<bool> preserveLengthEnabled{false};
         std::atomic<bool> granularResetRequested{true};
+        std::atomic<bool> stretchHighQualityEnabled{false};
         std::atomic<int> loadedSampleLength{0};
 
         // Granular pitch-shift state (audio thread only)
         double grainReadPosA = 0.0;
         double grainReadPosB = 0.0;
         int grainSamplesRemaining = 0;
+
+#if SW_HAVE_RUBBERBAND
+        static constexpr int kRubberBandMaxChannels = 2;
+        static constexpr int kRubberBandMaxBlockSize = 4096;
+
+        std::unique_ptr<RubberBand::RubberBandLiveShifter> rubberBandLiveShifter;
+        int rubberBandBlockSize = 0;
+        int rubberBandInputFill = 0;
+        int rubberBandOutputRead = 0;
+        int rubberBandOutputAvailable = 0;
+        int rubberBandStartDelayRemaining = 0;
+        bool rubberBandInitialized = false;
+        std::array<std::array<float, kRubberBandMaxBlockSize>, kRubberBandMaxChannels> rubberBandInput{};
+        std::array<std::array<float, kRubberBandMaxBlockSize>, kRubberBandMaxChannels> rubberBandOutput{};
+        std::array<const float *, kRubberBandMaxChannels> rubberBandInputPtrs{};
+        std::array<float *, kRubberBandMaxChannels> rubberBandOutputPtrs{};
+
+        void initialiseRubberBandIfNeeded();
+        void resetRubberBandState();
+#endif
 
         double currentSampleRate = 44100.0;
 

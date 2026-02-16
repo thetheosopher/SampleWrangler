@@ -111,6 +111,58 @@ target_include_directories(SampleWrangler PRIVATE
 )
 
 # ---------------------------------------------------------------------------
+# Rubber Band v4 integration (GPL) - Single-file build from source
+# ---------------------------------------------------------------------------
+set(SW_REQUIRE_RUBBERBAND OFF CACHE BOOL "Require Rubber Band v4 at configure time")
+set(RUBBERBAND_SOURCE_DIR "" CACHE PATH "Path to Rubber Band v4 source directory (contains single/RubberBandSingle.cpp)")
+
+# Check if Rubber Band source directory is provided and valid
+set(SW_HAVE_RUBBERBAND 0)
+set(RUBBERBAND_SOURCE_PATH "")
+
+if(RUBBERBAND_SOURCE_DIR)
+    set(RUBBERBAND_SOURCE_PATH "${RUBBERBAND_SOURCE_DIR}")
+elseif(DEFINED ENV{RUBBERBAND_SOURCE_DIR})
+    set(RUBBERBAND_SOURCE_PATH "$ENV{RUBBERBAND_SOURCE_DIR}")
+endif()
+
+# Rubber Band uses single-file build: single/RubberBandSingle.cpp
+if(RUBBERBAND_SOURCE_PATH AND EXISTS "${RUBBERBAND_SOURCE_PATH}/single/RubberBandSingle.cpp")
+    message(STATUS "Building Rubber Band HQ from source (GPL): ${RUBBERBAND_SOURCE_PATH}")
+
+    # Create a static library from the single-file build
+    add_library(rubberband STATIC
+        "${RUBBERBAND_SOURCE_PATH}/single/RubberBandSingle.cpp"
+    )
+
+    # Rubber Band headers are in the rubberband/ subdirectory
+    target_include_directories(rubberband PUBLIC
+        "${RUBBERBAND_SOURCE_PATH}"
+    )
+
+    # Prevent Windows min/max macro conflicts
+    target_compile_definitions(rubberband PRIVATE NOMINMAX)
+
+    # Suppress warnings from third-party code
+    if(MSVC)
+        target_compile_options(rubberband PRIVATE /W0)
+    else()
+        target_compile_options(rubberband PRIVATE -w)
+    endif()
+
+    set(SW_HAVE_RUBBERBAND 1)
+else()
+    message(STATUS "Rubber Band HQ not found; Stretch HQ will be unavailable")
+    message(STATUS "  Set RUBBERBAND_SOURCE_DIR (or env RUBBERBAND_SOURCE_DIR) to Rubber Band v4 source directory")
+endif()
+
+if(SW_REQUIRE_RUBBERBAND AND NOT SW_HAVE_RUBBERBAND)
+    message(FATAL_ERROR
+        "Rubber Band v4 is required but was not found. "
+        "Set RUBBERBAND_SOURCE_DIR (or env RUBBERBAND_SOURCE_DIR) to the Rubber Band v4 source directory containing single/RubberBandSingle.cpp.")
+endif()
+
+# ---------------------------------------------------------------------------
 # Compile definitions
 # ---------------------------------------------------------------------------
 target_compile_definitions(SampleWrangler PRIVATE
@@ -119,6 +171,7 @@ target_compile_definitions(SampleWrangler PRIVATE
     # Enable MP3 reading support — note JUCE legal disclaimer applies.
     # See: https://docs.juce.com/develop/classjuce_1_1MP3AudioFormat.html
     JUCE_USE_MP3AUDIOFORMAT=1
+    SW_HAVE_RUBBERBAND=${SW_HAVE_RUBBERBAND}
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SampleWrangler,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SampleWrangler,JUCE_VERSION>"
 )
@@ -139,6 +192,15 @@ target_link_libraries(SampleWrangler PRIVATE
     juce::juce_recommended_warning_flags
     SampleWranglerAssets
     sqlite3
+)
+
+if(SW_HAVE_RUBBERBAND)
+    target_link_libraries(SampleWrangler PRIVATE rubberband)
+endif()
+
+include(GNUInstallDirs)
+install(TARGETS SampleWrangler
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 # ---------------------------------------------------------------------------

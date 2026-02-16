@@ -17,7 +17,9 @@
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_CXX_STANDARD": "20"
+                "CMAKE_CXX_STANDARD": "20",
+                "SW_REQUIRE_RUBBERBAND": "ON",
+                "RUBBERBAND_SOURCE_DIR": "${sourceDir}/third_party/rubberband"
             }
         },
         {
@@ -31,7 +33,39 @@
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_CXX_STANDARD": "20"
+                "CMAKE_CXX_STANDARD": "20",
+                "SW_REQUIRE_RUBBERBAND": "ON",
+                "RUBBERBAND_SOURCE_DIR": "${sourceDir}/third_party/rubberband"
+            }
+        },
+        {
+            "name": "vs2022-debug-nohq",
+            "displayName": "VS 2022 Debug (No HQ Stretch)",
+            "generator": "Visual Studio 17 2022",
+            "architecture": {
+                "value": "x64",
+                "strategy": "set"
+            },
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_STANDARD": "20",
+                "SW_REQUIRE_RUBBERBAND": "OFF"
+            }
+        },
+        {
+            "name": "vs2022-release-nohq",
+            "displayName": "VS 2022 Release (No HQ Stretch)",
+            "generator": "Visual Studio 17 2022",
+            "architecture": {
+                "value": "x64",
+                "strategy": "set"
+            },
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_STANDARD": "20",
+                "SW_REQUIRE_RUBBERBAND": "OFF"
             }
         }
     ],
@@ -44,6 +78,16 @@
         {
             "name": "vs2022-release",
             "configurePreset": "vs2022-release",
+            "configuration": "Release"
+        },
+        {
+            "name": "vs2022-debug-nohq",
+            "configurePreset": "vs2022-debug-nohq",
+            "configuration": "Debug"
+        },
+        {
+            "name": "vs2022-release-nohq",
+            "configurePreset": "vs2022-release-nohq",
             "configuration": "Release"
         }
     ]

@@ -17,7 +17,6 @@ namespace sw
     }
 
     PreviewPanel::PreviewPanel()
-        : keyboard(keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
     {
         playButton.onClick = [this]
         {
@@ -49,18 +48,33 @@ namespace sw
         };
         loopButton.setTooltip("Loop playback; with Auto enabled, loops through the results list");
 
-        preserveLengthButton.onClick = [this]
+        stretchButton.onClick = [this]
         {
-            if (onPreserveLengthChanged)
-                onPreserveLengthChanged(preserveLengthButton.getToggleState());
+            if (onStretchChanged)
+                onStretchChanged(stretchButton.getToggleState());
         };
-        preserveLengthButton.setTooltip("Maintain duration while shifting pitch using time-stretch/pitch-shift");
+        stretchButton.setTooltip("Maintain duration while shifting pitch using time-stretch/pitch-shift");
+
+        stretchHighQualityButton.onClick = [this]
+        {
+            if (onStretchHighQualityChanged)
+                onStretchHighQualityChanged(stretchHighQualityButton.getToggleState());
+        };
+        stretchHighQualityButton.setTooltip("Use Rubber Band v4 high-quality pitch shifting for Stretch mode");
 
         addAndMakeVisible(playButton);
         addAndMakeVisible(stopButton);
+
+        // Apply fixed font LookAndFeel to toggle buttons
+        autoPlayButton.setLookAndFeel(&fixedFontLookAndFeel);
+        loopButton.setLookAndFeel(&fixedFontLookAndFeel);
+        stretchButton.setLookAndFeel(&fixedFontLookAndFeel);
+        stretchHighQualityButton.setLookAndFeel(&fixedFontLookAndFeel);
+
         addAndMakeVisible(autoPlayButton);
         addAndMakeVisible(loopButton);
-        addAndMakeVisible(preserveLengthButton);
+        addAndMakeVisible(stretchButton);
+        addAndMakeVisible(stretchHighQualityButton);
 
         pitchSlider.setSliderStyle(juce::Slider::LinearHorizontal);
         pitchSlider.setRange(-24.0, 24.0, 0.5); // semitones
@@ -73,7 +87,8 @@ namespace sw
                 onPitchChanged(pitchSlider.getValue());
         };
 
-        transposeLabel.setJustificationType(juce::Justification::centred);
+        transposeLabel.setJustificationType(juce::Justification::centredLeft);
+        transposeLabel.setFont(juce::FontOptions(12.0f));
         addAndMakeVisible(transposeLabel);
 
         pitchValueField.setJustificationType(juce::Justification::centred);
@@ -92,44 +107,20 @@ namespace sw
         updatePitchValueFieldText();
 
         outputDeviceTypeCombo.setTextWhenNoChoicesAvailable("No device types");
+        outputDeviceTypeCombo.onChange = [this]
+        {
+            if (onOutputDeviceTypeChanged)
+                onOutputDeviceTypeChanged(outputDeviceTypeCombo.getText());
+        };
         addAndMakeVisible(outputDeviceTypeCombo);
 
-        applyOutputDeviceTypeButton.onClick = [this]
-        {
-            if (onApplyOutputDeviceTypeRequested)
-                onApplyOutputDeviceTypeRequested(outputDeviceTypeCombo.getText());
-        };
-        addAndMakeVisible(applyOutputDeviceTypeButton);
-
         outputDeviceCombo.setTextWhenNoChoicesAvailable("No output devices");
+        outputDeviceCombo.onChange = [this]
+        {
+            if (onOutputDeviceChanged)
+                onOutputDeviceChanged(outputDeviceCombo.getText());
+        };
         addAndMakeVisible(outputDeviceCombo);
-
-        applyOutputDeviceButton.onClick = [this]
-        {
-            if (onApplyOutputDeviceRequested)
-                onApplyOutputDeviceRequested(outputDeviceCombo.getText());
-        };
-        addAndMakeVisible(applyOutputDeviceButton);
-
-        midiInputCombo.setTextWhenNoChoicesAvailable("No MIDI inputs");
-        midiInputCombo.onChange = [this]
-        {
-            if (!onMidiInputDeviceSelected)
-                return;
-
-            const int index = midiInputCombo.getSelectedItemIndex();
-            if (index < 0 || index >= midiInputDeviceIdentifiers.size())
-            {
-                onMidiInputDeviceSelected({});
-                return;
-            }
-
-            onMidiInputDeviceSelected(midiInputDeviceIdentifiers[index]);
-        };
-        addAndMakeVisible(midiInputCombo);
-
-        keyboard.setAvailableRange(36, 96); // C2–C7 range for preview
-        addAndMakeVisible(keyboard);
 
         setWantsKeyboardFocus(true);
         updatePlaybackButtonStates();
@@ -148,42 +139,40 @@ namespace sw
         constexpr int rowSpacing = 3;
         constexpr int topRowHeight = 36;
         constexpr int comboRowHeight = 24;
-        constexpr int maxKeyboardHeight = 92;
 
         auto topRow = area.removeFromTop(topRowHeight);
         playButton.setBounds(topRow.removeFromLeft(60));
         topRow.removeFromLeft(4);
         stopButton.setBounds(topRow.removeFromLeft(60));
         topRow.removeFromLeft(8);
+
+        // Grid layout for checkboxes: 2x2 grid with aligned columns
         auto toggleArea = topRow.removeFromLeft(128);
+        constexpr int col1Width = 64; // Width for first column (Auto, Stretch)
+        constexpr int col2Width = 64; // Width for second column (Loop, HQ)
+
         auto toggleTopRow = toggleArea.removeFromTop(16);
-        autoPlayButton.setBounds(toggleTopRow.removeFromLeft(62));
-        loopButton.setBounds(toggleTopRow.removeFromLeft(62));
-        preserveLengthButton.setBounds(toggleArea.removeFromTop(16));
+        autoPlayButton.setBounds(toggleTopRow.removeFromLeft(col1Width));
+        loopButton.setBounds(toggleTopRow.removeFromLeft(col2Width));
+
+        toggleArea.removeFromTop(2); // Small spacing between rows
+        auto toggleBottomRow = toggleArea;
+        stretchButton.setBounds(toggleBottomRow.removeFromLeft(col1Width));
+        stretchHighQualityButton.setBounds(toggleBottomRow.removeFromLeft(col2Width));
+
         topRow.removeFromLeft(8);
-        auto pitchArea = topRow.removeFromLeft(72);
-        transposeLabel.setBounds(pitchArea.removeFromTop(12));
+        auto pitchArea = topRow.removeFromLeft(90);
+        transposeLabel.setBounds(pitchArea.removeFromTop(14));
+        pitchArea.removeFromTop(2); // Padding between label and textbox
         pitchValueField.setBounds(pitchArea.removeFromTop(16));
 
         area.removeFromTop(rowSpacing);
         auto typeRow = area.removeFromTop(comboRowHeight);
-        outputDeviceTypeCombo.setBounds(typeRow.removeFromLeft(jmax(100, typeRow.getWidth() - 58)));
-        typeRow.removeFromLeft(4);
-        applyOutputDeviceTypeButton.setBounds(typeRow);
+        outputDeviceTypeCombo.setBounds(typeRow);
 
         area.removeFromTop(rowSpacing);
         auto deviceRow = area.removeFromTop(comboRowHeight);
-        outputDeviceCombo.setBounds(deviceRow.removeFromLeft(jmax(100, deviceRow.getWidth() - 58)));
-        deviceRow.removeFromLeft(4);
-        applyOutputDeviceButton.setBounds(deviceRow);
-
-        area.removeFromTop(rowSpacing);
-        auto midiRow = area.removeFromTop(comboRowHeight);
-        midiInputCombo.setBounds(midiRow);
-
-        area.removeFromTop(rowSpacing);
-        const int keyboardHeight = juce::jmin(maxKeyboardHeight, area.getHeight());
-        keyboard.setBounds(area.removeFromBottom(keyboardHeight));
+        outputDeviceCombo.setBounds(deviceRow);
     }
 
     void PreviewPanel::setAvailableOutputDeviceTypes(const juce::StringArray &typeNames, const juce::String &currentTypeName)
@@ -218,18 +207,17 @@ namespace sw
         const auto textColour = darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020);
         const auto controlBg = darkModeEnabled ? juce::Colour(0xff2b2b2b) : juce::Colour(0xffffffff);
         const auto outline = darkModeEnabled ? juce::Colour(0xff4d4d4d) : juce::Colour(0xffb8b8b8);
+        const auto arrowColour = darkModeEnabled ? juce::Colour(0xffcccccc) : juce::Colour(0xff606060);
 
         outputDeviceTypeCombo.setColour(juce::ComboBox::backgroundColourId, controlBg);
         outputDeviceTypeCombo.setColour(juce::ComboBox::textColourId, textColour);
         outputDeviceTypeCombo.setColour(juce::ComboBox::outlineColourId, outline);
+        outputDeviceTypeCombo.setColour(juce::ComboBox::arrowColourId, arrowColour);
 
         outputDeviceCombo.setColour(juce::ComboBox::backgroundColourId, controlBg);
         outputDeviceCombo.setColour(juce::ComboBox::textColourId, textColour);
         outputDeviceCombo.setColour(juce::ComboBox::outlineColourId, outline);
-
-        midiInputCombo.setColour(juce::ComboBox::backgroundColourId, controlBg);
-        midiInputCombo.setColour(juce::ComboBox::textColourId, textColour);
-        midiInputCombo.setColour(juce::ComboBox::outlineColourId, outline);
+        outputDeviceCombo.setColour(juce::ComboBox::arrowColourId, arrowColour);
 
         pitchSlider.setColour(juce::Slider::textBoxTextColourId, textColour);
         pitchSlider.setColour(juce::Slider::textBoxBackgroundColourId, controlBg);
@@ -249,9 +237,13 @@ namespace sw
         autoPlayButton.setColour(juce::ToggleButton::tickColourId, darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff1f5fa1));
         autoPlayButton.setColour(juce::ToggleButton::tickDisabledColourId, darkModeEnabled ? juce::Colour(0xff6b6b6b) : juce::Colour(0xff8a8a8a));
 
-        preserveLengthButton.setColour(juce::ToggleButton::textColourId, textColour);
-        preserveLengthButton.setColour(juce::ToggleButton::tickColourId, darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff1f5fa1));
-        preserveLengthButton.setColour(juce::ToggleButton::tickDisabledColourId, darkModeEnabled ? juce::Colour(0xff6b6b6b) : juce::Colour(0xff8a8a8a));
+        stretchButton.setColour(juce::ToggleButton::textColourId, textColour);
+        stretchButton.setColour(juce::ToggleButton::tickColourId, darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff1f5fa1));
+        stretchButton.setColour(juce::ToggleButton::tickDisabledColourId, darkModeEnabled ? juce::Colour(0xff6b6b6b) : juce::Colour(0xff8a8a8a));
+
+        stretchHighQualityButton.setColour(juce::ToggleButton::textColourId, textColour);
+        stretchHighQualityButton.setColour(juce::ToggleButton::tickColourId, darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff1f5fa1));
+        stretchHighQualityButton.setColour(juce::ToggleButton::tickDisabledColourId, darkModeEnabled ? juce::Colour(0xff6b6b6b) : juce::Colour(0xff8a8a8a));
 
         const auto buttonBg = darkModeEnabled ? juce::Colour(0xff2f3f4d) : juce::Colour(0xffe7ecef);
         const auto buttonBgHover = darkModeEnabled ? juce::Colour(0xff425362) : juce::Colour(0xffd9e1e6);
@@ -266,16 +258,6 @@ namespace sw
         stopButton.setColour(juce::TextButton::buttonOnColourId, buttonBgHover);
         stopButton.setColour(juce::TextButton::textColourOffId, buttonText);
         stopButton.setColour(juce::TextButton::textColourOnId, buttonText);
-
-        applyOutputDeviceTypeButton.setColour(juce::TextButton::buttonColourId, buttonBg);
-        applyOutputDeviceTypeButton.setColour(juce::TextButton::buttonOnColourId, buttonBgHover);
-        applyOutputDeviceTypeButton.setColour(juce::TextButton::textColourOffId, buttonText);
-        applyOutputDeviceTypeButton.setColour(juce::TextButton::textColourOnId, buttonText);
-
-        applyOutputDeviceButton.setColour(juce::TextButton::buttonColourId, buttonBg);
-        applyOutputDeviceButton.setColour(juce::TextButton::buttonOnColourId, buttonBgHover);
-        applyOutputDeviceButton.setColour(juce::TextButton::textColourOffId, buttonText);
-        applyOutputDeviceButton.setColour(juce::TextButton::textColourOnId, buttonText);
 
         repaint();
     }
@@ -309,14 +291,31 @@ namespace sw
         return loopButton.getToggleState();
     }
 
-    void PreviewPanel::setPreserveLengthEnabled(bool enabled)
+    void PreviewPanel::setStretchEnabled(bool enabled)
     {
-        preserveLengthButton.setToggleState(enabled, juce::dontSendNotification);
+        stretchButton.setToggleState(enabled, juce::dontSendNotification);
     }
 
-    bool PreviewPanel::isPreserveLengthEnabled() const noexcept
+    bool PreviewPanel::isStretchEnabled() const noexcept
     {
-        return preserveLengthButton.getToggleState();
+        return stretchButton.getToggleState();
+    }
+
+    void PreviewPanel::setStretchHighQualityEnabled(bool enabled)
+    {
+        stretchHighQualityButton.setToggleState(enabled, juce::dontSendNotification);
+    }
+
+    bool PreviewPanel::isStretchHighQualityEnabled() const noexcept
+    {
+        return stretchHighQualityButton.getToggleState();
+    }
+
+    void PreviewPanel::setStretchHighQualityAvailable(bool available)
+    {
+        stretchHighQualityButton.setEnabled(available);
+        if (!available)
+            stretchHighQualityButton.setToggleState(false, juce::dontSendNotification);
     }
 
     void PreviewPanel::updatePlaybackButtonStates()
@@ -344,31 +343,6 @@ namespace sw
             outputDeviceCombo.setText("", juce::dontSendNotification);
         else
             outputDeviceCombo.setSelectedItemIndex(0, juce::dontSendNotification);
-    }
-
-    void PreviewPanel::setAvailableMidiInputDevices(const juce::Array<juce::MidiDeviceInfo> &devices,
-                                                    const juce::String &currentDeviceIdentifier)
-    {
-        midiInputCombo.clear(juce::dontSendNotification);
-        midiInputDeviceIdentifiers.clear();
-
-        int id = 1;
-        int selectedIndex = -1;
-        for (const auto &device : devices)
-        {
-            midiInputCombo.addItem(device.name, id++);
-            midiInputDeviceIdentifiers.add(device.identifier);
-
-            if (device.identifier == currentDeviceIdentifier)
-                selectedIndex = midiInputDeviceIdentifiers.size() - 1;
-        }
-
-        if (selectedIndex >= 0)
-            midiInputCombo.setSelectedItemIndex(selectedIndex, juce::dontSendNotification);
-        else if (devices.isEmpty())
-            midiInputCombo.setText("", juce::dontSendNotification);
-        else
-            midiInputCombo.setSelectedItemIndex(0, juce::dontSendNotification);
     }
 
     bool PreviewPanel::keyPressed(const juce::KeyPress &key)

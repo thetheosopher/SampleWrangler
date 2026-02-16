@@ -68,6 +68,49 @@ Or press **F5** in VS Code (the launch config is pre-configured).
 MP3 reading is enabled via `JUCE_USE_MP3AUDIOFORMAT=1` in CMakeLists.txt.
 See the [JUCE MP3 legal disclaimer](https://docs.juce.com/develop/classjuce_1_1MP3AudioFormat.html) for details.
 
+## Rubber Band (Stretch HQ) build from source
+
+Stretch HQ uses **Rubber Band Library v4** (GPL), included as a git submodule in `third_party/rubberband`.
+
+### Setup
+
+The standard presets (`vs2022-debug` and `vs2022-release`) build Rubber Band from source automatically. If you cloned this repo without `--recursive`, initialize the submodule:
+
+```powershell
+git submodule update --init third_party/rubberband
+```
+
+Then configure and build:
+
+```powershell
+cmake --preset vs2022-debug
+cmake --build --preset vs2022-debug
+```
+
+Rubber Band is built as a static library from the single-file source (`single/RubberBandSingle.cpp`) and linked into SampleWrangler.
+
+### Fallback presets (no HQ Stretch dependency)
+
+If you prefer to build without Rubber Band (granular stretch only), use the `-nohq` presets:
+
+```bash
+cmake --preset vs2022-debug-nohq
+cmake --build --preset vs2022-debug-nohq
+```
+
+or release:
+
+```bash
+cmake --preset vs2022-release-nohq
+cmake --build --preset vs2022-release-nohq
+```
+
+These disable Rubber Band at configure time.
+
+### Licensing note
+
+Rubber Band Library is GPL unless you have a commercial licence; ensure distribution terms are compatible with your project's licensing model.
+
 ## Project layout
 
 ```
@@ -80,6 +123,7 @@ Source/
   Util/         Paths, Hashing, Logging
 third_party/
   sqlite/       Vendored SQLite amalgamation
+  rubberband/   Rubber Band Library v4 (git submodule, GPL)
 JUCE/           JUCE framework (git submodule)
 ```
 

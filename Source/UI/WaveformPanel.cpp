@@ -108,9 +108,6 @@ namespace sw
     void WaveformPanel::setPlayheadNormalized(float playheadPosition)
     {
         const float clamped = juce::jlimit(-1.0f, 1.0f, playheadPosition);
-        if (std::abs(playheadNormalized - clamped) < 0.0005f)
-            return;
-
         playheadNormalized = clamped;
         repaint();
     }

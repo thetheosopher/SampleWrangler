@@ -1,4 +1,5 @@
 #include "ResultsPanel.h"
+#include <algorithm>
 
 namespace
 {
@@ -114,7 +115,15 @@ namespace sw
 
     void ResultsPanel::setResults(std::vector<FileRecord> newResults)
     {
+        // Deselect before updating to avoid stale selection indices
+        resultsList.deselectAllRows();
+
         results = std::move(newResults);
+
+        // Sort results alphabetically by filename (case-insensitive)
+        std::sort(results.begin(), results.end(), [](const FileRecord &a, const FileRecord &b)
+                  { return juce::String(a.filename).compareIgnoreCase(juce::String(b.filename)) < 0; });
+
         resultsList.updateContent();
         repaint();
     }

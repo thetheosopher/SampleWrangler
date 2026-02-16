@@ -52,7 +52,8 @@ namespace sw
         void persistPreviewPitch(double semitones);
         void persistPreviewAutoPlayEnabled(bool enabled);
         void persistPreviewLoopEnabled(bool enabled);
-        void persistPreviewPreserveLengthEnabled(bool enabled);
+        void persistPreviewStretchEnabled(bool enabled);
+        void persistPreviewStretchHighQualityEnabled(bool enabled);
         void persistThemeMode(bool darkMode);
         void persistLastSelectedFile(const FileRecord &file);
         void persistScanSummaryStatus(const juce::String &statusText);
@@ -117,14 +118,20 @@ namespace sw
         BrowserPanel browserPanel;
         SplitterBar leftRightSplitter{SplitterBar::Orientation::vertical};
         ResultsPanel resultsPanel;
-        SplitterBar resultsBottomSplitter{SplitterBar::Orientation::horizontal};
+        SplitterBar resultsWaveformSplitter{SplitterBar::Orientation::horizontal};
         WaveformPanel waveformPanel;
+        SplitterBar waveformBottomSplitter{SplitterBar::Orientation::horizontal};
         PreviewPanel previewPanel;
-        SplitterBar previewWaveformSplitter{SplitterBar::Orientation::vertical};
+        SplitterBar previewKeyboardSplitter{SplitterBar::Orientation::vertical};
+        juce::MidiKeyboardState keyboardState;
+        juce::MidiKeyboardComponent keyboard{keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard};
+        juce::ComboBox midiInputCombo;
+        juce::StringArray midiInputDeviceIdentifiers;
 
         float leftPanelRatio = 0.24f;
+        float waveformPanelRatio = 0.55f;
         float bottomPanelRatio = 0.24f;
-        float previewPanelRatio = 0.377f;
+        float previewPanelRatio = 0.45f;
 
         // Core subsystems (non-UI)
         CatalogDb catalogDb;

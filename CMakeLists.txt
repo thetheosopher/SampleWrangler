@@ -133,3 +133,24 @@ target_link_libraries(SampleWrangler PRIVATE
     juce::juce_recommended_warning_flags
     sqlite3
 )
+
+# ---------------------------------------------------------------------------
+# Tests (lightweight non-audio modules)
+# ---------------------------------------------------------------------------
+enable_testing()
+
+add_executable(SampleWranglerCatalogDbTests
+    Tests/CatalogDbTests.cpp
+    Source/Catalog/CatalogDb.cpp
+    Source/Catalog/CatalogSchema.cpp
+)
+
+target_include_directories(SampleWranglerCatalogDbTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source
+)
+
+target_link_libraries(SampleWranglerCatalogDbTests PRIVATE
+    sqlite3
+)
+
+add_test(NAME SampleWrangler.CatalogDb COMMAND SampleWranglerCatalogDbTests)

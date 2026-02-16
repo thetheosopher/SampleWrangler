@@ -98,6 +98,15 @@
             "targets": [
                 "PACKAGE"
             ]
+        },
+        {
+            "name": "vs2022-release-package-msi-zip",
+            "displayName": "VS 2022 Release Package (MSI+ZIP)",
+            "configurePreset": "vs2022-release",
+            "configuration": "Release",
+            "targets": [
+                "PACKAGE"
+            ]
         }
     ]
 }

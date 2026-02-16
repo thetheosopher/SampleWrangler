@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(MSVC)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -24,7 +24,11 @@ target_compile_definitions(sqlite3 PRIVATE
     SQLITE_ENABLE_FTS5
 )
 if(MSVC)
-    set_property(TARGET sqlite3 PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set_property(TARGET sqlite3 PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(sqlite3 PRIVATE
+        $<$<CONFIG:Debug>:/MTd>
+        $<$<NOT:$<CONFIG:Debug>>:/MT>
+    )
 endif()
 # Suppress MSVC warnings for third-party C code
 if(MSVC)
@@ -202,7 +206,10 @@ target_link_libraries(SampleWrangler PRIVATE
 )
 
 if(MSVC)
-    target_link_options(SampleWrangler PRIVATE /NODEFAULTLIB:LIBCMT)
+    target_link_options(SampleWrangler PRIVATE
+        /NODEFAULTLIB:MSVCRT
+        /NODEFAULTLIB:MSVCRTD
+    )
 endif()
 
 if(SW_HAVE_RUBBERBAND)
@@ -225,21 +232,8 @@ set(CPACK_PACKAGE_FILE_NAME "SampleWrangler-${PROJECT_VERSION}-win64")
 set(CPACK_MONOLITHIC_INSTALL ON)
 
 if(WIN32)
-    find_program(SW_MAKENSIS_EXECUTABLE
-        NAMES makensis
-        PATHS
-            "C:/Program Files/NSIS"
-            "C:/Program Files (x86)/NSIS"
-    )
-    if(SW_MAKENSIS_EXECUTABLE)
-        set(CPACK_GENERATOR "NSIS;ZIP")
-        set(CPACK_NSIS_DISPLAY_NAME "SampleWrangler")
-        set(CPACK_NSIS_PACKAGE_NAME "SampleWrangler")
-        set(CPACK_NSIS_MODIFY_PATH OFF)
-    else()
-        message(WARNING "NSIS (makensis) not found; generating ZIP package only.")
-        set(CPACK_GENERATOR "ZIP")
-    endif()
+    set(CPACK_GENERATOR "WIX;ZIP")
+    set(CPACK_WIX_UPGRADE_GUID "E795F1BB-4E44-4F6C-BAE6-4371EA683986")
 endif()
 
 include(CPack)
@@ -284,7 +278,14 @@ target_link_libraries(SampleWranglerScannerAppleLoopTests PRIVATE
 )
 
 if(MSVC)
-    target_link_options(SampleWranglerScannerAppleLoopTests PRIVATE /NODEFAULTLIB:LIBCMT)
+    target_link_options(SampleWranglerCatalogDbTests PRIVATE
+        /NODEFAULTLIB:MSVCRT
+        /NODEFAULTLIB:MSVCRTD
+    )
+    target_link_options(SampleWranglerScannerAppleLoopTests PRIVATE
+        /NODEFAULTLIB:MSVCRT
+        /NODEFAULTLIB:MSVCRTD
+    )
 endif()
 
 add_test(NAME SampleWrangler.ScannerAppleLoop COMMAND SampleWranglerScannerAppleLoopTests)

@@ -1,0 +1,508 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Fragment>
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Directory Id="ProgramFiles64Folder">
+                <Directory Id="INSTALL_ROOT" Name="SampleWrangler">
+                    <Directory Id="CM_DP_bin" Name="bin">
+                        <Directory Id="CM_DP_bin.JUCE_8.0.12" Name="JUCE-8.0.12"/>
+                    </Directory>
+                    <Directory Id="CM_DP_include" Name="include">
+                        <Directory Id="CM_DP_include.JUCE_8.0.12" Name="JUCE-8.0.12">
+                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules" Name="modules">
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_analytics" Name="juce_analytics">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_analytics.analytics" Name="analytics"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_analytics.destinations" Name="destinations"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_animation" Name="juce_animation">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_animation.animation" Name="animation"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_animation.detail" Name="detail">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_animation.detail.chromium" Name="chromium"/>
+                                    </Directory>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics" Name="juce_audio_basics">
+                                    <Directory Id="CM_DH_069b5ae_audio_play_head" Name="audio_play_head"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics.buffers" Name="buffers"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics.midi" Name="midi">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics.midi.ump" Name="ump"/>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics.mpe" Name="mpe"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics.native" Name="native"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics.sources" Name="sources"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics.synthesisers" Name="synthesisers"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_basics.utilities" Name="utilities"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices" Name="juce_audio_devices">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices.audio_io" Name="audio_io"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices.midi_io" Name="midi_io">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices.midi_io.ump" Name="ump"/>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices.native" Name="native">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices.native.asio" Name="asio"/>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices.native.java" Name="java">
+                                            <Directory Id="CM_DH_1dc5415_app" Name="app">
+                                                <Directory Id="CM_DH_b0f715d_com" Name="com">
+                                                    <Directory Id="CM_DH_1ef6a3b_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_57db774_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                        <Directory Id="CM_DH_3131740_javaopt" Name="javaopt">
+                                            <Directory Id="CM_DH_5fd4791_app" Name="app">
+                                                <Directory Id="CM_DH_7905177_com" Name="com">
+                                                    <Directory Id="CM_DH_cd52c0e_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_896dff0_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices.native.oboe" Name="oboe">
+                                            <Directory Id="CM_DH_5a720f0_include" Name="include">
+                                                <Directory Id="CM_DH_44136ef_oboe" Name="oboe"/>
+                                            </Directory>
+                                            <Directory Id="CM_DH_1db1b07_src" Name="src">
+                                                <Directory Id="CM_DH_c40ca06_aaudio" Name="aaudio"/>
+                                                <Directory Id="CM_DH_2003213_common" Name="common"/>
+                                                <Directory Id="CM_DH_4b92ce9_fifo" Name="fifo"/>
+                                                <Directory Id="CM_DH_da6f0f4_flowgraph" Name="flowgraph">
+                                                    <Directory Id="CM_DH_801ff9b_resampler" Name="resampler"/>
+                                                </Directory>
+                                                <Directory Id="CM_DH_07152ff_opensles" Name="opensles"/>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_devices.sources" Name="sources"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_formats" Name="juce_audio_formats">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_formats.codecs" Name="codecs">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_formats.codecs.flac" Name="flac">
+                                            <Directory Id="CM_DH_51593b8_libFLAC" Name="libFLAC">
+                                                <Directory Id="CM_DH_c8a8561_deduplication" Name="deduplication"/>
+                                                <Directory Id="CM_DH_1cd75ea_include" Name="include">
+                                                    <Directory Id="CM_DH_b866188_private" Name="private"/>
+                                                    <Directory Id="CM_DH_50c728d_protected" Name="protected"/>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                        <Directory Id="CM_DH_3543854_oggvorbis" Name="oggvorbis">
+                                            <Directory Id="CM_DH_5f756d7_libvorbis_1.3.7" Name="libvorbis-1.3.7">
+                                                <Directory Id="CM_DH_0424808_lib" Name="lib">
+                                                    <Directory Id="CM_DH_2d3a731_books" Name="books">
+                                                        <Directory Id="CM_DH_6b71833_coupled" Name="coupled"/>
+                                                        <Directory Id="CM_DH_76ec9f2_floor" Name="floor"/>
+                                                        <Directory Id="CM_DH_e24b37a_uncoupled" Name="uncoupled"/>
+                                                    </Directory>
+                                                    <Directory Id="CM_DH_9c71a84_modes" Name="modes"/>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_formats.format" Name="format"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_formats.sampler" Name="sampler"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_plugin_client" Name="juce_audio_plugin_client">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_plugin_client.AAX" Name="AAX">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_plugin_client.AAX.SDK" Name="SDK">
+                                            <Directory Id="CM_DH_c52542b_Interfaces" Name="Interfaces">
+                                                <Directory Id="CM_DH_c7ee3cc_ACF" Name="ACF"/>
+                                            </Directory>
+                                            <Directory Id="CM_DH_0b8abbb_Libs" Name="Libs">
+                                                <Directory Id="CM_DH_2581867_AAXLibrary" Name="AAXLibrary">
+                                                    <Directory Id="CM_DH_bd4445f_source" Name="source"/>
+                                                </Directory>
+                                            </Directory>
+                                            <Directory Id="CM_DH_0ebd443_Utilities" Name="Utilities"/>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_plugin_client.AU" Name="AU">
+                                        <Directory Id="CM_DH_ed48a33_AudioUnitSDK" Name="AudioUnitSDK"/>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_plugin_client.detail" Name="detail"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_plugin_client.LV2" Name="LV2"/>
+                                    <Directory Id="CM_DH_b2a410c_Standalone" Name="Standalone"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_plugin_client.Unity" Name="Unity"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_plugin_client.VST3" Name="VST3"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_processors" Name="juce_audio_processors">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_processors.format" Name="format"/>
+                                    <Directory Id="CM_DH_71b5071_format_types" Name="format_types"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_processors.processors" Name="processors"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_processors.scanning" Name="scanning"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_processors.utilities" Name="utilities"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_processors_headless" Name="juce_audio_processors_headless">
+                                    <Directory Id="CM_DH_58e8197_format" Name="format"/>
+                                    <Directory Id="CM_DH_045a3c9_format_types" Name="format_types">
+                                        <Directory Id="CM_DH_eb4d922_LV2_SDK" Name="LV2_SDK">
+                                            <Directory Id="CM_DH_36dce0a_lilv" Name="lilv">
+                                                <Directory Id="CM_DH_a520c4b_lilv" Name="lilv"/>
+                                                <Directory Id="CM_DH_f499aae_src" Name="src">
+                                                    <Directory Id="CM_DH_646713e_zix" Name="zix"/>
+                                                </Directory>
+                                            </Directory>
+                                            <Directory Id="CM_DH_62f2eba_lv2" Name="lv2">
+                                                <Directory Id="CM_DH_31d81d9_lv2" Name="lv2">
+                                                    <Directory Id="CM_DH_90de12d_atom" Name="atom"/>
+                                                    <Directory Id="CM_DH_dad88bb_buf_size" Name="buf-size"/>
+                                                    <Directory Id="CM_DH_38e9881_core" Name="core"/>
+                                                    <Directory Id="CM_DH_b6fb8e3_data_access" Name="data-access"/>
+                                                    <Directory Id="CM_DH_818ca35_dynmanifest" Name="dynmanifest"/>
+                                                    <Directory Id="CM_DH_80d283a_event" Name="event"/>
+                                                    <Directory Id="CM_DH_4bb2ff1_instance_access" Name="instance-access"/>
+                                                    <Directory Id="CM_DH_7740c9a_log" Name="log"/>
+                                                    <Directory Id="CM_DH_6f32de1_midi" Name="midi"/>
+                                                    <Directory Id="CM_DH_2eaa9be_morph" Name="morph"/>
+                                                    <Directory Id="CM_DH_6d97baf_options" Name="options"/>
+                                                    <Directory Id="CM_DH_7a43804_parameters" Name="parameters"/>
+                                                    <Directory Id="CM_DH_40e4468_patch" Name="patch"/>
+                                                    <Directory Id="CM_DH_89df785_port_groups" Name="port-groups"/>
+                                                    <Directory Id="CM_DH_4cca205_port_props" Name="port-props"/>
+                                                    <Directory Id="CM_DH_9faec51_presets" Name="presets"/>
+                                                    <Directory Id="CM_DH_0c5770d_resize_port" Name="resize-port"/>
+                                                    <Directory Id="CM_DH_fd01d6f_state" Name="state"/>
+                                                    <Directory Id="CM_DH_3f74eda_time" Name="time"/>
+                                                    <Directory Id="CM_DH_f0b27ea_ui" Name="ui"/>
+                                                    <Directory Id="CM_DH_e0d8f0c_units" Name="units"/>
+                                                    <Directory Id="CM_DH_cc9b686_uri_map" Name="uri-map"/>
+                                                    <Directory Id="CM_DH_f4cebc5_urid" Name="urid"/>
+                                                    <Directory Id="CM_DH_54d997f_worker" Name="worker"/>
+                                                </Directory>
+                                            </Directory>
+                                            <Directory Id="CM_DH_675ad21_serd" Name="serd">
+                                                <Directory Id="CM_DH_66043d1_serd" Name="serd"/>
+                                                <Directory Id="CM_DH_6627dce_src" Name="src"/>
+                                            </Directory>
+                                            <Directory Id="CM_DH_ca461cb_sord" Name="sord">
+                                                <Directory Id="CM_DH_12371d8_sord" Name="sord"/>
+                                                <Directory Id="CM_DH_01d7f01_src" Name="src">
+                                                    <Directory Id="CM_DH_039d95d_zix" Name="zix"/>
+                                                </Directory>
+                                            </Directory>
+                                            <Directory Id="CM_DH_5b72ea8_sratom" Name="sratom">
+                                                <Directory Id="CM_DH_d522603_sratom" Name="sratom"/>
+                                                <Directory Id="CM_DH_2783e37_src" Name="src"/>
+                                            </Directory>
+                                        </Directory>
+                                        <Directory Id="CM_DH_c5583c8_pslextensions" Name="pslextensions"/>
+                                        <Directory Id="CM_DH_bd27685_VST3_SDK" Name="VST3_SDK">
+                                            <Directory Id="CM_DH_768857d_base" Name="base">
+                                                <Directory Id="CM_DH_49d7dc9_source" Name="source"/>
+                                                <Directory Id="CM_DH_c4dd890_thread" Name="thread">
+                                                    <Directory Id="CM_DH_34aba2b_include" Name="include"/>
+                                                    <Directory Id="CM_DH_931e9c2_source" Name="source"/>
+                                                </Directory>
+                                            </Directory>
+                                            <Directory Id="CM_DH_af5c359_pluginterfaces" Name="pluginterfaces">
+                                                <Directory Id="CM_DH_c374f69_base" Name="base"/>
+                                                <Directory Id="CM_DH_864670c_gui" Name="gui"/>
+                                                <Directory Id="CM_DH_628e644_vst" Name="vst"/>
+                                            </Directory>
+                                            <Directory Id="CM_DH_290497d_public.sdk" Name="public.sdk">
+                                                <Directory Id="CM_DH_2cbb22d_source" Name="source">
+                                                    <Directory Id="CM_DH_7c6d3d2_common" Name="common"/>
+                                                    <Directory Id="CM_DH_f1e8654_vst" Name="vst">
+                                                        <Directory Id="CM_DH_edbf37d_hosting" Name="hosting"/>
+                                                        <Directory Id="CM_DH_bb016a3_moduleinfo" Name="moduleinfo"/>
+                                                        <Directory Id="CM_DH_7006b70_utility" Name="utility"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DH_f687fd6_processors" Name="processors"/>
+                                    <Directory Id="CM_DH_b4968f2_utilities" Name="utilities">
+                                        <Directory Id="CM_DH_c407e9a_ARA" Name="ARA"/>
+                                    </Directory>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_utils" Name="juce_audio_utils">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_utils.audio_cd" Name="audio_cd"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_utils.gui" Name="gui"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_utils.native" Name="native"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_audio_utils.players" Name="players"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_box2d" Name="juce_box2d">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_box2d.box2d" Name="box2d">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_box2d.box2d.Collision" Name="Collision">
+                                            <Directory Id="CM_DH_8740b83_Shapes" Name="Shapes"/>
+                                        </Directory>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_box2d.box2d.Common" Name="Common"/>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_box2d.box2d.Dynamics" Name="Dynamics">
+                                            <Directory Id="CM_DH_97038a3_Contacts" Name="Contacts"/>
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_box2d.box2d.Dynamics.Joints" Name="Joints"/>
+                                        </Directory>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_box2d.box2d.Rope" Name="Rope"/>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_box2d.utils" Name="utils"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core" Name="juce_core">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.containers" Name="containers"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.detail" Name="detail"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.files" Name="files"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.json" Name="json"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.logging" Name="logging"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.maths" Name="maths"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.memory" Name="memory"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.misc" Name="misc"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.native" Name="native">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.native.java" Name="java">
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.native.java.app" Name="app">
+                                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.native.java.app.com" Name="com">
+                                                    <Directory Id="CM_DH_b94d12d_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_a0a9d21_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.native.javacore" Name="javacore">
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.native.javacore.app" Name="app">
+                                                <Directory Id="CM_DH_5c267b3_com" Name="com">
+                                                    <Directory Id="CM_DH_1d30311_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_e6edf58_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.native.javacore.init" Name="init">
+                                                <Directory Id="CM_DH_6bede86_com" Name="com">
+                                                    <Directory Id="CM_DH_af051df_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_19ff514_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.network" Name="network"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.serialisation" Name="serialisation"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.streams" Name="streams"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.system" Name="system"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.text" Name="text"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.threads" Name="threads"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.time" Name="time"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.unit_tests" Name="unit_tests"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.xml" Name="xml"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.zip" Name="zip">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_core.zip.zlib" Name="zlib"/>
+                                    </Directory>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_cryptography" Name="juce_cryptography">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_cryptography.encryption" Name="encryption"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_cryptography.hashing" Name="hashing"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_data_structures" Name="juce_data_structures">
+                                    <Directory Id="CM_DH_37c59a1_app_properties" Name="app_properties"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_data_structures.undomanager" Name="undomanager"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_data_structures.values" Name="values"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_dsp" Name="juce_dsp">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_dsp.containers" Name="containers"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_dsp.filter_design" Name="filter_design"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_dsp.frequency" Name="frequency"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_dsp.maths" Name="maths"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_dsp.native" Name="native"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_dsp.processors" Name="processors"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_dsp.widgets" Name="widgets"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_events" Name="juce_events">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_events.broadcasters" Name="broadcasters"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_events.interprocess" Name="interprocess"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_events.messages" Name="messages"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_events.native" Name="native"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_events.timers" Name="timers"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics" Name="juce_graphics">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.colour" Name="colour"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.contexts" Name="contexts"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.detail" Name="detail"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.effects" Name="effects"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.fonts" Name="fonts">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.fonts.harfbuzz" Name="harfbuzz">
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.fonts.harfbuzz.OT" Name="OT">
+                                                <Directory Id="CM_DH_b8e25de_Color" Name="Color">
+                                                    <Directory Id="CM_DH_947e49f_CBDT" Name="CBDT"/>
+                                                    <Directory Id="CM_DH_d618bf2_COLR" Name="COLR"/>
+                                                    <Directory Id="CM_DH_0bcfc00_CPAL" Name="CPAL"/>
+                                                    <Directory Id="CM_DH_cc42d2a_sbix" Name="sbix"/>
+                                                    <Directory Id="CM_DH_447e7ee_svg" Name="svg"/>
+                                                </Directory>
+                                                <Directory Id="CM_DH_d00a8f4_glyf" Name="glyf"/>
+                                                <Directory Id="CM_DH_19097ee_Layout" Name="Layout">
+                                                    <Directory Id="CM_DH_f8201fe_Common" Name="Common"/>
+                                                    <Directory Id="CM_DH_a082410_GDEF" Name="GDEF"/>
+                                                    <Directory Id="CM_DH_eada5dd_GPOS" Name="GPOS"/>
+                                                    <Directory Id="CM_DH_cd6a755_GSUB" Name="GSUB"/>
+                                                </Directory>
+                                                <Directory Id="CM_DH_8a0cdf3_name" Name="name"/>
+                                                <Directory Id="CM_DH_8ea9ba0_Var" Name="Var">
+                                                    <Directory Id="CM_DH_d60f85d_VARC" Name="VARC"/>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.geometry" Name="geometry"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.images" Name="images"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.image_formats" Name="image_formats">
+                                        <Directory Id="CM_DH_da77804_jpglib" Name="jpglib"/>
+                                        <Directory Id="CM_DH_efdeacc_pnglib" Name="pnglib"/>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.native" Name="native"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.placement" Name="placement"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.unicode" Name="unicode">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_graphics.unicode.sheenbidi" Name="sheenbidi">
+                                            <Directory Id="CM_DH_1f77755_Headers" Name="Headers">
+                                                <Directory Id="CM_DH_523ff0f_SheenBidi" Name="SheenBidi"/>
+                                            </Directory>
+                                            <Directory Id="CM_DH_821c0b7_Source" Name="Source"/>
+                                        </Directory>
+                                    </Directory>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics" Name="juce_gui_basics">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.accessibility" Name="accessibility">
+                                        <Directory Id="CM_DH_2b8b038_enums" Name="enums"/>
+                                        <Directory Id="CM_DH_9ce09a3_interfaces" Name="interfaces"/>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.application" Name="application"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.buttons" Name="buttons"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.commands" Name="commands"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.components" Name="components"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.desktop" Name="desktop"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.detail" Name="detail"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.drawables" Name="drawables"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.filebrowser" Name="filebrowser"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.keyboard" Name="keyboard"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.layout" Name="layout"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.lookandfeel" Name="lookandfeel"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.menus" Name="menus"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.misc" Name="misc"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.mouse" Name="mouse"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.native" Name="native">
+                                        <Directory Id="CM_DH_9bca248_accessibility" Name="accessibility"/>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.native.java" Name="java">
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.native.java.app" Name="app">
+                                                <Directory Id="CM_DH_70479cb_com" Name="com">
+                                                    <Directory Id="CM_DH_3039dd5_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_7e7d757_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.native.javaopt" Name="javaopt">
+                                            <Directory Id="CM_DH_f302288_app" Name="app">
+                                                <Directory Id="CM_DH_349ba30_com" Name="com">
+                                                    <Directory Id="CM_DH_d94d117_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_26f6bfb_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.positioning" Name="positioning"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.properties" Name="properties"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.widgets" Name="widgets"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_basics.windows" Name="windows"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra" Name="juce_gui_extra">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.code_editor" Name="code_editor"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.detail" Name="detail"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.documents" Name="documents"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.embedding" Name="embedding"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.misc" Name="misc"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.native" Name="native">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.native.java" Name="java">
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.native.java.app" Name="app">
+                                                <Directory Id="CM_DH_04c7250_com" Name="com">
+                                                    <Directory Id="CM_DH_f660e78_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_d70819e_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.native.javaopt" Name="javaopt">
+                                            <Directory Id="CM_DH_1f4beeb_app" Name="app">
+                                                <Directory Id="CM_DH_d3defa8_com" Name="com">
+                                                    <Directory Id="CM_DH_a7adfd5_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_968d60e_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_gui_extra.native.javascript" Name="javascript"/>
+                                    </Directory>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript" Name="juce_javascript">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript.choc" Name="choc">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript.choc.containers" Name="containers"/>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript.choc.javascript" Name="javascript"/>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript.choc.math" Name="math"/>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript.choc.platform" Name="platform"/>
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript.choc.text" Name="text"/>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript.detail" Name="detail"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_javascript.javascript" Name="javascript"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_midi_ci" Name="juce_midi_ci">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_midi_ci.ci" Name="ci"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_midi_ci.detail" Name="detail"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_opengl" Name="juce_opengl">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_opengl.geometry" Name="geometry"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_opengl.native" Name="native">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_opengl.native.java" Name="java">
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_opengl.native.java.app" Name="app">
+                                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_opengl.native.java.app.com" Name="com">
+                                                    <Directory Id="CM_DH_d149ee1_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_becd119_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_opengl.opengl" Name="opengl"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_opengl.utils" Name="utils"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_osc" Name="juce_osc">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_osc.osc" Name="osc"/>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_product_unlocking" Name="juce_product_unlocking">
+                                    <Directory Id="CM_DH_a6897d5_in_app_purchases" Name="in_app_purchases"/>
+                                    <Directory Id="CM_DH_bdd3dfc_marketplace" Name="marketplace"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_product_unlocking.native" Name="native">
+                                        <Directory Id="CM_DH_98e2d1b_java" Name="java">
+                                            <Directory Id="CM_DH_58a831b_app" Name="app">
+                                                <Directory Id="CM_DH_1386bfe_com" Name="com">
+                                                    <Directory Id="CM_DH_ecf7401_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_59768a9_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                </Directory>
+                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_video" Name="juce_video">
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_video.capture" Name="capture"/>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_video.native" Name="native">
+                                        <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_video.native.java" Name="java">
+                                            <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_video.native.java.app" Name="app">
+                                                <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_video.native.java.app.com" Name="com">
+                                                    <Directory Id="CM_DH_e3e9010_rmsl" Name="rmsl">
+                                                        <Directory Id="CM_DH_1eb746e_juce" Name="juce"/>
+                                                    </Directory>
+                                                </Directory>
+                                            </Directory>
+                                        </Directory>
+                                    </Directory>
+                                    <Directory Id="CM_DP_include.JUCE_8.0.12.modules.juce_video.playback" Name="playback"/>
+                                </Directory>
+                            </Directory>
+                        </Directory>
+                    </Directory>
+                    <Directory Id="CM_DP_lib" Name="lib">
+                        <Directory Id="CM_DP_lib.cmake" Name="cmake">
+                            <Directory Id="CM_DP_lib.cmake.JUCE_8.0.12" Name="JUCE-8.0.12"/>
+                        </Directory>
+                    </Directory>
+                </Directory>
+            </Directory>
+        </Directory>
+    </Fragment>
+</Wix>

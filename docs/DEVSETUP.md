@@ -16,6 +16,8 @@ git submodule update --init --recursive   # pulls JUCE
 
 ## Configure & build (CMake Presets)
 
+Note: Windows builds are configured to statically link the MSVC C runtime (`/MT` and `/MTd`).
+
 ### Debug
 
 ```bash
@@ -34,8 +36,11 @@ cmake --build --preset vs2022-release
 
 ```bash
 cmake --preset vs2022-release
-cmake --build --preset vs2022-release-package
+cmake --build --preset vs2022-release-package-msi-zip
 ```
+
+If WIX is available, this generates both `.msi` and `.zip` in one run.
+If WIX is not available, package generation will fail; install WIX tooling on the build machine.
 
 Package artifacts are written under:
 

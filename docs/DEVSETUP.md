@@ -30,6 +30,24 @@ cmake --preset vs2022-release
 cmake --build --preset vs2022-release
 ```
 
+### Preset cache recovery (VS instance changed)
+
+If you see an error like "could not find specified instance of Visual Studio", the build cache is pinned to an old VS installation. Reset it with:
+
+```bash
+rm -r build/vs2022-debug
+cmake --preset vs2022-debug
+cmake --build --preset vs2022-debug
+```
+
+PowerShell equivalent:
+
+```powershell
+Remove-Item -Recurse -Force "build/vs2022-debug"
+cmake --preset vs2022-debug
+cmake --build --preset vs2022-debug
+```
+
 The executable is written to:
 
 ```

@@ -175,6 +175,9 @@ namespace sw
 
     MainComponent::MainComponent()
     {
+        setWantsKeyboardFocus(true);
+        setMouseClickGrabsKeyboardFocus(true);
+
         addAndMakeVisible(toolbar);
         addAndMakeVisible(addRootToolbarButton);
         addAndMakeVisible(openSourceInExplorerToolbarButton);
@@ -525,6 +528,23 @@ namespace sw
     }
 
     MainComponent::~MainComponent() = default;
+
+    bool MainComponent::keyPressed(const juce::KeyPress &key)
+    {
+        if (key == juce::KeyPress::spaceKey)
+        {
+            if (audioEngine.isPreviewPlaying())
+                audioEngine.stop();
+            else
+                audioEngine.play();
+
+            waveformPanel.setPlayheadNormalized(static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized()));
+            previewPanel.setPlaybackActive(audioEngine.isPreviewPlaying());
+            return true;
+        }
+
+        return false;
+    }
 
     void MainComponent::paint(juce::Graphics &g)
     {

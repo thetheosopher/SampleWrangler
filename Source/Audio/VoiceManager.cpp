@@ -32,7 +32,8 @@ namespace sw
     void VoiceManager::getNextAudioBlock(const juce::AudioSourceChannelInfo &info)
     {
         // RT-SAFE — no allocations, locks, I/O, or logging.
-        auto *buf = sampleBuffer.load(std::memory_order_acquire);
+        const auto loadedBuffer = sampleBuffer.load(std::memory_order_acquire);
+        auto *buf = loadedBuffer.get();
 
         if (!playing.load(std::memory_order_relaxed) || buf == nullptr || buf->getNumSamples() == 0)
         {
@@ -263,9 +264,12 @@ namespace sw
         playbackFinished.store(false, std::memory_order_relaxed);
         granularResetRequested.store(true, std::memory_order_release);
         loadedSampleLength.store(buffer != nullptr ? buffer->getNumSamples() : 0, std::memory_order_relaxed);
-        ownedBuffer = std::move(buffer);
+        std::shared_ptr<juce::AudioBuffer<float>> sharedBuffer;
+        if (buffer != nullptr)
+            sharedBuffer = std::shared_ptr<juce::AudioBuffer<float>>(std::move(buffer));
+
         bufferSampleRate = fileSampleRate;
-        sampleBuffer.store(ownedBuffer.get(), std::memory_order_release);
+        sampleBuffer.store(std::move(sharedBuffer), std::memory_order_release);
         playbackPos.store(0.0, std::memory_order_relaxed);
 #if SW_HAVE_RUBBERBAND
         initialiseRubberBandIfNeeded();

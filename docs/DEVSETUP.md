@@ -30,6 +30,22 @@ cmake --preset vs2022-release
 cmake --build --preset vs2022-release
 ```
 
+### Release installer / package
+
+```bash
+cmake --preset vs2022-release
+cmake --build --preset vs2022-release-package
+```
+
+Package artifacts are written under:
+
+```
+build/vs2022-release/
+```
+
+On Windows, if NSIS is installed (`makensis` on PATH), an `.exe` installer is generated.
+Otherwise, CPack generates a `.zip` package.
+
 ### Preset cache recovery (VS instance changed)
 
 If you see an error like "could not find specified instance of Visual Studio", the build cache is pinned to an old VS installation. Reset it with:

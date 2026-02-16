@@ -54,6 +54,9 @@ namespace sw
         bool insertCacheEntry(const WaveCacheEntry &entry);
         std::optional<WaveCacheEntry> cacheEntryByKey(const std::string &key);
 
+        // ----- Maintenance -----
+        bool vacuum();
+
     private:
         sqlite3 *db = nullptr;
     };

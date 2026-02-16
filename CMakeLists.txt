@@ -4,6 +4,10 @@ project(SampleWrangler VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
+
 # ---------------------------------------------------------------------------
 # JUCE (submodule in /JUCE)
 # ---------------------------------------------------------------------------
@@ -19,6 +23,9 @@ target_include_directories(sqlite3 PUBLIC third_party/sqlite)
 target_compile_definitions(sqlite3 PRIVATE
     SQLITE_ENABLE_FTS5
 )
+if(MSVC)
+    set_property(TARGET sqlite3 PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
 # Suppress MSVC warnings for third-party C code
 if(MSVC)
     target_compile_options(sqlite3 PRIVATE /W0)
@@ -194,6 +201,10 @@ target_link_libraries(SampleWrangler PRIVATE
     sqlite3
 )
 
+if(MSVC)
+    target_link_options(SampleWrangler PRIVATE /NODEFAULTLIB:LIBCMT)
+endif()
+
 if(SW_HAVE_RUBBERBAND)
     target_link_libraries(SampleWrangler PRIVATE rubberband)
 endif()
@@ -202,6 +213,36 @@ include(GNUInstallDirs)
 install(TARGETS SampleWrangler
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+# ---------------------------------------------------------------------------
+# Packaging (CPack)
+# ---------------------------------------------------------------------------
+set(CPACK_PACKAGE_NAME "SampleWrangler")
+set(CPACK_PACKAGE_VENDOR "SampleWrangler")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "SampleWrangler")
+set(CPACK_PACKAGE_FILE_NAME "SampleWrangler-${PROJECT_VERSION}-win64")
+set(CPACK_MONOLITHIC_INSTALL ON)
+
+if(WIN32)
+    find_program(SW_MAKENSIS_EXECUTABLE
+        NAMES makensis
+        PATHS
+            "C:/Program Files/NSIS"
+            "C:/Program Files (x86)/NSIS"
+    )
+    if(SW_MAKENSIS_EXECUTABLE)
+        set(CPACK_GENERATOR "NSIS;ZIP")
+        set(CPACK_NSIS_DISPLAY_NAME "SampleWrangler")
+        set(CPACK_NSIS_PACKAGE_NAME "SampleWrangler")
+        set(CPACK_NSIS_MODIFY_PATH OFF)
+    else()
+        message(WARNING "NSIS (makensis) not found; generating ZIP package only.")
+        set(CPACK_GENERATOR "ZIP")
+    endif()
+endif()
+
+include(CPack)
 
 # ---------------------------------------------------------------------------
 # Tests (lightweight non-audio modules)
@@ -241,5 +282,9 @@ target_link_libraries(SampleWranglerScannerAppleLoopTests PRIVATE
     juce::juce_core
     juce::juce_audio_formats
 )
+
+if(MSVC)
+    target_link_options(SampleWranglerScannerAppleLoopTests PRIVATE /NODEFAULTLIB:LIBCMT)
+endif()
 
 add_test(NAME SampleWrangler.ScannerAppleLoop COMMAND SampleWranglerScannerAppleLoopTests)

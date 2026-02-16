@@ -12,6 +12,7 @@
 #include "Audio/MidiInputRouter.h"
 
 #include <chrono>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -67,6 +68,7 @@ namespace sw
         void cancelScan();
         void handleOpenSourceInExplorerClicked();
         void handleDeleteRootClicked();
+        void handleVacuumDatabaseClicked();
         void resetLayout();
         void handleAddRootClicked();
         void handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert);
@@ -104,6 +106,23 @@ namespace sw
             bool darkModeEnabled = true;
         };
 
+        class TooltipLookAndFeel final : public juce::LookAndFeel_V4
+        {
+        public:
+            void setDarkMode(bool enabled) { darkModeEnabled = enabled; }
+
+            juce::Rectangle<int> getTooltipBounds(const juce::String &tipText,
+                                                  juce::Point<int> screenPos,
+                                                  juce::Rectangle<int> parentArea) override;
+            void drawTooltip(juce::Graphics &g,
+                             const juce::String &text,
+                             int width,
+                             int height) override;
+
+        private:
+            bool darkModeEnabled = true;
+        };
+
         // Owned sub-panels
         juce::Component toolbar;
         juce::DrawableButton addRootToolbarButton{"Add Source", juce::DrawableButton::ImageFitted};
@@ -112,7 +131,9 @@ namespace sw
         juce::DrawableButton rescanToolbarButton{"Rescan Selected Source", juce::DrawableButton::ImageFitted};
         juce::DrawableButton cancelScanToolbarButton{"Cancel Scan", juce::DrawableButton::ImageFitted};
         juce::DrawableButton resetLayoutToolbarButton{"Reset Layout", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton vacuumDbToolbarButton{"Compress Database", juce::DrawableButton::ImageFitted};
         juce::DrawableButton themeToolbarButton{"Theme", juce::DrawableButton::ImageFitted};
+        TooltipLookAndFeel tooltipLookAndFeel;
         juce::TooltipWindow tooltipWindow{this};
 
         BrowserPanel browserPanel;
@@ -144,6 +165,7 @@ namespace sw
         bool scanInProgress = false;
         std::optional<int64_t> selectedRootFilterId;
         std::optional<FileRecord> currentSelectedFile;
+        std::atomic<uint64_t> previewLoadRequestCounter{0};
         std::string currentSearchQuery;
         juce::String selectedMidiInputIdentifier;
         juce::StringArray lastKnownMidiInputIdentifiers;
@@ -151,7 +173,10 @@ namespace sw
         juce::String toolbarFeedbackText;
         int toolbarFeedbackTicksRemaining = 0;
         juce::String scanStatusText{"Idle"};
-        juce::String playbackPositionText{"00:00:00.000 / 00:00:00.000"};
+        juce::String playbackPositionText{"00:00:00.000"};
+        juce::Font playbackTimeFont{juce::FontOptions(20.0f)
+                                        .withName(juce::Font::getDefaultMonospacedFontName())
+                                        .withStyle("Regular")};
         bool darkModeEnabled = true;
         std::chrono::steady_clock::time_point scanStartTime{};
 

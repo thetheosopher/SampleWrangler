@@ -23,7 +23,7 @@ namespace sw
             return *file.loopType == "acidized" || *file.loopType == "apple-loop";
         }
 
-        constexpr int kToolbarHeight = 36;
+        constexpr int kToolbarHeight = 48;
         constexpr int kStatusBarHeight = 24;
         constexpr int kUiTimerHz = 60;
         constexpr int kMidiDeviceRefreshIntervalTicks = kUiTimerHz;
@@ -55,132 +55,524 @@ namespace sw
     {
         std::unique_ptr<juce::Drawable> createFolderIcon(const juce::Colour colour)
         {
-            auto drawable = std::make_unique<juce::DrawablePath>();
-            juce::Path icon;
-            icon.addRoundedRectangle(2.0f, 8.0f, 20.0f, 12.0f, 2.0f);
-            icon.addRoundedRectangle(4.0f, 4.0f, 9.0f, 5.0f, 1.5f);
-            drawable->setPath(icon);
-            drawable->setFill(colour);
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            juce::Path folderBack;
+            folderBack.addRoundedRectangle(2.0f, 6.2f, 20.0f, 12.4f, 2.1f);
+
+            juce::Path folderTab;
+            folderTab.addRoundedRectangle(4.0f, 3.2f, 7.8f, 4.2f, 1.2f);
+
+            juce::Path folderFront;
+            folderFront.startNewSubPath(2.2f, 9.5f);
+            folderFront.lineTo(22.0f, 9.5f);
+            folderFront.lineTo(18.6f, 20.0f);
+            folderFront.lineTo(4.4f, 20.0f);
+            folderFront.closeSubPath();
+
+            g.setColour(juce::Colour(0x1a000000));
+            g.fillRoundedRectangle(2.2f, 6.7f, 20.0f, 13.2f, 2.1f);
+
+            g.setColour(juce::Colour(0xffd8a64a));
+            g.fillPath(folderBack);
+
+            g.setColour(juce::Colour(0xfff6d178));
+            g.fillPath(folderTab);
+
+            g.setColour(juce::Colour(0xfff1c258));
+            g.fillPath(folderFront);
+
+            juce::Path flapHighlight;
+            flapHighlight.startNewSubPath(3.4f, 10.6f);
+            flapHighlight.lineTo(21.0f, 10.6f);
+            flapHighlight.lineTo(20.5f, 12.1f);
+            flapHighlight.lineTo(3.0f, 12.1f);
+            flapHighlight.closeSubPath();
+            g.setColour(juce::Colour(0x55ffffff));
+            g.fillPath(flapHighlight);
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.22f)
+                                         : colour.withAlpha(0.14f);
+            g.setColour(tintOverlay);
+            g.strokePath(folderFront, juce::PathStrokeType(0.65f));
+
+            g.setColour(juce::Colour(0xc06b4a1f));
+            g.strokePath(folderBack, juce::PathStrokeType(0.9f));
+            g.strokePath(folderFront, juce::PathStrokeType(0.9f));
+            g.strokePath(folderTab, juce::PathStrokeType(0.85f));
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
             return drawable;
         }
 
         std::unique_ptr<juce::Drawable> createRescanIcon(const juce::Colour colour)
         {
-            auto drawable = std::make_unique<juce::DrawablePath>();
-            juce::Path icon;
-            icon.addCentredArc(12.0f, 12.0f, 8.0f, 8.0f, 0.0f,
-                               juce::MathConstants<float>::pi * 0.25f,
-                               juce::MathConstants<float>::pi * 1.75f,
-                               true);
-            icon.addTriangle(20.0f, 9.0f, 23.0f, 12.0f, 19.0f, 14.0f);
-            drawable->setPath(icon);
-            drawable->setStrokeFill(colour);
-            drawable->setStrokeType(juce::PathStrokeType(2.2f));
+            juce::ignoreUnused(colour);
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            constexpr float arcRadius = 7.0f;
+            constexpr float arcEndAngle = juce::MathConstants<float>::pi * 1.89f;
+
+            juce::Path circularArrow;
+            circularArrow.addCentredArc(12.0f, 12.0f, arcRadius, arcRadius, 0.0f,
+                                        juce::MathConstants<float>::pi * 0.23f,
+                                        arcEndAngle,
+                                        true);
+
+            const float arcEndX = 12.0f + arcRadius * std::cos(arcEndAngle);
+            const float arcEndY = 12.0f + arcRadius * std::sin(arcEndAngle);
+
+            const juce::Point<float> tangent(-std::sin(arcEndAngle), std::cos(arcEndAngle));
+            const juce::Point<float> normal(-tangent.y, tangent.x);
+
+            constexpr float arrowTipOffset = 3.8f * 1.5f;
+            constexpr float arrowTailOffset = 0.9f * 1.5f;
+            constexpr float arrowHalfWidth = 2.9f * 1.5f;
+
+            const auto arcEnd = juce::Point<float>(arcEndX, arcEndY);
+            const auto baseCenter = arcEnd + tangent * arrowTailOffset;
+            const auto tip = arcEnd - tangent * arrowTipOffset;
+            const auto baseA = baseCenter + normal * arrowHalfWidth;
+            const auto baseB = baseCenter - normal * arrowHalfWidth;
+
+            juce::Path arrowHead;
+            arrowHead.addTriangle(tip.x, tip.y,
+                                  baseA.x, baseA.y,
+                                  baseB.x, baseB.y);
+
+            juce::Path arrowNeck;
+            arrowNeck.startNewSubPath((arcEnd + tangent * 0.15f).x, (arcEnd + tangent * 0.15f).y);
+            arrowNeck.lineTo((baseCenter - tangent * 0.9f).x, (baseCenter - tangent * 0.9f).y);
+
+            juce::Path arrowHeadBackdrop;
+            arrowHeadBackdrop.addTriangle((tip - tangent * 0.35f).x, (tip - tangent * 0.35f).y,
+                                          (baseA + tangent * 0.2f + normal * 0.35f).x, (baseA + tangent * 0.2f + normal * 0.35f).y,
+                                          (baseB + tangent * 0.2f - normal * 0.35f).x, (baseB + tangent * 0.2f - normal * 0.35f).y);
+
+            g.setColour(juce::Colour(0xff2f8dff));
+            g.strokePath(circularArrow, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            g.setColour(juce::Colour(0xff1b5e8f));
+            g.strokePath(circularArrow, juce::PathStrokeType(0.55f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            // Opaque backing ensures the head reads clearly over the ring.
+            g.setColour(juce::Colours::white);
+            g.fillPath(arrowHeadBackdrop);
+
+            g.setColour(juce::Colour(0xff2abf85));
+            g.fillPath(arrowHead);
+            g.strokePath(arrowNeck, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour(juce::Colour(0xff1a8b66));
+            g.strokePath(arrowHead, juce::PathStrokeType(0.65f));
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
             return drawable;
         }
 
         std::unique_ptr<juce::Drawable> createCancelIcon(const juce::Colour colour)
         {
-            auto drawable = std::make_unique<juce::DrawablePath>();
-            juce::Path icon;
-            icon.addEllipse(3.0f, 3.0f, 18.0f, 18.0f);
-            icon.startNewSubPath(8.0f, 8.0f);
-            icon.lineTo(16.0f, 16.0f);
-            icon.startNewSubPath(16.0f, 8.0f);
-            icon.lineTo(8.0f, 16.0f);
-            drawable->setPath(icon);
-            drawable->setStrokeFill(colour);
-            drawable->setStrokeType(juce::PathStrokeType(2.0f));
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            juce::Path ring;
+            ring.addEllipse(3.5f, 3.5f, 17.0f, 17.0f);
+
+            juce::Path innerDisc;
+            innerDisc.addEllipse(5.7f, 5.7f, 12.6f, 12.6f);
+
+            juce::Path cross;
+            cross.startNewSubPath(8.2f, 8.2f);
+            cross.lineTo(15.8f, 15.8f);
+            cross.startNewSubPath(15.8f, 8.2f);
+            cross.lineTo(8.2f, 15.8f);
+
+            g.setColour(juce::Colour(0xffda4f4f));
+            g.fillPath(ring);
+
+            g.setColour(juce::Colour(0xffbe3d3d));
+            g.fillPath(innerDisc);
+
+            g.setColour(juce::Colour(0x55ffffff));
+            g.fillEllipse(6.4f, 6.3f, 6.8f, 3.0f);
+
+            g.setColour(juce::Colours::white.withAlpha(0.96f));
+            g.strokePath(cross, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            g.setColour(juce::Colour(0xb06f2e2e));
+            g.strokePath(ring, juce::PathStrokeType(0.85f));
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.20f)
+                                         : colour.withAlpha(0.10f);
+            g.setColour(tintOverlay);
+            g.strokePath(ring, juce::PathStrokeType(0.6f));
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
             return drawable;
         }
 
         std::unique_ptr<juce::Drawable> createResetLayoutIcon(const juce::Colour colour)
         {
-            auto drawable = std::make_unique<juce::DrawablePath>();
-            juce::Path icon;
-            icon.addRectangle(3.0f, 3.0f, 8.0f, 8.0f);
-            icon.addRectangle(13.0f, 3.0f, 8.0f, 8.0f);
-            icon.addRectangle(3.0f, 13.0f, 8.0f, 8.0f);
-            icon.addRectangle(13.0f, 13.0f, 8.0f, 8.0f);
-            drawable->setPath(icon);
-            drawable->setStrokeFill(colour);
-            drawable->setStrokeType(juce::PathStrokeType(1.8f));
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            juce::Path tileA;
+            tileA.addRoundedRectangle(3.1f, 3.1f, 7.6f, 7.6f, 1.0f);
+            juce::Path tileB;
+            tileB.addRoundedRectangle(13.3f, 3.1f, 7.6f, 7.6f, 1.0f);
+            juce::Path tileC;
+            tileC.addRoundedRectangle(3.1f, 13.3f, 7.6f, 7.6f, 1.0f);
+            juce::Path tileD;
+            tileD.addRoundedRectangle(13.3f, 13.3f, 7.6f, 7.6f, 1.0f);
+
+            g.setColour(juce::Colour(0xff5da7ff));
+            g.fillPath(tileA);
+            g.setColour(juce::Colour(0xff7fb7ff));
+            g.fillPath(tileB);
+            g.setColour(juce::Colour(0xff3f95ff));
+            g.fillPath(tileC);
+            g.setColour(juce::Colour(0xff65c39d));
+            g.fillPath(tileD);
+
+            g.setColour(juce::Colour(0x45ffffff));
+            g.fillRoundedRectangle(3.8f, 3.8f, 15.4f, 2.2f, 0.7f);
+
+            juce::Path resetArrow;
+            resetArrow.addCentredArc(12.0f, 12.0f, 6.0f, 6.0f, 0.0f,
+                                     juce::MathConstants<float>::pi * 0.14f,
+                                     juce::MathConstants<float>::pi * 1.16f,
+                                     true);
+            juce::Path resetHead;
+            resetHead.addTriangle(18.25f, 8.0f, 21.2f, 10.2f, 17.45f, 11.4f);
+
+            g.setColour(juce::Colours::white.withAlpha(0.96f));
+            g.strokePath(resetArrow, juce::PathStrokeType(1.45f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.fillPath(resetHead);
+
+            g.setColour(juce::Colour(0xb02c5f9d));
+            g.strokePath(tileA, juce::PathStrokeType(0.72f));
+            g.strokePath(tileB, juce::PathStrokeType(0.72f));
+            g.strokePath(tileC, juce::PathStrokeType(0.72f));
+            g.strokePath(tileD, juce::PathStrokeType(0.72f));
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.20f)
+                                         : colour.withAlpha(0.10f);
+            g.setColour(tintOverlay);
+            g.strokePath(resetArrow, juce::PathStrokeType(0.55f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
+            return drawable;
+        }
+
+        std::unique_ptr<juce::Drawable> createVacuumIcon(const juce::Colour colour)
+        {
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            juce::Path base;
+            base.addRoundedRectangle(3.0f, 16.5f, 18.0f, 4.0f, 1.0f);
+
+            juce::Path fixedJaw;
+            fixedJaw.addRoundedRectangle(4.0f, 8.0f, 4.0f, 8.5f, 0.8f);
+
+            juce::Path movingJaw;
+            movingJaw.addRoundedRectangle(15.0f, 8.0f, 4.0f, 8.5f, 0.8f);
+
+            juce::Path screwBar;
+            screwBar.addRoundedRectangle(8.0f, 11.2f, 7.2f, 2.2f, 0.9f);
+
+            juce::Path handle;
+            handle.startNewSubPath(11.2f, 10.0f);
+            handle.lineTo(11.2f, 7.0f);
+            handle.startNewSubPath(9.4f, 8.5f);
+            handle.lineTo(13.0f, 8.5f);
+
+            juce::Path compressedBlock;
+            compressedBlock.addRoundedRectangle(8.8f, 9.1f, 1.8f, 6.2f, 0.45f);
+
+            g.setColour(juce::Colour(0xff5f7f99));
+            g.fillPath(base);
+            g.setColour(juce::Colour(0xff6d8ea8));
+            g.fillPath(fixedJaw);
+            g.setColour(juce::Colour(0xff7ba1bf));
+            g.fillPath(movingJaw);
+            g.setColour(juce::Colour(0xff3f89d6));
+            g.fillPath(screwBar);
+
+            g.setColour(juce::Colour(0xff61d091));
+            g.fillPath(compressedBlock);
+
+            g.setColour(juce::Colour(0x66ffffff));
+            g.fillRoundedRectangle(4.2f, 16.9f, 11.8f, 1.0f, 0.4f);
+
+            g.setColour(juce::Colour(0xff3b5a72));
+            g.strokePath(handle, juce::PathStrokeType(1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            g.setColour(juce::Colour(0xb02f4659));
+            g.strokePath(base, juce::PathStrokeType(0.75f));
+            g.strokePath(fixedJaw, juce::PathStrokeType(0.7f));
+            g.strokePath(movingJaw, juce::PathStrokeType(0.7f));
+            g.strokePath(screwBar, juce::PathStrokeType(0.65f));
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.20f)
+                                         : colour.withAlpha(0.10f);
+            g.setColour(tintOverlay);
+            g.strokePath(base, juce::PathStrokeType(0.55f));
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
             return drawable;
         }
 
         std::unique_ptr<juce::Drawable> createDeleteIcon(const juce::Colour colour)
         {
-            auto drawable = std::make_unique<juce::DrawablePath>();
-            juce::Path icon;
-            icon.addRectangle(6.0f, 8.0f, 12.0f, 12.0f);
-            icon.addRectangle(5.0f, 6.0f, 14.0f, 2.0f);
-            icon.addRectangle(9.0f, 4.0f, 6.0f, 2.0f);
-            icon.startNewSubPath(10.0f, 10.0f);
-            icon.lineTo(10.0f, 18.0f);
-            icon.startNewSubPath(14.0f, 10.0f);
-            icon.lineTo(14.0f, 18.0f);
-            drawable->setPath(icon);
-            drawable->setStrokeFill(colour);
-            drawable->setStrokeType(juce::PathStrokeType(1.8f));
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            juce::Path lid;
+            lid.addRoundedRectangle(5.0f, 6.0f, 14.0f, 2.4f, 0.8f);
+
+            juce::Path handle;
+            handle.addRoundedRectangle(9.0f, 4.0f, 6.0f, 1.8f, 0.7f);
+
+            juce::Path body;
+            body.addRoundedRectangle(6.4f, 8.4f, 11.2f, 11.2f, 1.7f);
+
+            g.setColour(juce::Colour(0x22000000));
+            g.fillRoundedRectangle(6.6f, 9.1f, 11.2f, 11.4f, 1.8f);
+
+            g.setColour(juce::Colour(0xffe15757));
+            g.fillPath(body);
+
+            g.setColour(juce::Colour(0xffcc4545));
+            g.fillPath(lid);
+
+            g.setColour(juce::Colour(0xfff06b6b));
+            g.fillPath(handle);
+
+            g.setColour(juce::Colour(0x55ffffff));
+            g.fillRoundedRectangle(7.3f, 9.2f, 2.0f, 9.2f, 0.8f);
+
+            g.setColour(juce::Colour(0x40ffffff));
+            g.fillRoundedRectangle(10.6f, 10.0f, 0.9f, 8.1f, 0.4f);
+            g.fillRoundedRectangle(12.6f, 10.0f, 0.9f, 8.1f, 0.4f);
+
+            g.setColour(juce::Colour(0xc0842f2f));
+            g.strokePath(body, juce::PathStrokeType(0.85f));
+            g.strokePath(lid, juce::PathStrokeType(0.85f));
+            g.strokePath(handle, juce::PathStrokeType(0.75f));
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.25f)
+                                         : colour.withAlpha(0.14f);
+            g.setColour(tintOverlay);
+            g.strokePath(body, juce::PathStrokeType(0.6f));
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
             return drawable;
         }
 
         std::unique_ptr<juce::Drawable> createExplorerIcon(const juce::Colour colour)
         {
-            auto drawable = std::make_unique<juce::DrawablePath>();
-            juce::Path icon;
-            icon.addRoundedRectangle(3.0f, 8.0f, 14.0f, 10.0f, 1.8f);
-            icon.addRoundedRectangle(4.0f, 5.0f, 7.0f, 3.0f, 1.2f);
-            icon.startNewSubPath(12.0f, 6.0f);
-            icon.lineTo(20.0f, 6.0f);
-            icon.lineTo(20.0f, 14.0f);
-            icon.startNewSubPath(15.0f, 11.0f);
-            icon.lineTo(20.0f, 6.0f);
-            icon.startNewSubPath(16.0f, 6.0f);
-            icon.lineTo(20.0f, 6.0f);
-            icon.lineTo(20.0f, 10.0f);
-            drawable->setPath(icon);
-            drawable->setStrokeFill(colour);
-            drawable->setStrokeType(juce::PathStrokeType(1.8f));
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            juce::Path folderBack;
+            folderBack.addRoundedRectangle(2.0f, 6.4f, 15.6f, 11.8f, 1.9f);
+
+            juce::Path folderTab;
+            folderTab.addRoundedRectangle(3.8f, 3.5f, 6.8f, 3.7f, 1.1f);
+
+            juce::Path folderFront;
+            folderFront.startNewSubPath(2.2f, 9.4f);
+            folderFront.lineTo(18.0f, 9.4f);
+            folderFront.lineTo(15.2f, 19.4f);
+            folderFront.lineTo(4.0f, 19.4f);
+            folderFront.closeSubPath();
+
+            g.setColour(juce::Colour(0x1a000000));
+            g.fillRoundedRectangle(2.3f, 6.9f, 15.6f, 12.5f, 2.0f);
+
+            g.setColour(juce::Colour(0xffd6a149));
+            g.fillPath(folderBack);
+            g.setColour(juce::Colour(0xfff2cc73));
+            g.fillPath(folderTab);
+            g.setColour(juce::Colour(0xffeebe56));
+            g.fillPath(folderFront);
+
+            juce::Path flapHighlight;
+            flapHighlight.startNewSubPath(3.1f, 10.5f);
+            flapHighlight.lineTo(17.2f, 10.5f);
+            flapHighlight.lineTo(16.8f, 11.9f);
+            flapHighlight.lineTo(2.8f, 11.9f);
+            flapHighlight.closeSubPath();
+            g.setColour(juce::Colour(0x55ffffff));
+            g.fillPath(flapHighlight);
+
+            juce::Path explorerWindow;
+            explorerWindow.addRoundedRectangle(14.0f, 5.0f, 7.6f, 7.6f, 1.2f);
+            g.setColour(juce::Colour(0xff4ea3ff));
+            g.fillPath(explorerWindow);
+
+            g.setColour(juce::Colour(0x55ffffff));
+            g.fillRoundedRectangle(14.4f, 5.5f, 6.8f, 2.0f, 0.8f);
+
+            juce::Path openArrow;
+            openArrow.startNewSubPath(15.5f, 10.6f);
+            openArrow.lineTo(20.0f, 6.1f);
+            openArrow.startNewSubPath(17.3f, 6.1f);
+            openArrow.lineTo(20.0f, 6.1f);
+            openArrow.lineTo(20.0f, 8.8f);
+            g.setColour(juce::Colours::white.withAlpha(0.95f));
+            g.strokePath(openArrow, juce::PathStrokeType(1.35f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            g.setColour(juce::Colour(0xc0476ea4));
+            g.strokePath(explorerWindow, juce::PathStrokeType(0.85f));
+            g.setColour(juce::Colour(0xc06b4a1f));
+            g.strokePath(folderBack, juce::PathStrokeType(0.85f));
+            g.strokePath(folderFront, juce::PathStrokeType(0.85f));
+            g.strokePath(folderTab, juce::PathStrokeType(0.8f));
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.24f)
+                                         : colour.withAlpha(0.14f);
+            g.setColour(tintOverlay);
+            g.strokePath(folderFront, juce::PathStrokeType(0.6f));
+
+            // Repaint the Explorer badge on top so its background remains fully opaque.
+            g.setColour(juce::Colour(0xff4ea3ff));
+            g.fillPath(explorerWindow);
+            g.setColour(juce::Colour(0x55ffffff));
+            g.fillRoundedRectangle(14.4f, 5.5f, 6.8f, 2.0f, 0.8f);
+            g.setColour(juce::Colours::white.withAlpha(0.95f));
+            g.strokePath(openArrow, juce::PathStrokeType(1.35f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour(juce::Colour(0xc0476ea4));
+            g.strokePath(explorerWindow, juce::PathStrokeType(0.85f));
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
             return drawable;
         }
 
         std::unique_ptr<juce::Drawable> createThemeIcon(const juce::Colour colour, bool showSun)
         {
-            auto drawable = std::make_unique<juce::DrawablePath>();
-            juce::Path icon;
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
 
             if (showSun)
             {
-                icon.addEllipse(8.0f, 8.0f, 8.0f, 8.0f);
-                icon.startNewSubPath(12.0f, 3.0f);
-                icon.lineTo(12.0f, 6.0f);
-                icon.startNewSubPath(12.0f, 18.0f);
-                icon.lineTo(12.0f, 21.0f);
-                icon.startNewSubPath(3.0f, 12.0f);
-                icon.lineTo(6.0f, 12.0f);
-                icon.startNewSubPath(18.0f, 12.0f);
-                icon.lineTo(21.0f, 12.0f);
-                icon.startNewSubPath(5.4f, 5.4f);
-                icon.lineTo(7.2f, 7.2f);
-                icon.startNewSubPath(16.8f, 16.8f);
-                icon.lineTo(18.6f, 18.6f);
-                icon.startNewSubPath(16.8f, 7.2f);
-                icon.lineTo(18.6f, 5.4f);
-                icon.startNewSubPath(5.4f, 18.6f);
-                icon.lineTo(7.2f, 16.8f);
+                juce::Path sunCore;
+                sunCore.addEllipse(7.2f, 7.2f, 9.6f, 9.6f);
+
+                juce::Path rays;
+                rays.startNewSubPath(12.0f, 2.8f);
+                rays.lineTo(12.0f, 5.5f);
+                rays.startNewSubPath(12.0f, 18.5f);
+                rays.lineTo(12.0f, 21.2f);
+                rays.startNewSubPath(2.8f, 12.0f);
+                rays.lineTo(5.5f, 12.0f);
+                rays.startNewSubPath(18.5f, 12.0f);
+                rays.lineTo(21.2f, 12.0f);
+                rays.startNewSubPath(5.3f, 5.3f);
+                rays.lineTo(7.2f, 7.2f);
+                rays.startNewSubPath(16.8f, 16.8f);
+                rays.lineTo(18.7f, 18.7f);
+                rays.startNewSubPath(16.8f, 7.2f);
+                rays.lineTo(18.7f, 5.3f);
+                rays.startNewSubPath(5.3f, 18.7f);
+                rays.lineTo(7.2f, 16.8f);
+
+                g.setColour(juce::Colour(0xffffc84e));
+                g.fillPath(sunCore);
+                g.setColour(juce::Colour(0x65ffffff));
+                g.fillEllipse(8.5f, 8.3f, 5.2f, 2.3f);
+
+                g.setColour(juce::Colour(0xffffaf35));
+                g.strokePath(rays, juce::PathStrokeType(1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                g.setColour(juce::Colour(0xb07d5a17));
+                g.strokePath(sunCore, juce::PathStrokeType(0.75f));
             }
             else
             {
-                icon.addCentredArc(12.0f, 12.0f, 7.0f, 7.0f, 0.0f,
-                                   juce::MathConstants<float>::pi * 0.2f,
-                                   juce::MathConstants<float>::pi * 1.8f,
-                                   true);
+                juce::Path moonOuter;
+                moonOuter.addEllipse(6.1f, 4.9f, 11.8f, 13.8f);
+
+                juce::Path moonInnerCut;
+                moonInnerCut.addEllipse(9.6f, 4.6f, 10.6f, 13.8f);
+
+                juce::Path moonCrescent;
+                moonCrescent.addPath(moonOuter);
+                moonCrescent.setUsingNonZeroWinding(false);
+                moonCrescent.addPath(moonInnerCut);
+
+                juce::Path sparkle;
+                sparkle.startNewSubPath(17.4f, 6.4f);
+                sparkle.lineTo(17.4f, 8.8f);
+                sparkle.startNewSubPath(16.2f, 7.6f);
+                sparkle.lineTo(18.6f, 7.6f);
+
+                g.setColour(juce::Colour(0xff9fc6ff));
+                g.fillPath(moonCrescent);
+                g.setColour(juce::Colour(0x55ffffff));
+                g.fillEllipse(8.2f, 8.1f, 3.9f, 2.0f);
+
+                g.setColour(juce::Colour(0xff6f9be1));
+                g.strokePath(moonOuter, juce::PathStrokeType(0.85f));
+                g.setColour(juce::Colour(0xffc8dcff));
+                g.strokePath(sparkle, juce::PathStrokeType(1.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             }
 
-            drawable->setPath(icon);
-            drawable->setStrokeFill(colour);
-            drawable->setStrokeType(juce::PathStrokeType(1.8f));
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.20f)
+                                         : colour.withAlpha(0.10f);
+            g.setColour(tintOverlay);
+            if (showSun)
+                g.drawEllipse(4.2f, 4.2f, 15.6f, 15.6f, 0.55f);
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
             return drawable;
         }
     }
@@ -189,6 +581,7 @@ namespace sw
     {
         setWantsKeyboardFocus(true);
         setMouseClickGrabsKeyboardFocus(true);
+        tooltipWindow.setLookAndFeel(&tooltipLookAndFeel);
 
         addAndMakeVisible(toolbar);
         addAndMakeVisible(addRootToolbarButton);
@@ -197,6 +590,7 @@ namespace sw
         addAndMakeVisible(rescanToolbarButton);
         addAndMakeVisible(cancelScanToolbarButton);
         addAndMakeVisible(resetLayoutToolbarButton);
+        addAndMakeVisible(vacuumDbToolbarButton);
         addAndMakeVisible(themeToolbarButton);
         addAndMakeVisible(browserPanel);
         addAndMakeVisible(leftRightSplitter);
@@ -413,6 +807,14 @@ namespace sw
             resetLayout();
         };
 
+        vacuumDbToolbarButton.setImages(createVacuumIcon(juce::Colours::white).release(),
+                                        createVacuumIcon(juce::Colours::lightgrey).release());
+        vacuumDbToolbarButton.setTooltip("Compress database (VACUUM)");
+        vacuumDbToolbarButton.onClick = [this]
+        {
+            handleVacuumDatabaseClicked();
+        };
+
         themeToolbarButton.onClick = [this]
         {
             applyThemeMode(!darkModeEnabled, true);
@@ -592,7 +994,10 @@ namespace sw
         setSize(1200, 800);
     }
 
-    MainComponent::~MainComponent() = default;
+    MainComponent::~MainComponent()
+    {
+        tooltipWindow.setLookAndFeel(nullptr);
+    }
 
     bool MainComponent::keyPressed(const juce::KeyPress &key)
     {
@@ -640,17 +1045,20 @@ namespace sw
                          juce::Justification::centredRight,
                          1);
 
-        g.drawFittedText("Pos: " + playbackPositionText,
-                         statusBarBounds.reduced(10, 0),
-                         juce::Justification::centred,
-                         1);
+        auto toolbarRightArea = toolbarBounds.reduced(12, 0).removeFromRight(240);
+        g.setColour(darkModeEnabled ? juce::Colour(0xffbfe4ff) : juce::Colour(0xff1f4f7a));
+        g.setFont(playbackTimeFont);
+        g.drawText(playbackPositionText,
+                   toolbarRightArea,
+                   juce::Justification::centredRight,
+                   false);
 
         if (toolbarFeedbackTicksRemaining > 0 && toolbarFeedbackText.isNotEmpty())
         {
             g.setColour(darkModeEnabled ? juce::Colours::lightgreen : juce::Colour(0xff1f7a43));
             g.setFont(12.0f);
             g.drawFittedText(toolbarFeedbackText,
-                             toolbarBounds.reduced(10, 0),
+                             toolbarBounds.reduced(10, 0).withTrimmedRight(250),
                              juce::Justification::centredRight,
                              1);
         }
@@ -704,6 +1112,105 @@ namespace sw
     {
         if (onDragEnded != nullptr)
             onDragEnded();
+    }
+
+    juce::Rectangle<int> MainComponent::TooltipLookAndFeel::getTooltipBounds(const juce::String &tipText,
+                                                                             juce::Point<int> screenPos,
+                                                                             juce::Rectangle<int> parentArea)
+    {
+        auto area = parentArea;
+        if (area.isEmpty())
+        {
+            const auto &displays = juce::Desktop::getInstance().getDisplays();
+
+            if (const auto *display = displays.getDisplayForPoint(screenPos))
+                area = display->userArea;
+            else if (const auto *primaryDisplay = displays.getPrimaryDisplay())
+                area = primaryDisplay->userArea;
+            else
+                area = juce::Rectangle<int>(0, 0, 1920, 1080);
+        }
+
+        const juce::Font font(juce::FontOptions(15.0f).withStyle("Bold"));
+        juce::StringArray lines;
+        lines.addLines(tipText);
+        if (lines.isEmpty())
+            lines.add(tipText);
+
+        int maxLineWidth = 0;
+        for (const auto &line : lines)
+        {
+            juce::GlyphArrangement glyphs;
+            glyphs.addLineOfText(font, line, 0.0f, 0.0f);
+            const int lineWidth = static_cast<int>(std::ceil(glyphs.getBoundingBox(0, glyphs.getNumGlyphs(), true).getWidth()));
+            maxLineWidth = juce::jmax(maxLineWidth, lineWidth);
+        }
+
+        constexpr int horizontalPadding = 14;
+        constexpr int verticalPadding = 10;
+        constexpr int lineGap = 2;
+
+        const int lineHeight = static_cast<int>(std::ceil(font.getHeight()));
+        const int lineCount = juce::jmax(1, lines.size());
+        const int desiredWidth = maxLineWidth + horizontalPadding * 2;
+        const int desiredHeight = (lineCount * lineHeight) + ((lineCount - 1) * lineGap) + verticalPadding * 2;
+
+        const int maxAllowedWidth = juce::jmax(200, area.getWidth() - 20);
+        const int finalWidth = juce::jlimit(200, maxAllowedWidth, desiredWidth);
+        const int finalHeight = juce::jlimit(32, area.getHeight(), desiredHeight);
+
+        juce::Rectangle<int> bounds(screenPos.x + 24, screenPos.y + 20, finalWidth, finalHeight);
+
+        if (bounds.getRight() > area.getRight())
+            bounds.setX(screenPos.x - finalWidth - 16);
+        if (bounds.getBottom() > area.getBottom())
+            bounds.setY(screenPos.y - finalHeight - 16);
+
+        return bounds.constrainedWithin(area.reduced(2));
+    }
+
+    void MainComponent::TooltipLookAndFeel::drawTooltip(juce::Graphics &g,
+                                                        const juce::String &text,
+                                                        int width,
+                                                        int height)
+    {
+        const auto bounds = juce::Rectangle<float>(0.5f, 0.5f, static_cast<float>(width) - 1.0f, static_cast<float>(height) - 1.0f);
+        const auto background = darkModeEnabled ? juce::Colour(0xff1f2933) : juce::Colour(0xfff7fbff);
+        const auto border = darkModeEnabled ? juce::Colour(0xff4b6378) : juce::Colour(0xffb7c8da);
+        const auto textColour = darkModeEnabled ? juce::Colour(0xffe9f2fb) : juce::Colour(0xff22313f);
+
+        g.setColour(background);
+        g.fillRoundedRectangle(bounds, 7.0f);
+
+        g.setColour(border);
+        g.drawRoundedRectangle(bounds, 7.0f, 1.2f);
+
+        juce::StringArray lines;
+        lines.addLines(text);
+        if (lines.isEmpty())
+            lines.add(text);
+
+        const juce::Font font(juce::FontOptions(15.0f).withStyle("Bold"));
+        g.setFont(font);
+        g.setColour(textColour);
+
+        constexpr int horizontalPadding = 14;
+        constexpr int verticalPadding = 10;
+        constexpr int lineGap = 2;
+
+        int y = verticalPadding;
+        const int lineHeight = static_cast<int>(std::ceil(font.getHeight()));
+        for (const auto &line : lines)
+        {
+            g.drawText(line,
+                       horizontalPadding,
+                       y,
+                       width - horizontalPadding * 2,
+                       lineHeight,
+                       juce::Justification::centredLeft,
+                       false);
+            y += lineHeight + lineGap;
+        }
     }
 
     void MainComponent::refreshRoots()
@@ -1026,11 +1533,15 @@ namespace sw
                                           createCancelIcon(hoverIconColour).release());
         resetLayoutToolbarButton.setImages(createResetLayoutIcon(normalIconColour).release(),
                                            createResetLayoutIcon(hoverIconColour).release());
+        vacuumDbToolbarButton.setImages(createVacuumIcon(normalIconColour).release(),
+                                        createVacuumIcon(hoverIconColour).release());
 
         themeToolbarButton.setImages(
-            createThemeIcon(normalIconColour, !darkModeEnabled).release(),
-            createThemeIcon(hoverIconColour, !darkModeEnabled).release());
+            createThemeIcon(normalIconColour, darkModeEnabled).release(),
+            createThemeIcon(hoverIconColour, darkModeEnabled).release());
         themeToolbarButton.setTooltip(darkModeEnabled ? "Switch to Light Mode" : "Switch to Dark Mode");
+        tooltipLookAndFeel.setDarkMode(darkModeEnabled);
+        tooltipWindow.repaint();
 
         if (persist)
             persistThemeMode(darkModeEnabled);
@@ -1169,6 +1680,7 @@ namespace sw
     {
         persistLastSelectedFile(file);
         currentSelectedFile = file;
+        const uint64_t requestId = previewLoadRequestCounter.fetch_add(1, std::memory_order_acq_rel) + 1;
 
         const bool hasLoopMetadata = hasEmbeddedLoopMetadata(file);
         const bool hasValidEmbeddedLoopRegion = hasLoopMetadata && file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
@@ -1225,9 +1737,15 @@ namespace sw
         juce::Component::SafePointer<MainComponent> safeThis(this);
 
         jobQueue.enqueue(Job{
-            [safeThis, absolutePath, playWhenReady](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
+            [safeThis, absolutePath, playWhenReady, requestId](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
             {
                 if (cancelGeneration.load(std::memory_order_relaxed) != jobGeneration)
+                    return;
+
+                if (safeThis == nullptr)
+                    return;
+
+                if (safeThis->previewLoadRequestCounter.load(std::memory_order_acquire) != requestId)
                     return;
 
                 juce::AudioFormatManager formatManager;
@@ -1284,9 +1802,12 @@ namespace sw
 
                 const double sampleRate = reader->sampleRate;
 
-                juce::MessageManager::callAsync([safeThis, interleaved, peaks, numChannels, numSamples, sampleRate, playWhenReady, absolutePath]
+                juce::MessageManager::callAsync([safeThis, interleaved, peaks, numChannels, numSamples, sampleRate, playWhenReady, absolutePath, requestId]
                                                 {
                     if (safeThis == nullptr)
+                        return;
+
+                    if (safeThis->previewLoadRequestCounter.load(std::memory_order_acquire) != requestId)
                         return;
 
                     auto previewBuffer = std::make_unique<juce::AudioBuffer<float>>(numChannels, numSamples);
@@ -1381,11 +1902,11 @@ namespace sw
             }
         }
 
-        const juce::String nextPlaybackPositionText = formatClockHmsMs(durationSeconds * static_cast<double>(progress)) + " / " + formatClockHmsMs(durationSeconds);
+        const juce::String nextPlaybackPositionText = formatClockHmsMs(durationSeconds * static_cast<double>(progress));
         if (playbackPositionText != nextPlaybackPositionText)
         {
             playbackPositionText = nextPlaybackPositionText;
-            repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
+            repaint(0, 0, getWidth(), kToolbarHeight);
         }
 
         if (previewPanel.isAutoPlayEnabled() && audioEngine.consumePreviewFinishedFlag())
@@ -1641,6 +2162,24 @@ namespace sw
         rootFolder.revealToUser();
     }
 
+    void MainComponent::handleVacuumDatabaseClicked()
+    {
+        if (scanInProgress)
+            return;
+
+        if (!catalogDb.vacuum())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                   "Database Compression Failed",
+                                                   "Unable to compact the database.");
+            return;
+        }
+
+        toolbarFeedbackText = "Database compressed";
+        toolbarFeedbackTicksRemaining = 60;
+        repaint(0, 0, getWidth(), kToolbarHeight);
+    }
+
     void MainComponent::updateToolbarScanState(bool inProgress)
     {
         addRootToolbarButton.setEnabled(!inProgress);
@@ -1648,6 +2187,7 @@ namespace sw
         deleteRootToolbarButton.setEnabled(!inProgress && selectedRootFilterId.has_value());
         rescanToolbarButton.setEnabled(!inProgress && selectedRootFilterId.has_value());
         cancelScanToolbarButton.setEnabled(inProgress);
+        vacuumDbToolbarButton.setEnabled(!inProgress && catalogDb.isOpen());
     }
 
     void MainComponent::resetLayout()
@@ -1667,22 +2207,26 @@ namespace sw
     {
         auto area = getLocalBounds();
 
-        auto toolbarArea = area.removeFromTop(kToolbarHeight).reduced(6, 4);
-        toolbar.setBounds(toolbarArea);
+        auto toolbarStrip = area.removeFromTop(kToolbarHeight);
+        toolbar.setBounds(toolbarStrip);
 
         area.removeFromBottom(kStatusBarHeight);
 
-        constexpr int iconButtonSize = 28;
-        constexpr int toolbarGap = 6;
+        constexpr int iconButtonSize = 42;
+        constexpr int toolbarGap = 4;
+
+        auto toolbarArea = toolbarStrip.reduced(6, (kToolbarHeight - iconButtonSize) / 2);
         addRootToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         openSourceInExplorerToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
-        deleteRootToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
-        toolbarArea.removeFromLeft(toolbarGap);
         rescanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         cancelScanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        deleteRootToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        vacuumDbToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         resetLayoutToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);

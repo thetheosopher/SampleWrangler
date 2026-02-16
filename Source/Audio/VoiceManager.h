@@ -62,11 +62,9 @@ namespace sw
         void setPlaybackProgressNormalized(double normalizedProgress);
 
     private:
-        // Sample data — swapped atomically from message thread, read on audio thread.
-        // Using a simple pointer swap; real implementation should use a lock-free
-        // exchange or JUCE's AbstractFifo for safe hand-off.
-        std::atomic<juce::AudioBuffer<float> *> sampleBuffer{nullptr};
-        std::unique_ptr<juce::AudioBuffer<float>> ownedBuffer; // message-thread ownership
+        // Sample data — shared ownership avoids use-after-free when swapping buffers
+        // while the audio thread is still rendering the previous block.
+        std::atomic<std::shared_ptr<juce::AudioBuffer<float>>> sampleBuffer;
         double bufferSampleRate = 44100.0;
 
         std::atomic<bool> playing{false};

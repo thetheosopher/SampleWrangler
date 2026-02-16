@@ -89,6 +89,15 @@
             "name": "vs2022-release-nohq",
             "configurePreset": "vs2022-release-nohq",
             "configuration": "Release"
+        },
+        {
+            "name": "vs2022-release-package",
+            "displayName": "VS 2022 Release Package",
+            "configurePreset": "vs2022-release",
+            "configuration": "Release",
+            "targets": [
+                "PACKAGE"
+            ]
         }
     ]
 }

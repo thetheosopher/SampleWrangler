@@ -743,4 +743,12 @@ namespace sw
         return e;
     }
 
+    bool CatalogDb::vacuum()
+    {
+        if (db == nullptr)
+            return false;
+
+        return sqlite3_exec(db, "VACUUM;", nullptr, nullptr, nullptr) == SQLITE_OK;
+    }
+
 } // namespace sw

@@ -1,3 +1,6 @@
 [submodule "JUCE"]
 	path = JUCE
 	url = https://github.com/juce-framework/JUCE.git
+[submodule "third_party/rubberband"]
+	path = third_party/rubberband
+	url = https://github.com/breakfastquay/rubberband.git

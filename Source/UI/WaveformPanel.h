@@ -19,7 +19,7 @@ namespace sw
         void mouseDrag(const juce::MouseEvent &event) override;
 
         /// Load waveform peaks for display. Called from a background thread result.
-        void setPeaks(const std::vector<float> &peaks);
+        void setPeaks(const std::vector<std::vector<float>> &peaksByChannel);
         void setPlayheadNormalized(float playheadPosition);
         void setLoopRegionNormalized(float loopStart, float loopEnd);
         void setDarkMode(bool enabled);
@@ -29,7 +29,7 @@ namespace sw
     private:
         float normalizedPositionFromX(int x) const;
 
-        std::vector<float> currentPeaks;
+        std::vector<std::vector<float>> currentPeaksByChannel;
         float playheadNormalized = -1.0f;
         float loopStartNormalized = -1.0f;
         float loopEndNormalized = -1.0f;

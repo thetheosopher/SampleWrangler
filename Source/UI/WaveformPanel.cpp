@@ -10,7 +10,7 @@ namespace sw
     {
         g.fillAll(darkModeEnabled ? juce::Colour(0xff1a1a2e) : juce::Colour(0xffedf2fb));
 
-        if (currentPeaks.empty())
+        if (currentPeaksByChannel.empty() || currentPeaksByChannel.front().empty())
         {
             g.setColour(darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff6a6a6a));
             g.setFont(12.0f);
@@ -18,21 +18,41 @@ namespace sw
             return;
         }
 
-        // Draw simple peak waveform
         const auto bounds = getLocalBounds().toFloat().reduced(2.0f);
-        const float midY = bounds.getCentreY();
-        const float halfH = bounds.getHeight() * 0.5f;
+        const int numChannels = static_cast<int>(currentPeaksByChannel.size());
+        const int numPeaks = static_cast<int>(currentPeaksByChannel.front().size());
+        if (numChannels <= 0 || numPeaks <= 0)
+            return;
+
+        const float laneHeight = bounds.getHeight() / static_cast<float>(numChannels);
+        const float step = bounds.getWidth() / static_cast<float>(numPeaks);
 
         g.setColour(darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff2b78c6));
 
-        const int numPeaks = static_cast<int>(currentPeaks.size());
-        const float step = bounds.getWidth() / static_cast<float>(numPeaks);
-
-        for (int i = 0; i < numPeaks; ++i)
+        for (int ch = 0; ch < numChannels; ++ch)
         {
-            float x = bounds.getX() + static_cast<float>(i) * step;
-            float h = currentPeaks[static_cast<size_t>(i)] * halfH;
-            g.drawVerticalLine(static_cast<int>(x), midY - h, midY + h);
+            const auto &channelPeaks = currentPeaksByChannel[static_cast<size_t>(ch)];
+            if (channelPeaks.empty())
+                continue;
+
+            const float laneTop = bounds.getY() + static_cast<float>(ch) * laneHeight;
+            const float laneBottom = laneTop + laneHeight;
+            const float laneMid = laneTop + (laneHeight * 0.5f);
+            const float laneHalfAmplitude = juce::jmax(1.0f, (laneHeight * 0.5f) - 1.0f);
+
+            for (int i = 0; i < numPeaks && i < static_cast<int>(channelPeaks.size()); ++i)
+            {
+                const float x = bounds.getX() + static_cast<float>(i) * step;
+                const float h = channelPeaks[static_cast<size_t>(i)] * laneHalfAmplitude;
+                g.drawVerticalLine(static_cast<int>(x), laneMid - h, laneMid + h);
+            }
+
+            if (ch < numChannels - 1)
+            {
+                g.setColour((darkModeEnabled ? juce::Colours::white : juce::Colour(0xff505050)).withAlpha(0.12f));
+                g.drawHorizontalLine(static_cast<int>(laneBottom), bounds.getX(), bounds.getRight());
+                g.setColour(darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff2b78c6));
+            }
         }
 
         if (loopStartNormalized >= 0.0f && loopEndNormalized > loopStartNormalized)
@@ -57,7 +77,7 @@ namespace sw
 
     void WaveformPanel::mouseDown(const juce::MouseEvent &event)
     {
-        if (currentPeaks.empty())
+        if (currentPeaksByChannel.empty() || currentPeaksByChannel.front().empty())
             return;
 
         const float normalized = normalizedPositionFromX(event.x);
@@ -69,7 +89,7 @@ namespace sw
 
     void WaveformPanel::mouseDrag(const juce::MouseEvent &event)
     {
-        if (currentPeaks.empty())
+        if (currentPeaksByChannel.empty() || currentPeaksByChannel.front().empty())
             return;
 
         const float normalized = normalizedPositionFromX(event.x);
@@ -79,9 +99,9 @@ namespace sw
             onScrubRequested(normalized);
     }
 
-    void WaveformPanel::setPeaks(const std::vector<float> &peaks)
+    void WaveformPanel::setPeaks(const std::vector<std::vector<float>> &peaksByChannel)
     {
-        currentPeaks = peaks;
+        currentPeaksByChannel = peaksByChannel;
         repaint();
     }
 

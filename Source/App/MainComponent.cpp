@@ -907,23 +907,25 @@ namespace sw
                 const int peakCount = std::max(1, std::min(targetPeakCount, numSamples));
                 const int samplesPerPeak = std::max(1, numSamples / peakCount);
 
-                auto peaks = std::make_shared<std::vector<float>>();
-                peaks->resize(static_cast<size_t>(peakCount), 0.0f);
+                auto peaks = std::make_shared<std::vector<std::vector<float>>>();
+                peaks->resize(static_cast<size_t>(numChannels));
+                for (auto &channelPeaks : *peaks)
+                    channelPeaks.resize(static_cast<size_t>(peakCount), 0.0f);
 
                 for (int p = 0; p < peakCount; ++p)
                 {
                     const int start = p * samplesPerPeak;
                     const int end = std::min(numSamples, start + samplesPerPeak);
 
-                    float maxAbs = 0.0f;
                     for (int ch = 0; ch < numChannels; ++ch)
                     {
+                        float maxAbs = 0.0f;
                         const auto *channelData = tempBuffer.getReadPointer(ch);
                         for (int s = start; s < end; ++s)
                             maxAbs = std::max(maxAbs, std::abs(channelData[s]));
-                    }
 
-                    (*peaks)[static_cast<size_t>(p)] = maxAbs;
+                        (*peaks)[static_cast<size_t>(ch)][static_cast<size_t>(p)] = maxAbs;
+                    }
                 }
 
                 auto interleaved = std::make_shared<std::vector<float>>();

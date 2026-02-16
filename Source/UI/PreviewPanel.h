@@ -29,18 +29,22 @@ namespace sw
 
         std::function<void()> onPlayRequested;
         std::function<void()> onStopRequested;
+        std::function<void(bool enabled)> onAutoPlaybackChanged;
         std::function<void(bool enabled)> onLoopPlaybackChanged;
         std::function<void(double semitones)> onPitchChanged;
         std::function<void(const juce::String &typeName)> onApplyOutputDeviceTypeRequested;
         std::function<void(const juce::String &deviceName)> onApplyOutputDeviceRequested;
         std::function<void(const juce::String &deviceIdentifier)> onMidiInputDeviceSelected;
 
+        void setAutoPlayEnabled(bool enabled);
+        bool isAutoPlayEnabled() const noexcept;
         void setLoopEnabled(bool enabled);
         bool isLoopEnabled() const noexcept;
 
     private:
         juce::TextButton playButton{"Play"};
         juce::TextButton stopButton{"Stop"};
+        juce::ToggleButton autoPlayButton{"Auto"};
         juce::ToggleButton loopButton{"Loop"};
         juce::Slider pitchSlider;
         juce::ComboBox outputDeviceTypeCombo;

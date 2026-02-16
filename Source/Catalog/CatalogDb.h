@@ -31,7 +31,7 @@ namespace sw
 
         bool isOpen() const noexcept { return db != nullptr; }
 
-        // ----- Roots -----
+        // ----- Sources -----
         bool addRoot(const std::string &path, const std::string &label);
         bool removeRoot(int64_t rootId);
         std::vector<RootRecord> allRoots();

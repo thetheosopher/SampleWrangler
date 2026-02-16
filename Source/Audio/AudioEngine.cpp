@@ -182,6 +182,11 @@ namespace sw
         return voiceManager.isPlaying();
     }
 
+    bool AudioEngine::consumePreviewFinishedFlag() noexcept
+    {
+        return voiceManager.consumePlaybackFinishedFlag();
+    }
+
     double AudioEngine::getPreviewPlaybackProgressNormalized() const noexcept
     {
         return voiceManager.getPlaybackProgressNormalized();

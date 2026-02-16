@@ -8,7 +8,7 @@
 namespace sw
 {
 
-    /// Scans root directories, discovers audio files, and upserts them into the catalog.
+    /// Scans source directories, discovers audio files, and upserts them into the catalog.
     /// Runs on the Pipeline JobQueue (background threads).
     class Scanner
     {
@@ -20,7 +20,7 @@ namespace sw
         Scanner(CatalogDb &db, JobQueue &queue);
         ~Scanner() = default;
 
-        /// Enqueue a full scan of the given root.
+        /// Enqueue a full scan of the given source.
         void scanRoot(int64_t rootId,
                       const std::string &rootPath,
                       ProgressCallback onProgress = {},

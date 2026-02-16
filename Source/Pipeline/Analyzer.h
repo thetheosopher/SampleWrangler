@@ -18,7 +18,7 @@ namespace sw
         /// Enqueue analysis for a single file by its DB id.
         void analyzeFile(int64_t fileId);
 
-        /// Enqueue analysis for all un-analyzed files in a root.
+        /// Enqueue analysis for all un-analyzed files in a source.
         void analyzeRoot(int64_t rootId);
 
     private:

@@ -42,6 +42,7 @@ namespace sw
 
         /// True while the current buffer is actively playing.
         bool isPlaying() const noexcept;
+        bool consumePlaybackFinishedFlag() noexcept;
 
         /// Normalized playback position in [0..1] for the loaded sample.
         double getPlaybackProgressNormalized() const noexcept;
@@ -56,6 +57,7 @@ namespace sw
         double bufferSampleRate = 44100.0;
 
         std::atomic<bool> playing{false};
+        std::atomic<bool> playbackFinished{false};
         std::atomic<bool> loopEnabled{false};
         std::atomic<int64_t> loopStartSample{-1};
         std::atomic<int64_t> loopEndSample{-1};

@@ -10,7 +10,7 @@
 namespace sw
 {
 
-    /// Left panel: root folder management, directory tree, and file browser.
+    /// Left panel: source folder management, directory tree, and file browser.
     class BrowserPanel final : public juce::Component,
                                public juce::SettableTooltipClient
     {
@@ -26,8 +26,6 @@ namespace sw
         bool keyPressed(const juce::KeyPress &key) override;
 
         void setRoots(std::vector<RootRecord> roots);
-        void setScanStatus(const juce::String &statusText);
-        void setScanInProgress(bool inProgress);
         void setSelectedRootId(std::optional<int64_t> rootId);
         void setDarkMode(bool enabled);
 
@@ -38,7 +36,6 @@ namespace sw
         std::optional<int> rootRowIndexForY(int y) const;
 
         std::vector<RootRecord> roots;
-        juce::String scanStatus{"Idle"};
         std::optional<int64_t> selectedRootId;
         bool darkModeEnabled = true;
 

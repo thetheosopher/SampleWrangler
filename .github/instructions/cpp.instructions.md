@@ -26,7 +26,7 @@ applyTo: "**/*.h,**/*.hpp,**/*.cpp,**/*.cxx"
 
 ## Windows Integration
 - Provide “Reveal in Explorer” and drag-drop out.
-- Network roots may be offline; scanning must time out and not block UI.
+- Network sources may be offline; scanning must time out and not block UI.
 
 ## Code Layout Conventions
 - Prefer `namespace sw` (SampleWrangler) for non-JUCE code.

@@ -75,6 +75,8 @@ namespace sw
             if (std::memcmp(riffHeader.data(), "RIFF", 4) != 0 || std::memcmp(riffHeader.data() + 8, "WAVE", 4) != 0)
                 return;
 
+            std::vector<int64_t> cueSampleOffsets;
+
             while (in)
             {
                 std::array<char, 8> chunkHeader{};
@@ -117,7 +119,13 @@ namespace sw
                     if (const auto beats = readU32LE(chunkData.data(), chunkData.size(), 8))
                         rec.acidBeats = static_cast<int>(*beats);
 
-                    if (const auto tempo = readF32LE(chunkData.data(), chunkData.size(), 12))
+                    std::optional<float> tempo;
+                    if (chunkData.size() >= 16)
+                        tempo = readF32LE(chunkData.data(), chunkData.size(), 12);
+                    if ((!tempo.has_value() || *tempo <= 0.0f || *tempo > 400.0f) && chunkData.size() >= 24)
+                        tempo = readF32LE(chunkData.data(), chunkData.size(), 20);
+
+                    if (tempo.has_value())
                     {
                         const double bpm = static_cast<double>(*tempo);
                         if (bpm > 0.0 && bpm < 400.0)
@@ -142,6 +150,34 @@ namespace sw
                         rec.loopEndSample = static_cast<int64_t>(*loopEnd);
                     }
                 }
+                else if (std::memcmp(chunkId, "cue ", 4) == 0)
+                {
+                    const auto numCuePoints = readU32LE(chunkData.data(), chunkData.size(), 0);
+                    if (!numCuePoints.has_value() || *numCuePoints == 0)
+                        continue;
+
+                    constexpr size_t cueHeaderSize = 4;
+                    constexpr size_t cueEntrySize = 24;
+                    const size_t availableEntries = (chunkData.size() > cueHeaderSize)
+                                                        ? ((chunkData.size() - cueHeaderSize) / cueEntrySize)
+                                                        : 0;
+                    const size_t entriesToRead = std::min<size_t>(*numCuePoints, availableEntries);
+
+                    for (size_t i = 0; i < entriesToRead; ++i)
+                    {
+                        const size_t entryOffset = cueHeaderSize + i * cueEntrySize;
+                        const auto sampleOffset = readU32LE(chunkData.data(), chunkData.size(), entryOffset + 20);
+                        if (sampleOffset.has_value())
+                            cueSampleOffsets.push_back(static_cast<int64_t>(*sampleOffset));
+                    }
+                }
+            }
+
+            if ((!rec.loopStartSample.has_value() || !rec.loopEndSample.has_value()) && cueSampleOffsets.size() >= 2)
+            {
+                std::sort(cueSampleOffsets.begin(), cueSampleOffsets.end());
+                rec.loopStartSample = cueSampleOffsets.front();
+                rec.loopEndSample = cueSampleOffsets.back();
             }
 
             if (rec.loopType.has_value() && *rec.loopType == "acidized" &&
@@ -223,7 +259,7 @@ namespace sw
                     if (!playable && !indexOnly)
                         continue;
 
-                    // Build relative path from root
+                    // Build relative path from source
                     auto relPath = fs::relative(path, rootPath, ec).generic_string();
                     if (ec)
                         continue;

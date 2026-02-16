@@ -22,6 +22,10 @@ namespace sw
         void setResults(std::vector<FileRecord> newResults);
         void selectFirstRowIfNoneSelected();
         bool selectFile(int64_t rootId, const std::string &relativePath);
+        bool selectRow(int row);
+        int getSelectedRow() const noexcept;
+        int getResultCount() const noexcept;
+        const FileRecord *getResultAt(int row) const noexcept;
         void setDarkMode(bool enabled);
 
         std::function<void(const std::string &query)> onSearchQueryChanged;

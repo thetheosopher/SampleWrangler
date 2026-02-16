@@ -8,7 +8,7 @@
 namespace sw
 {
 
-    /// Represents a configured root folder.
+    /// Represents a configured source folder.
     struct RootRecord
     {
         int64_t id = 0;
@@ -22,7 +22,7 @@ namespace sw
     {
         int64_t id = 0;
         int64_t rootId = 0;
-        std::string relativePath; // path relative to root
+        std::string relativePath; // path relative to source
         std::string filename;     // leaf name
         std::string extension;    // lowercase, no dot
         int64_t sizeBytes = 0;

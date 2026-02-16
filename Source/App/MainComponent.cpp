@@ -16,6 +16,7 @@ namespace sw
     namespace
     {
         constexpr int kToolbarHeight = 36;
+        constexpr int kStatusBarHeight = 24;
         constexpr int kSplitterThickness = 5;
         constexpr int kMinLeftPanelWidth = 180;
         constexpr int kMinRightPanelWidth = 320;
@@ -184,6 +185,7 @@ namespace sw
         {
             auto content = getLocalBounds();
             content.removeFromTop(kToolbarHeight);
+            content.removeFromBottom(kStatusBarHeight);
 
             const int totalWidth = content.getWidth() - kSplitterThickness;
             if (totalWidth <= (kMinLeftPanelWidth + kMinRightPanelWidth))
@@ -205,6 +207,7 @@ namespace sw
         {
             auto content = getLocalBounds();
             content.removeFromTop(kToolbarHeight);
+            content.removeFromBottom(kStatusBarHeight);
 
             const int totalWidth = content.getWidth() - kSplitterThickness;
             if (totalWidth <= (kMinLeftPanelWidth + kMinRightPanelWidth))
@@ -236,6 +239,7 @@ namespace sw
         {
             auto content = getLocalBounds();
             content.removeFromTop(kToolbarHeight);
+            content.removeFromBottom(kStatusBarHeight);
 
             const int totalWidth = content.getWidth() - kSplitterThickness;
             if (totalWidth <= (kMinLeftPanelWidth + kMinRightPanelWidth))
@@ -287,7 +291,7 @@ namespace sw
 
         addRootToolbarButton.setImages(createFolderIcon(juce::Colours::white).release(),
                                        createFolderIcon(juce::Colours::lightgrey).release());
-        addRootToolbarButton.setTooltip("Add a root folder to the library");
+        addRootToolbarButton.setTooltip("Add a source folder to the library");
         addRootToolbarButton.onClick = [this]
         {
             handleAddRootClicked();
@@ -311,10 +315,10 @@ namespace sw
 
         rescanToolbarButton.setImages(createRescanIcon(juce::Colours::white).release(),
                                       createRescanIcon(juce::Colours::lightgrey).release());
-        rescanToolbarButton.setTooltip("Rescan all configured roots");
+        rescanToolbarButton.setTooltip("Rescan selected source");
         rescanToolbarButton.onClick = [this]
         {
-            handleRescanAllClicked();
+            handleRescanSelectedClicked();
         };
 
         cancelScanToolbarButton.setImages(createCancelIcon(juce::Colours::white).release(),
@@ -365,7 +369,7 @@ namespace sw
 
         resultsPanel.onFileSelected = [this](const FileRecord &file)
         {
-            handleFileSelected(file, false, false);
+            handleFileSelected(file, previewPanel.isAutoPlayEnabled(), false);
         };
 
         resultsPanel.onFileActivated = [this](const FileRecord &file)
@@ -393,9 +397,15 @@ namespace sw
 
         previewPanel.onLoopPlaybackChanged = [this](bool enabled)
         {
-            audioEngine.setLoopEnabled(enabled);
             persistPreviewLoopEnabled(enabled);
-            updateWaveformLoopOverlay();
+            applyEffectiveLoopPlaybackMode();
+        };
+
+        previewPanel.onAutoPlaybackChanged = [this](bool enabled)
+        {
+            persistPreviewAutoPlayEnabled(enabled);
+            applyEffectiveLoopPlaybackMode();
+            repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
         };
 
         previewPanel.onPitchChanged = [this](double semitones)
@@ -461,7 +471,6 @@ namespace sw
         refreshResults();
         restoreLastSelection();
         restoreScanSummaryStatus();
-        browserPanel.setScanInProgress(false);
         updateToolbarScanState(false);
         startTimerHz(30);
 
@@ -472,9 +481,26 @@ namespace sw
 
     void MainComponent::paint(juce::Graphics &g)
     {
-        auto toolbarBounds = getLocalBounds().removeFromTop(kToolbarHeight);
+        auto contentBounds = getLocalBounds();
+        auto toolbarBounds = contentBounds.removeFromTop(kToolbarHeight);
+        auto statusBarBounds = contentBounds.removeFromBottom(kStatusBarHeight);
         g.setColour(darkModeEnabled ? juce::Colour(0xff272c33) : juce::Colour(0xffe8eaee));
         g.fillRect(toolbarBounds);
+
+        g.setColour(darkModeEnabled ? juce::Colour(0xff252a30) : juce::Colour(0xffe6e8ec));
+        g.fillRect(statusBarBounds);
+
+        g.setColour(darkModeEnabled ? juce::Colours::lightgreen : juce::Colour(0xff1f7a43));
+        g.setFont(11.0f);
+        g.drawFittedText("Scan: " + scanStatusText,
+                         statusBarBounds.reduced(10, 0),
+                         juce::Justification::centredLeft,
+                         1);
+
+        g.drawFittedText("Auto: " + juce::String(previewPanel.isAutoPlayEnabled() ? "On" : "Off"),
+                         statusBarBounds.reduced(10, 0),
+                         juce::Justification::centredRight,
+                         1);
 
         if (toolbarFeedbackTicksRemaining > 0 && toolbarFeedbackText.isNotEmpty())
         {
@@ -488,6 +514,7 @@ namespace sw
 
         g.setColour(darkModeEnabled ? juce::Colours::darkgrey.withAlpha(0.9f) : juce::Colour(0xffbcbcbc));
         g.drawHorizontalLine(toolbarBounds.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
+        g.drawHorizontalLine(statusBarBounds.getY(), 0.0f, static_cast<float>(getWidth()));
     }
 
     MainComponent::SplitterBar::SplitterBar(Orientation orientationIn)
@@ -498,9 +525,19 @@ namespace sw
                            : juce::MouseCursor::UpDownResizeCursor);
     }
 
+    void MainComponent::SplitterBar::setDarkMode(bool enabled)
+    {
+        if (darkModeEnabled == enabled)
+            return;
+
+        darkModeEnabled = enabled;
+        repaint();
+    }
+
     void MainComponent::SplitterBar::paint(juce::Graphics &g)
     {
-        g.fillAll(juce::Colours::darkgrey.withAlpha(0.75f));
+        g.fillAll(darkModeEnabled ? juce::Colours::darkgrey.withAlpha(0.75f)
+                                  : juce::Colour(0xffd5d9df));
     }
 
     void MainComponent::SplitterBar::mouseDown(const juce::MouseEvent &event)
@@ -609,6 +646,10 @@ namespace sw
 
             applyMidiInputSelection(selectedMidiInputIdentifier, true);
         }
+        else if (midiRouter.getActiveDeviceIdentifier() != selectedMidiInputIdentifier)
+        {
+            applyMidiInputSelection(selectedMidiInputIdentifier, false);
+        }
 
         previewPanel.setAvailableMidiInputDevices(devices, selectedMidiInputIdentifier);
     }
@@ -678,9 +719,13 @@ namespace sw
         if (const auto savedLoop = catalogDb.getAppSetting("preview.loopEnabled"))
             loopEnabled = (*savedLoop == "1" || *savedLoop == "true" || *savedLoop == "True");
 
+        bool autoPlayEnabled = false;
+        if (const auto savedAuto = catalogDb.getAppSetting("preview.autoPlayEnabled"))
+            autoPlayEnabled = (*savedAuto == "1" || *savedAuto == "true" || *savedAuto == "True");
+
+        previewPanel.setAutoPlayEnabled(autoPlayEnabled);
         previewPanel.setLoopEnabled(loopEnabled);
-        audioEngine.setLoopEnabled(loopEnabled);
-        updateWaveformLoopOverlay();
+        applyEffectiveLoopPlaybackMode();
     }
 
     void MainComponent::restoreMidiInputSettings()
@@ -700,6 +745,11 @@ namespace sw
         catalogDb.setAppSetting("preview.pitchSemitones", juce::String(semitones).toStdString());
     }
 
+    void MainComponent::persistPreviewAutoPlayEnabled(bool enabled)
+    {
+        catalogDb.setAppSetting("preview.autoPlayEnabled", enabled ? "1" : "0");
+    }
+
     void MainComponent::persistPreviewLoopEnabled(bool enabled)
     {
         catalogDb.setAppSetting("preview.loopEnabled", enabled ? "1" : "0");
@@ -714,14 +764,33 @@ namespace sw
     {
         darkModeEnabled = darkMode;
 
+        const auto normalIconColour = darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020);
+        const auto hoverIconColour = darkModeEnabled ? juce::Colours::lightgrey : juce::Colour(0xff4a4a4a);
+
         browserPanel.setDarkMode(darkModeEnabled);
         resultsPanel.setDarkMode(darkModeEnabled);
         previewPanel.setDarkMode(darkModeEnabled);
         waveformPanel.setDarkMode(darkModeEnabled);
+        leftRightSplitter.setDarkMode(darkModeEnabled);
+        resultsBottomSplitter.setDarkMode(darkModeEnabled);
+        previewWaveformSplitter.setDarkMode(darkModeEnabled);
+
+        addRootToolbarButton.setImages(createFolderIcon(normalIconColour).release(),
+                                       createFolderIcon(hoverIconColour).release());
+        openSourceInExplorerToolbarButton.setImages(createExplorerIcon(normalIconColour).release(),
+                                                    createExplorerIcon(hoverIconColour).release());
+        deleteRootToolbarButton.setImages(createDeleteIcon(normalIconColour).release(),
+                                          createDeleteIcon(hoverIconColour).release());
+        rescanToolbarButton.setImages(createRescanIcon(normalIconColour).release(),
+                                      createRescanIcon(hoverIconColour).release());
+        cancelScanToolbarButton.setImages(createCancelIcon(normalIconColour).release(),
+                                          createCancelIcon(hoverIconColour).release());
+        resetLayoutToolbarButton.setImages(createResetLayoutIcon(normalIconColour).release(),
+                                           createResetLayoutIcon(hoverIconColour).release());
 
         themeToolbarButton.setImages(
-            createThemeIcon(darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020), !darkModeEnabled).release(),
-            createThemeIcon(darkModeEnabled ? juce::Colours::lightgrey : juce::Colour(0xff4a4a4a), !darkModeEnabled).release());
+            createThemeIcon(normalIconColour, !darkModeEnabled).release(),
+            createThemeIcon(hoverIconColour, !darkModeEnabled).release());
         themeToolbarButton.setTooltip(darkModeEnabled ? "Switch to Light Mode" : "Switch to Dark Mode");
 
         if (persist)
@@ -806,16 +875,25 @@ namespace sw
     {
         if (const auto status = catalogDb.getAppSetting("scan.lastSummaryStatus"))
         {
-            browserPanel.setScanStatus(*status);
+            setScanStatusText(*status);
             return;
         }
 
-        browserPanel.setScanStatus("Idle");
+        setScanStatusText("Idle");
     }
 
     void MainComponent::persistScanSummaryStatus(const juce::String &statusText)
     {
         catalogDb.setAppSetting("scan.lastSummaryStatus", statusText.toStdString());
+    }
+
+    void MainComponent::setScanStatusText(const juce::String &statusText)
+    {
+        if (scanStatusText == statusText)
+            return;
+
+        scanStatusText = statusText;
+        repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
     }
 
     std::string MainComponent::rootPathForId(int64_t rootId)
@@ -838,17 +916,26 @@ namespace sw
         const bool isAcidized = file.loopType.has_value() && *file.loopType == "acidized";
         const bool hasValidAcidLoopRegion = isAcidized && file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
                                             *file.loopEndSample > *file.loopStartSample;
+        const bool hasSampleLength = file.totalSamples.has_value() && *file.totalSamples > 1;
 
         audioEngine.setPreviewRootMidiNote(isAcidized && file.acidRootNote.has_value() ? *file.acidRootNote : 60);
 
-        if (hasValidAcidLoopRegion)
+        if (isAcidized && hasValidAcidLoopRegion)
         {
             audioEngine.setPreviewLoopRegionSamples(*file.loopStartSample, *file.loopEndSample);
 
-            if (!previewPanel.isLoopEnabled())
+            if (!previewPanel.isLoopEnabled() && !previewPanel.isAutoPlayEnabled())
             {
                 previewPanel.setLoopEnabled(true);
-                audioEngine.setLoopEnabled(true);
+            }
+        }
+        else if (isAcidized && hasSampleLength)
+        {
+            audioEngine.setPreviewLoopRegionSamples(0, *file.totalSamples - 1);
+
+            if (!previewPanel.isLoopEnabled() && !previewPanel.isAutoPlayEnabled())
+            {
+                previewPanel.setLoopEnabled(true);
             }
         }
         else
@@ -856,6 +943,7 @@ namespace sw
             audioEngine.clearPreviewLoopRegion();
         }
 
+        applyEffectiveLoopPlaybackMode();
         updateWaveformLoopOverlay();
 
         if (file.indexOnly)
@@ -987,6 +1075,13 @@ namespace sw
             }
         }
 
+        if (file.loopType.has_value() && *file.loopType == "acidized" &&
+            file.totalSamples.has_value() && *file.totalSamples > 1)
+        {
+            waveformPanel.setLoopRegionNormalized(0.0f, 1.0f);
+            return;
+        }
+
         if (previewPanel.isLoopEnabled())
             waveformPanel.setLoopRegionNormalized(0.0f, 1.0f);
         else
@@ -1013,6 +1108,46 @@ namespace sw
 
         const float progress = static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized());
         waveformPanel.setPlayheadNormalized(progress);
+
+        if (previewPanel.isAutoPlayEnabled() && audioEngine.consumePreviewFinishedFlag())
+            advanceAutoplaySelectionAndPlay();
+    }
+
+    void MainComponent::applyEffectiveLoopPlaybackMode()
+    {
+        const bool loopCurrentFile = previewPanel.isLoopEnabled() && !previewPanel.isAutoPlayEnabled();
+        audioEngine.setLoopEnabled(loopCurrentFile);
+        updateWaveformLoopOverlay();
+    }
+
+    void MainComponent::advanceAutoplaySelectionAndPlay()
+    {
+        const int rowCount = resultsPanel.getResultCount();
+        if (rowCount <= 0)
+            return;
+
+        int candidateRow = resultsPanel.getSelectedRow();
+        if (candidateRow < 0)
+            candidateRow = -1;
+
+        const bool wrapList = previewPanel.isLoopEnabled();
+        const int maxSteps = wrapList ? rowCount : (rowCount - candidateRow - 1);
+
+        for (int step = 0; step < maxSteps; ++step)
+        {
+            int nextRow = candidateRow + 1 + step;
+            if (wrapList)
+                nextRow %= rowCount;
+            else if (nextRow >= rowCount)
+                return;
+
+            const auto *nextFile = resultsPanel.getResultAt(nextRow);
+            if (nextFile == nullptr || nextFile->indexOnly)
+                continue;
+
+            resultsPanel.selectRow(nextRow);
+            return;
+        }
     }
 
     void MainComponent::handleAddRootClicked()
@@ -1021,7 +1156,7 @@ namespace sw
         if (const auto savedRootPath = catalogDb.getAppSetting("roots.lastAddedPath"))
             initialDirectory = juce::File(*savedRootPath);
 
-        rootChooser = std::make_unique<juce::FileChooser>("Select a root folder", initialDirectory);
+        rootChooser = std::make_unique<juce::FileChooser>("Select a source folder", initialDirectory);
 
         constexpr auto chooserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories;
 
@@ -1037,8 +1172,8 @@ namespace sw
             if (!catalogDb.addRoot(path, label))
             {
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                                                       "Add Root Failed",
-                                                       "Could not add root:\n" + selected.getFullPathName());
+                                                       "Add Source Failed",
+                                                       "Could not add source:\n" + selected.getFullPathName());
                 return;
             }
 
@@ -1068,11 +1203,7 @@ namespace sw
         updateToolbarScanState(true);
         scannedFilesCount = 0;
         scanStartTime = std::chrono::steady_clock::now();
-        const juce::String rootProgressPrefix = rescanAllInProgress
-                                                    ? ("Root " + juce::String(rescanCurrentRootIndex) + "/" + juce::String(rescanTotalRoots) + " - ")
-                                                    : juce::String();
-        browserPanel.setScanStatus("Scanning " + rootProgressPrefix + "[" + rootDisplayName + "]... 0 files (0.0s)");
-        browserPanel.setScanInProgress(true);
+        setScanStatusText("Scanning [" + rootDisplayName + "]... 0 files (0.0s)");
 
         scanner.scanRoot(
             rootId,
@@ -1084,11 +1215,8 @@ namespace sw
                     ++scannedFilesCount;
                     const auto now = std::chrono::steady_clock::now();
                     const auto elapsedSec = std::chrono::duration<double>(now - scanStartTime).count();
-                    const juce::String rootProgressPrefix = rescanAllInProgress
-                                                          ? ("Root " + juce::String(rescanCurrentRootIndex) + "/" + juce::String(rescanTotalRoots) + " - ")
-                                                          : juce::String();
-                    browserPanel.setScanStatus("Scanning " + rootProgressPrefix + "[" + rootDisplayName + "]... " + juce::String(scannedFilesCount)
-                                               + " files (" + juce::String(elapsedSec, 1) + "s)");
+                    setScanStatusText("Scanning [" + rootDisplayName + "]... " + juce::String(scannedFilesCount)
+                                      + " files (" + juce::String(elapsedSec, 1) + "s)");
 
                     if ((scannedFilesCount % 25) == 0)
                         refreshResults(); });
@@ -1100,14 +1228,10 @@ namespace sw
                     scanInProgress = false;
                     const auto now = std::chrono::steady_clock::now();
                     const auto elapsedSec = std::chrono::duration<double>(now - scanStartTime).count();
-                    const juce::String rootProgressPrefix = rescanAllInProgress
-                                                          ? ("Root " + juce::String(rescanCurrentRootIndex) + "/" + juce::String(rescanTotalRoots) + " - ")
-                                                          : juce::String();
-                    const auto summary = "Idle (last " + rootProgressPrefix + "[" + rootDisplayName + "]: " + juce::String(scannedFilesCount)
+                    const auto summary = "Idle (last [" + rootDisplayName + "]: " + juce::String(scannedFilesCount)
                                        + " files in " + juce::String(elapsedSec, 1) + "s)";
-                    browserPanel.setScanStatus(summary);
+                    setScanStatusText(summary);
                     persistScanSummaryStatus(summary);
-                    browserPanel.setScanInProgress(false);
                     updateToolbarScanState(false);
                     refreshResults();
                     resultsPanel.selectFirstRowIfNoneSelected();
@@ -1117,54 +1241,33 @@ namespace sw
             });
     }
 
-    void MainComponent::handleRescanAllClicked()
+    void MainComponent::handleRescanSelectedClicked()
     {
         if (scanInProgress)
             return;
 
-        const auto roots = catalogDb.allRoots();
-        if (roots.empty())
+        if (!selectedRootFilterId.has_value())
         {
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                   "Rescan All",
-                                                   "No roots configured to scan.");
+                                                   "Rescan Selected Source",
+                                                   "Select a source in the Browser panel to rescan.");
             return;
         }
 
-        rescanAllInProgress = true;
-        rescanCurrentRootIndex = 0;
-        rescanTotalRoots = static_cast<int>(roots.size());
-        auto sharedRoots = std::make_shared<std::vector<RootRecord>>(roots);
-        auto runNext = std::make_shared<std::function<void(size_t)>>();
-
-        *runNext = [this, sharedRoots, runNext](size_t index)
+        const auto roots = catalogDb.allRoots();
+        const auto it = std::find_if(roots.begin(), roots.end(), [this](const RootRecord &root)
+                                     { return root.id == *selectedRootFilterId; });
+        if (it == roots.end())
         {
-            if (!rescanAllInProgress)
-                return;
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                   "Rescan Selected Source",
+                                                   "The selected source is no longer available.");
+            refreshRoots();
+            updateToolbarScanState(scanInProgress);
+            return;
+        }
 
-            if (index >= sharedRoots->size())
-            {
-                const int completedRoots = rescanTotalRoots;
-                rescanAllInProgress = false;
-                rescanCurrentRootIndex = 0;
-                rescanTotalRoots = 0;
-
-                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                       "Rescan All Complete",
-                                                       "Scanned " + juce::String(completedRoots) + " roots.");
-                return;
-            }
-
-            rescanCurrentRootIndex = static_cast<int>(index) + 1;
-            const auto &root = (*sharedRoots)[index];
-            startRootScan(root.id, root.path, juce::String(root.label), [this, sharedRoots, runNext, index]()
-                          {
-                if (!rescanAllInProgress)
-                    return;
-                (*runNext)(index + 1); });
-        };
-
-        (*runNext)(0);
+        startRootScan(it->id, it->path, juce::String(it->label));
     }
 
     void MainComponent::cancelScan()
@@ -1172,13 +1275,9 @@ namespace sw
         if (!scanInProgress)
             return;
 
-        rescanAllInProgress = false;
-        rescanCurrentRootIndex = 0;
-        rescanTotalRoots = 0;
-
         const auto now = std::chrono::steady_clock::now();
         const auto elapsedSec = std::chrono::duration<double>(now - scanStartTime).count();
-        browserPanel.setScanStatus("Cancelling... (" + juce::String(elapsedSec, 1) + "s)");
+        setScanStatusText("Cancelling... (" + juce::String(elapsedSec, 1) + "s)");
 
         const int cancelledCount = scannedFilesCount;
         const double cancelledElapsedSec = elapsedSec;
@@ -1189,9 +1288,8 @@ namespace sw
             scanInProgress = false;
             const auto summary = "Idle (cancelled: " + juce::String(cancelledCount)
                                + " files in " + juce::String(cancelledElapsedSec, 1) + "s)";
-            browserPanel.setScanStatus(summary);
+            setScanStatusText(summary);
             persistScanSummaryStatus(summary);
-            browserPanel.setScanInProgress(false);
             updateToolbarScanState(false);
             refreshResults();
             resultsPanel.selectFirstRowIfNoneSelected(); });
@@ -1269,7 +1367,7 @@ namespace sw
         addRootToolbarButton.setEnabled(!inProgress);
         openSourceInExplorerToolbarButton.setEnabled(selectedRootFilterId.has_value());
         deleteRootToolbarButton.setEnabled(!inProgress && selectedRootFilterId.has_value());
-        rescanToolbarButton.setEnabled(!inProgress);
+        rescanToolbarButton.setEnabled(!inProgress && selectedRootFilterId.has_value());
         cancelScanToolbarButton.setEnabled(inProgress);
     }
 
@@ -1291,6 +1389,8 @@ namespace sw
 
         auto toolbarArea = area.removeFromTop(kToolbarHeight).reduced(6, 4);
         toolbar.setBounds(toolbarArea);
+
+        area.removeFromBottom(kStatusBarHeight);
 
         constexpr int iconButtonSize = 28;
         constexpr int toolbarGap = 6;

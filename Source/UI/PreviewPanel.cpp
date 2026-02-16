@@ -22,15 +22,23 @@ namespace sw
         };
         stopButton.setTooltip("Stop preview playback");
 
+        autoPlayButton.onClick = [this]
+        {
+            if (onAutoPlaybackChanged)
+                onAutoPlaybackChanged(autoPlayButton.getToggleState());
+        };
+        autoPlayButton.setTooltip("Automatically play selected samples and advance after playback completes");
+
         loopButton.onClick = [this]
         {
             if (onLoopPlaybackChanged)
                 onLoopPlaybackChanged(loopButton.getToggleState());
         };
-        loopButton.setTooltip("Loop playback (restarts sample when it reaches the end)");
+        loopButton.setTooltip("Loop playback; with Auto enabled, loops through the results list");
 
         addAndMakeVisible(playButton);
         addAndMakeVisible(stopButton);
+        addAndMakeVisible(autoPlayButton);
         addAndMakeVisible(loopButton);
 
         pitchSlider.setSliderStyle(juce::Slider::Rotary);
@@ -100,13 +108,16 @@ namespace sw
         constexpr int rowSpacing = 3;
         constexpr int topRowHeight = 30;
         constexpr int comboRowHeight = 24;
+        constexpr int maxKeyboardHeight = 92;
 
         auto topRow = area.removeFromTop(topRowHeight);
         playButton.setBounds(topRow.removeFromLeft(60));
         topRow.removeFromLeft(4);
         stopButton.setBounds(topRow.removeFromLeft(60));
         topRow.removeFromLeft(8);
-        loopButton.setBounds(topRow.removeFromLeft(62));
+        auto toggleStackArea = topRow.removeFromLeft(62);
+        autoPlayButton.setBounds(toggleStackArea.removeFromTop(topRowHeight / 2));
+        loopButton.setBounds(toggleStackArea);
         topRow.removeFromLeft(8);
         pitchSlider.setBounds(topRow.removeFromLeft(70));
 
@@ -127,7 +138,8 @@ namespace sw
         midiInputCombo.setBounds(midiRow);
 
         area.removeFromTop(rowSpacing);
-        keyboard.setBounds(area);
+        const int keyboardHeight = juce::jmin(maxKeyboardHeight, area.getHeight());
+        keyboard.setBounds(area.removeFromBottom(keyboardHeight));
     }
 
     void PreviewPanel::setAvailableOutputDeviceTypes(const juce::StringArray &typeNames, const juce::String &currentTypeName)
@@ -179,7 +191,25 @@ namespace sw
         pitchSlider.setColour(juce::Slider::textBoxOutlineColourId, outline);
         pitchSlider.setColour(juce::Slider::rotarySliderFillColourId, darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff2b78c6));
 
+        loopButton.setColour(juce::ToggleButton::textColourId, textColour);
+        loopButton.setColour(juce::ToggleButton::tickColourId, darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff1f5fa1));
+        loopButton.setColour(juce::ToggleButton::tickDisabledColourId, darkModeEnabled ? juce::Colour(0xff6b6b6b) : juce::Colour(0xff8a8a8a));
+
+        autoPlayButton.setColour(juce::ToggleButton::textColourId, textColour);
+        autoPlayButton.setColour(juce::ToggleButton::tickColourId, darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff1f5fa1));
+        autoPlayButton.setColour(juce::ToggleButton::tickDisabledColourId, darkModeEnabled ? juce::Colour(0xff6b6b6b) : juce::Colour(0xff8a8a8a));
+
         repaint();
+    }
+
+    void PreviewPanel::setAutoPlayEnabled(bool enabled)
+    {
+        autoPlayButton.setToggleState(enabled, juce::dontSendNotification);
+    }
+
+    bool PreviewPanel::isAutoPlayEnabled() const noexcept
+    {
+        return autoPlayButton.getToggleState();
     }
 
     void PreviewPanel::setLoopEnabled(bool enabled)

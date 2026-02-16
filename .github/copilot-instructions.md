@@ -3,7 +3,7 @@
 ## Project Summary
 SampleWrangler is a Windows desktop application (Windows 10+) built with JUCE and modern C++.
 Goal: a fast audio sample librarian MVP with:
-- Root folder management + incremental scanning
+- Source folder management + incremental scanning
 - SQLite catalog + fast search
 - Waveform overview caching (peaks) + simple waveform viewer
 - ASIO preview playback (required) with minimal sampler-like preview features (pitch via MIDI + on-screen keyboard, loop points, basic polyphony)
@@ -42,7 +42,7 @@ Typical workflow:
 
 ## Data Model Rules
 - Catalog is local-only.
-- Support moving library roots (relink): store `root_id + relative_path` rather than only absolute paths.
+- Support moving library sources (relink): store `root_id + relative_path` rather than only absolute paths.
 - Backup/restore: copy DB + settings + waveform cache.
 
 ## Audio File Formats (MVP)

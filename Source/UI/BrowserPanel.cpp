@@ -41,7 +41,6 @@ namespace sw
         const auto background = darkModeEnabled ? juce::Colour(0xff2b2b2b) : juce::Colour(0xfff0f0f0);
         const auto titleColour = darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020);
         const auto separatorColour = darkModeEnabled ? juce::Colours::darkgrey.withAlpha(0.8f) : juce::Colour(0xffb5b5b5);
-        const auto scanColour = darkModeEnabled ? juce::Colours::lightgreen : juce::Colour(0xff186a3b);
         const auto emptyColour = darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff6f6f6f);
         const auto selectedColour = darkModeEnabled ? juce::Colour(0xff35506b) : juce::Colour(0xffc9dcf1);
         const auto rowTextColour = darkModeEnabled ? juce::Colours::lightgrey : juce::Colour(0xff2f2f2f);
@@ -58,17 +57,12 @@ namespace sw
         auto listArea = getLocalBounds().reduced(8);
         listArea.removeFromTop(controlsBottomY);
 
-        g.setColour(scanColour);
-        g.setFont(11.0f);
-        g.drawFittedText("Scan: " + scanStatus, listArea.removeFromTop(16), juce::Justification::left, 1);
-        listArea.removeFromTop(4);
-
         g.setFont(12.0f);
 
         if (roots.empty())
         {
             g.setColour(emptyColour);
-            g.drawText("No roots configured", listArea.removeFromTop(20), juce::Justification::left);
+            g.drawText("No sources configured", listArea.removeFromTop(20), juce::Justification::left);
             return;
         }
 
@@ -101,17 +95,6 @@ namespace sw
     {
         roots = std::move(newRoots);
         repaint();
-    }
-
-    void BrowserPanel::setScanStatus(const juce::String &statusText)
-    {
-        scanStatus = statusText;
-        repaint();
-    }
-
-    void BrowserPanel::setScanInProgress(bool inProgress)
-    {
-        (void)inProgress;
     }
 
     void BrowserPanel::setSelectedRootId(std::optional<int64_t> rootId)
@@ -181,12 +164,10 @@ namespace sw
     std::optional<int> BrowserPanel::rootRowIndexForY(int y) const
     {
         constexpr int controlsBottomY = 30;
-        constexpr int scanRowHeight = 16;
-        constexpr int rowGap = 4;
         constexpr int rowHeight = 18;
 
         auto listArea = getLocalBounds().reduced(8);
-        listArea.removeFromTop(controlsBottomY + scanRowHeight + rowGap);
+        listArea.removeFromTop(controlsBottomY);
 
         if (y < listArea.getY() || y >= listArea.getBottom())
             return std::nullopt;

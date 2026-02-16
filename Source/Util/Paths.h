@@ -6,7 +6,7 @@
 namespace sw
 {
 
-    /// Resolve an absolute path from a root path and a relative path.
+    /// Resolve an absolute path from a source path and a relative path.
     std::string resolveAbsolutePath(const std::string &rootPath, const std::string &relativePath);
 
     /// Return the application data directory for SampleWrangler.

@@ -66,6 +66,7 @@ namespace sw
                     for (int ch = 0; ch < numOutChannels; ++ch)
                         info.buffer->clear(ch, info.startSample + i, info.numSamples - i);
                     playing.store(false, std::memory_order_relaxed);
+                    playbackFinished.store(true, std::memory_order_relaxed);
                     pos = 0.0;
                     break;
                 }
@@ -97,6 +98,7 @@ namespace sw
     void VoiceManager::loadBuffer(std::unique_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate)
     {
         stop();
+        playbackFinished.store(false, std::memory_order_relaxed);
         loadedSampleLength.store(buffer != nullptr ? buffer->getNumSamples() : 0, std::memory_order_relaxed);
         ownedBuffer = std::move(buffer);
         bufferSampleRate = fileSampleRate;
@@ -108,6 +110,7 @@ namespace sw
     {
         if (sampleBuffer.load(std::memory_order_acquire) == nullptr)
             return;
+        playbackFinished.store(false, std::memory_order_relaxed);
         playing.store(true, std::memory_order_relaxed);
     }
 
@@ -152,6 +155,11 @@ namespace sw
     bool VoiceManager::isPlaying() const noexcept
     {
         return playing.load(std::memory_order_relaxed);
+    }
+
+    bool VoiceManager::consumePlaybackFinishedFlag() noexcept
+    {
+        return playbackFinished.exchange(false, std::memory_order_acq_rel);
     }
 
     double VoiceManager::getPlaybackProgressNormalized() const noexcept

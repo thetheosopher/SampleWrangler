@@ -26,7 +26,7 @@ namespace sw
 
     bool CatalogSchema::createAll(sqlite3 *db)
     {
-        // --- roots ---
+        // --- sources (table name remains roots for compatibility) ---
         if (!exec(db, R"SQL(
         CREATE TABLE IF NOT EXISTS roots (
             id      INTEGER PRIMARY KEY AUTOINCREMENT,

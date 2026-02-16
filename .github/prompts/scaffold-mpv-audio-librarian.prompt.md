@@ -11,7 +11,7 @@ You are working inside ${workspaceFolder}. Follow repository instructions in:
 
 ## Objective
 Scaffold a buildable JUCE C++20 application (Windows 10+) named **SampleWrangler** that matches the MVP architecture:
-- Minimal UI (left: roots/tree, center: results/search, bottom/right: waveform + preview)
+- Minimal UI (left: sources/tree, center: results/search, bottom/right: waveform + preview)
 - SQLite catalog and schema
 - Background scanning pipeline (incremental) with cancellation
 - Waveform cache (peak overview) generation on demand
@@ -41,7 +41,7 @@ Scaffold a buildable JUCE C++20 application (Windows 10+) named **SampleWrangler
 - Pitch shift: resample-style pitch for MVP (duration changes).
 - Analysis: on-demand + idle (prioritize selected item).
 - Wave cache: per-file cache file keyed by (root_id, rel_path, size, mtime).
-- Root relinking: store root table + relative paths, not only absolute file paths.
+- Source relinking: store source table + relative paths, not only absolute file paths.
 - Index-only formats: REX/REX2, NKI, SFZ (display + search but no audition).
 - Avoid MinGW; assume MSVC.
 

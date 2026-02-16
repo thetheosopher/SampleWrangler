@@ -128,6 +128,33 @@ namespace sw
         return false;
     }
 
+    bool ResultsPanel::selectRow(int row)
+    {
+        if (row < 0 || row >= static_cast<int>(results.size()))
+            return false;
+
+        resultsList.selectRow(row);
+        return true;
+    }
+
+    int ResultsPanel::getSelectedRow() const noexcept
+    {
+        return resultsList.getSelectedRow();
+    }
+
+    int ResultsPanel::getResultCount() const noexcept
+    {
+        return static_cast<int>(results.size());
+    }
+
+    const FileRecord *ResultsPanel::getResultAt(int row) const noexcept
+    {
+        if (row < 0 || row >= static_cast<int>(results.size()))
+            return nullptr;
+
+        return &results[static_cast<size_t>(row)];
+    }
+
     void ResultsPanel::setDarkMode(bool enabled)
     {
         if (darkModeEnabled == enabled)

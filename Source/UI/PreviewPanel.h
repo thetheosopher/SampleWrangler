@@ -26,11 +26,13 @@ namespace sw
         void setAvailableOutputDevices(const juce::StringArray &deviceNames, const juce::String &currentDeviceName);
         void setAvailableMidiInputDevices(const juce::Array<juce::MidiDeviceInfo> &devices,
                                           const juce::String &currentDeviceIdentifier);
+        void setPlaybackActive(bool playing);
 
         std::function<void()> onPlayRequested;
         std::function<void()> onStopRequested;
         std::function<void(bool enabled)> onAutoPlaybackChanged;
         std::function<void(bool enabled)> onLoopPlaybackChanged;
+        std::function<void(bool enabled)> onPreserveLengthChanged;
         std::function<void(double semitones)> onPitchChanged;
         std::function<void(const juce::String &typeName)> onApplyOutputDeviceTypeRequested;
         std::function<void(const juce::String &deviceName)> onApplyOutputDeviceRequested;
@@ -40,13 +42,34 @@ namespace sw
         bool isAutoPlayEnabled() const noexcept;
         void setLoopEnabled(bool enabled);
         bool isLoopEnabled() const noexcept;
+        void setPreserveLengthEnabled(bool enabled);
+        bool isPreserveLengthEnabled() const noexcept;
+        void updatePlaybackButtonStates();
+
+        class PitchValueField final : public juce::Label
+        {
+        public:
+            std::function<void()> onScrubStart;
+            std::function<void(int deltaPixels)> onScrubPixels;
+
+            void mouseDown(const juce::MouseEvent &event) override;
+            void mouseDrag(const juce::MouseEvent &event) override;
+
+        private:
+            int dragStartScreenX = 0;
+        };
 
     private:
+        void updatePitchValueFieldText();
+
         juce::TextButton playButton{"Play"};
         juce::TextButton stopButton{"Stop"};
         juce::ToggleButton autoPlayButton{"Auto"};
         juce::ToggleButton loopButton{"Loop"};
+        juce::ToggleButton preserveLengthButton{"Preserve Length"};
         juce::Slider pitchSlider;
+        juce::Label transposeLabel{"TransposeLabel", "Transpose"};
+        PitchValueField pitchValueField;
         juce::ComboBox outputDeviceTypeCombo;
         juce::TextButton applyOutputDeviceTypeButton{"Apply"};
         juce::ComboBox outputDeviceCombo;
@@ -57,6 +80,7 @@ namespace sw
         juce::MidiKeyboardComponent keyboard;
         bool isPlaying = false;
         bool darkModeEnabled = false;
+        double pitchScrubStartValue = 0.0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PreviewPanel)
     };

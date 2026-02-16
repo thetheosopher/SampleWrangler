@@ -26,7 +26,17 @@ namespace sw
         constexpr int kMinWaveformWidth = 220;
         constexpr float kDefaultLeftPanelRatio = 0.24f;
         constexpr float kDefaultBottomPanelRatio = 0.24f;
-        constexpr float kDefaultPreviewPanelRatio = 0.35f;
+        constexpr float kDefaultPreviewPanelRatio = 0.377f;
+
+        juce::String formatClockHmsMs(double seconds)
+        {
+            const int totalMilliseconds = juce::jmax(0, static_cast<int>(std::round(seconds * 1000.0)));
+            const int hours = totalMilliseconds / 3600000;
+            const int minutes = (totalMilliseconds / 60000) % 60;
+            const int secs = (totalMilliseconds / 1000) % 60;
+            const int millis = totalMilliseconds % 1000;
+            return juce::String::formatted("%02d:%02d:%02d.%03d", hours, minutes, secs, millis);
+        }
     }
 
     namespace
@@ -414,6 +424,12 @@ namespace sw
             persistPreviewPitch(semitones);
         };
 
+        previewPanel.onPreserveLengthChanged = [this](bool enabled)
+        {
+            audioEngine.setPreserveLengthEnabled(enabled);
+            persistPreviewPreserveLengthEnabled(enabled);
+        };
+
         previewPanel.onApplyOutputDeviceTypeRequested = [this](const juce::String &typeName)
         {
             juce::String error;
@@ -462,14 +478,45 @@ namespace sw
         refreshMidiInputDeviceList(true);
 
         midiRouter.setMidiCallback([this](const juce::MidiMessage &message)
-                                   { audioEngine.handleMidiMessage(message); });
+                                   {
+            if (message.isNoteOn())
+            {
+                juce::Component::SafePointer<MainComponent> safeThis(this);
+                juce::MessageManager::callAsync([safeThis]
+                                                {
+                    if (safeThis == nullptr)
+                        return;
+
+                    bool changed = false;
+                    if (safeThis->previewPanel.isAutoPlayEnabled())
+                    {
+                        safeThis->previewPanel.setAutoPlayEnabled(false);
+                        safeThis->persistPreviewAutoPlayEnabled(false);
+                        changed = true;
+                    }
+
+                    if (!safeThis->previewPanel.isLoopEnabled())
+                    {
+                        safeThis->previewPanel.setLoopEnabled(true);
+                        safeThis->persistPreviewLoopEnabled(true);
+                        changed = true;
+                    }
+
+                    if (changed)
+                    {
+                        safeThis->applyEffectiveLoopPlaybackMode();
+                        safeThis->repaint(0, safeThis->getHeight() - kStatusBarHeight, safeThis->getWidth(), kStatusBarHeight);
+                    }
+                });
+            }
+
+            audioEngine.handleMidiMessage(message); });
         midiRouter.attachKeyboardState(previewPanel.getKeyboardState());
 
         refreshMidiInputDeviceList(true);
 
         refreshRoots();
         refreshResults();
-        restoreLastSelection();
         restoreScanSummaryStatus();
         updateToolbarScanState(false);
         startTimerHz(30);
@@ -500,6 +547,11 @@ namespace sw
         g.drawFittedText("Auto: " + juce::String(previewPanel.isAutoPlayEnabled() ? "On" : "Off"),
                          statusBarBounds.reduced(10, 0),
                          juce::Justification::centredRight,
+                         1);
+
+        g.drawFittedText("Pos: " + playbackPositionText,
+                         statusBarBounds.reduced(10, 0),
+                         juce::Justification::centred,
                          1);
 
         if (toolbarFeedbackTicksRemaining > 0 && toolbarFeedbackText.isNotEmpty())
@@ -723,8 +775,14 @@ namespace sw
         if (const auto savedAuto = catalogDb.getAppSetting("preview.autoPlayEnabled"))
             autoPlayEnabled = (*savedAuto == "1" || *savedAuto == "true" || *savedAuto == "True");
 
+        bool preserveLengthEnabled = false;
+        if (const auto savedPreserveLength = catalogDb.getAppSetting("preview.preserveLengthEnabled"))
+            preserveLengthEnabled = (*savedPreserveLength == "1" || *savedPreserveLength == "true" || *savedPreserveLength == "True");
+
         previewPanel.setAutoPlayEnabled(autoPlayEnabled);
         previewPanel.setLoopEnabled(loopEnabled);
+        previewPanel.setPreserveLengthEnabled(preserveLengthEnabled);
+        audioEngine.setPreserveLengthEnabled(preserveLengthEnabled);
         applyEffectiveLoopPlaybackMode();
     }
 
@@ -753,6 +811,11 @@ namespace sw
     void MainComponent::persistPreviewLoopEnabled(bool enabled)
     {
         catalogDb.setAppSetting("preview.loopEnabled", enabled ? "1" : "0");
+    }
+
+    void MainComponent::persistPreviewPreserveLengthEnabled(bool enabled)
+    {
+        catalogDb.setAppSetting("preview.preserveLengthEnabled", enabled ? "1" : "0");
     }
 
     void MainComponent::persistThemeMode(bool darkMode)
@@ -896,6 +959,12 @@ namespace sw
         repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
     }
 
+    void MainComponent::updateWindowTitleForLoadedFile(const juce::String &fullPath)
+    {
+        if (auto *window = findParentComponentOfClass<juce::DocumentWindow>())
+            window->setName("Sample Wrangler - [" + fullPath + "]");
+    }
+
     std::string MainComponent::rootPathForId(int64_t rootId)
     {
         const auto roots = catalogDb.allRoots();
@@ -1027,7 +1096,7 @@ namespace sw
 
                 const double sampleRate = reader->sampleRate;
 
-                juce::MessageManager::callAsync([safeThis, interleaved, peaks, numChannels, numSamples, sampleRate, playWhenReady]
+                juce::MessageManager::callAsync([safeThis, interleaved, peaks, numChannels, numSamples, sampleRate, playWhenReady, absolutePath]
                                                 {
                     if (safeThis == nullptr)
                         return;
@@ -1041,6 +1110,7 @@ namespace sw
                     }
 
                     safeThis->audioEngine.loadPreviewBuffer(std::move(previewBuffer), sampleRate);
+                    safeThis->updateWindowTitleForLoadedFile(absolutePath);
                     safeThis->waveformPanel.setPeaks(*peaks);
                     safeThis->waveformPanel.setPlayheadNormalized(0.0f);
                     safeThis->updateWaveformLoopOverlay();
@@ -1108,6 +1178,27 @@ namespace sw
 
         const float progress = static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized());
         waveformPanel.setPlayheadNormalized(progress);
+        previewPanel.setPlaybackActive(audioEngine.isPreviewPlaying());
+
+        double durationSeconds = 0.0;
+        if (currentSelectedFile.has_value() && !currentSelectedFile->indexOnly)
+        {
+            if (currentSelectedFile->durationSec.has_value() && *currentSelectedFile->durationSec > 0.0)
+            {
+                durationSeconds = *currentSelectedFile->durationSec;
+            }
+            else if (currentSelectedFile->totalSamples.has_value() && currentSelectedFile->sampleRate.has_value() && *currentSelectedFile->sampleRate > 0)
+            {
+                durationSeconds = static_cast<double>(*currentSelectedFile->totalSamples) / static_cast<double>(*currentSelectedFile->sampleRate);
+            }
+        }
+
+        const juce::String nextPlaybackPositionText = formatClockHmsMs(durationSeconds * static_cast<double>(progress)) + " / " + formatClockHmsMs(durationSeconds);
+        if (playbackPositionText != nextPlaybackPositionText)
+        {
+            playbackPositionText = nextPlaybackPositionText;
+            repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
+        }
 
         if (previewPanel.isAutoPlayEnabled() && audioEngine.consumePreviewFinishedFlag())
             advanceAutoplaySelectionAndPlay();

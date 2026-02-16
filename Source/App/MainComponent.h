@@ -51,10 +51,12 @@ namespace sw
         void persistPreviewPitch(double semitones);
         void persistPreviewAutoPlayEnabled(bool enabled);
         void persistPreviewLoopEnabled(bool enabled);
+        void persistPreviewPreserveLengthEnabled(bool enabled);
         void persistThemeMode(bool darkMode);
         void persistLastSelectedFile(const FileRecord &file);
         void persistScanSummaryStatus(const juce::String &statusText);
         void setScanStatusText(const juce::String &statusText);
+        void updateWindowTitleForLoadedFile(const juce::String &fullPath);
         void startRootScan(int64_t rootId,
                            const std::string &rootPath,
                            const juce::String &rootDisplayName,
@@ -121,7 +123,7 @@ namespace sw
 
         float leftPanelRatio = 0.24f;
         float bottomPanelRatio = 0.24f;
-        float previewPanelRatio = 0.35f;
+        float previewPanelRatio = 0.377f;
 
         // Core subsystems (non-UI)
         CatalogDb catalogDb;
@@ -141,6 +143,7 @@ namespace sw
         juce::String toolbarFeedbackText;
         int toolbarFeedbackTicksRemaining = 0;
         juce::String scanStatusText{"Idle"};
+        juce::String playbackPositionText{"00:00:00.000 / 00:00:00.000"};
         bool darkModeEnabled = true;
         std::chrono::steady_clock::time_point scanStartTime{};
 

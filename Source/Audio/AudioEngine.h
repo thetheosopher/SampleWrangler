@@ -50,6 +50,8 @@ namespace sw
 
         /// Set pitch shift in semitones (resample-style, changes duration).
         void setPitchSemitones(double semitones);
+        void setPreserveLengthEnabled(bool enabled);
+        bool isPreserveLengthEnabled() const noexcept;
 
         /// Enable/disable loop playback for preview.
         void setLoopEnabled(bool enabled);

@@ -12,7 +12,7 @@ class SampleWranglerApplication final : public juce::JUCEApplication
 public:
     SampleWranglerApplication() = default;
 
-    const juce::String getApplicationName() override { return JUCE_APPLICATION_NAME_STRING; }
+    const juce::String getApplicationName() override { return "Sample Wrangler"; }
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override { return false; }
 

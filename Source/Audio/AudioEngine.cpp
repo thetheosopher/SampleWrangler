@@ -82,6 +82,16 @@ namespace sw
         applyCurrentPitch();
     }
 
+    void AudioEngine::setPreserveLengthEnabled(bool enabled)
+    {
+        voiceManager.setPreserveLengthEnabled(enabled);
+    }
+
+    bool AudioEngine::isPreserveLengthEnabled() const noexcept
+    {
+        return voiceManager.isPreserveLengthEnabled();
+    }
+
     void AudioEngine::setLoopEnabled(bool enabled)
     {
         voiceManager.setLoopEnabled(enabled);
@@ -98,6 +108,7 @@ namespace sw
         {
             activeMidiNote.store(message.getNoteNumber(), std::memory_order_relaxed);
             applyCurrentPitch();
+            setPreviewPlaybackProgressNormalized(0.0);
             play();
             return;
         }

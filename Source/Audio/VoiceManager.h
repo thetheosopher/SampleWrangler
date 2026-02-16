@@ -33,6 +33,8 @@ namespace sw
 
         /// Set resample-style pitch shift in semitones.
         void setPitchSemitones(double semitones);
+        void setPreserveLengthEnabled(bool enabled);
+        bool isPreserveLengthEnabled() const noexcept;
 
         void setLoopEnabled(bool enabled);
         bool isLoopEnabled() const noexcept;
@@ -64,7 +66,14 @@ namespace sw
         std::atomic<int> previewRootMidiNote{60};
         std::atomic<double> playbackPos{0.0};
         std::atomic<double> playbackRate{1.0}; // ratio: 1.0 = original pitch
+        std::atomic<bool> preserveLengthEnabled{false};
+        std::atomic<bool> granularResetRequested{true};
         std::atomic<int> loadedSampleLength{0};
+
+        // Granular pitch-shift state (audio thread only)
+        double grainReadPosA = 0.0;
+        double grainReadPosB = 0.0;
+        int grainSamplesRemaining = 0;
 
         double currentSampleRate = 44100.0;
 

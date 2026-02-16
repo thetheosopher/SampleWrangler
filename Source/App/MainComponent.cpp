@@ -23,6 +23,9 @@ namespace sw
         constexpr int kMinBottomHeight = 120;
         constexpr int kMinPreviewWidth = 220;
         constexpr int kMinWaveformWidth = 220;
+        constexpr float kDefaultLeftPanelRatio = 0.24f;
+        constexpr float kDefaultBottomPanelRatio = 0.24f;
+        constexpr float kDefaultPreviewPanelRatio = 0.35f;
     }
 
     namespace
@@ -67,6 +70,20 @@ namespace sw
             drawable->setStrokeType(juce::PathStrokeType(2.0f));
             return drawable;
         }
+
+        std::unique_ptr<juce::Drawable> createResetLayoutIcon(const juce::Colour colour)
+        {
+            auto drawable = std::make_unique<juce::DrawablePath>();
+            juce::Path icon;
+            icon.addRectangle(3.0f, 3.0f, 8.0f, 8.0f);
+            icon.addRectangle(13.0f, 3.0f, 8.0f, 8.0f);
+            icon.addRectangle(3.0f, 13.0f, 8.0f, 8.0f);
+            icon.addRectangle(13.0f, 13.0f, 8.0f, 8.0f);
+            drawable->setPath(icon);
+            drawable->setStrokeFill(colour);
+            drawable->setStrokeType(juce::PathStrokeType(1.8f));
+            return drawable;
+        }
     }
 
     MainComponent::MainComponent()
@@ -75,6 +92,7 @@ namespace sw
         addAndMakeVisible(addRootToolbarButton);
         addAndMakeVisible(rescanToolbarButton);
         addAndMakeVisible(cancelScanToolbarButton);
+        addAndMakeVisible(resetLayoutToolbarButton);
         addAndMakeVisible(browserPanel);
         addAndMakeVisible(leftRightSplitter);
         addAndMakeVisible(resultsPanel);
@@ -98,6 +116,10 @@ namespace sw
 
             leftPanelRatio = static_cast<float>(nextLeftWidth) / static_cast<float>(totalWidth);
             resized();
+        };
+        leftRightSplitter.onDragEnded = [this]
+        {
+            persistLayoutSettings();
         };
 
         resultsBottomSplitter.onDragged = [this](int deltaPixels)
@@ -125,6 +147,10 @@ namespace sw
 
             bottomPanelRatio = static_cast<float>(nextBottomHeight) / static_cast<float>(totalHeight);
             resized();
+        };
+        resultsBottomSplitter.onDragEnded = [this]
+        {
+            persistLayoutSettings();
         };
 
         previewWaveformSplitter.onDragged = [this](int deltaPixels)
@@ -163,6 +189,16 @@ namespace sw
             previewPanelRatio = static_cast<float>(nextPreviewWidth) / static_cast<float>(splitWidth);
             resized();
         };
+        previewWaveformSplitter.onDragEnded = [this]
+        {
+            persistLayoutSettings();
+        };
+
+        browserPanel.onRootSelected = [this](std::optional<int64_t> rootId)
+        {
+            selectedRootFilterId = rootId;
+            refreshResults(currentSearchQuery);
+        };
 
         addRootToolbarButton.setImages(createFolderIcon(juce::Colours::white).release(),
                                        createFolderIcon(juce::Colours::lightgrey).release());
@@ -188,6 +224,14 @@ namespace sw
             cancelScan();
         };
 
+        resetLayoutToolbarButton.setImages(createResetLayoutIcon(juce::Colours::white).release(),
+                                           createResetLayoutIcon(juce::Colours::lightgrey).release());
+        resetLayoutToolbarButton.setTooltip("Reset splitter layout to defaults");
+        resetLayoutToolbarButton.onClick = [this]
+        {
+            resetLayout();
+        };
+
         updateToolbarScanState(false);
 
         const auto appDataDir = defaultCacheDirectory();
@@ -199,6 +243,10 @@ namespace sw
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
                                                    "Database Error",
                                                    "Failed to open catalog database:\n" + juce::String(dbPath));
+        }
+        else
+        {
+            restoreLayoutSettings();
         }
 
         resultsPanel.onSearchQueryChanged = [this](const std::string &query)
@@ -268,19 +316,24 @@ namespace sw
             refreshOutputDeviceList();
         };
 
+        previewPanel.onMidiInputDeviceSelected = [this](const juce::String &deviceIdentifier)
+        {
+            applyMidiInputSelection(deviceIdentifier, true);
+        };
+
         audioEngine.initialiseDeviceManager();
         restoreAudioDeviceSettings();
         restorePreviewSettings();
+        restoreMidiInputSettings();
         refreshOutputDeviceTypeList();
         refreshOutputDeviceList();
+        refreshMidiInputDeviceList(true);
 
         midiRouter.setMidiCallback([this](const juce::MidiMessage &message)
                                    { audioEngine.handleMidiMessage(message); });
         midiRouter.attachKeyboardState(previewPanel.getKeyboardState());
 
-        const auto midiDevices = juce::MidiInput::getAvailableDevices();
-        if (!midiDevices.isEmpty())
-            midiRouter.enableDevice(midiDevices[0].identifier);
+        refreshMidiInputDeviceList(true);
 
         refreshRoots();
         refreshResults();
@@ -300,6 +353,16 @@ namespace sw
         auto toolbarBounds = getLocalBounds().removeFromTop(kToolbarHeight);
         g.setColour(juce::Colour(0xff272c33));
         g.fillRect(toolbarBounds);
+
+        if (toolbarFeedbackTicksRemaining > 0 && toolbarFeedbackText.isNotEmpty())
+        {
+            g.setColour(juce::Colours::lightgreen);
+            g.setFont(12.0f);
+            g.drawFittedText(toolbarFeedbackText,
+                             toolbarBounds.reduced(10, 0),
+                             juce::Justification::centredRight,
+                             1);
+        }
 
         g.setColour(juce::Colours::darkgrey.withAlpha(0.9f));
         g.drawHorizontalLine(toolbarBounds.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
@@ -335,17 +398,47 @@ namespace sw
             onDragged(delta);
     }
 
+    void MainComponent::SplitterBar::mouseUp(const juce::MouseEvent &)
+    {
+        if (onDragEnded != nullptr)
+            onDragEnded();
+    }
+
     void MainComponent::refreshRoots()
     {
-        browserPanel.setRoots(catalogDb.allRoots());
+        const auto roots = catalogDb.allRoots();
+
+        if (selectedRootFilterId.has_value())
+        {
+            const auto it = std::find_if(roots.begin(), roots.end(), [this](const RootRecord &root)
+                                         { return root.id == *selectedRootFilterId; });
+
+            if (it == roots.end())
+                selectedRootFilterId.reset();
+        }
+
+        browserPanel.setRoots(roots);
+        browserPanel.setSelectedRootId(selectedRootFilterId);
     }
 
     void MainComponent::refreshResults(const std::string &query)
     {
+        currentSearchQuery = query;
+
+        if (!selectedRootFilterId.has_value())
+        {
+            if (query.empty())
+                resultsPanel.setResults(catalogDb.listRecentFiles(300));
+            else
+                resultsPanel.setResults(catalogDb.searchFiles(query + "*", 300));
+            return;
+        }
+
+        const int64_t rootId = *selectedRootFilterId;
         if (query.empty())
-            resultsPanel.setResults(catalogDb.listRecentFiles(300));
+            resultsPanel.setResults(catalogDb.listRecentFilesByRoot(rootId, 300));
         else
-            resultsPanel.setResults(catalogDb.searchFiles(query + "*", 300));
+            resultsPanel.setResults(catalogDb.searchFilesByRoot(rootId, query + "*", 300));
     }
 
     void MainComponent::refreshOutputDeviceList()
@@ -358,6 +451,57 @@ namespace sw
     {
         previewPanel.setAvailableOutputDeviceTypes(audioEngine.getAvailableOutputDeviceTypes(),
                                                    audioEngine.getCurrentOutputDeviceType());
+    }
+
+    void MainComponent::refreshMidiInputDeviceList(bool forceRefresh)
+    {
+        const auto devices = juce::MidiInput::getAvailableDevices();
+        juce::StringArray identifiers;
+        identifiers.ensureStorageAllocated(devices.size());
+        for (const auto &device : devices)
+            identifiers.add(device.identifier);
+
+        const bool changed = forceRefresh || identifiers != lastKnownMidiInputIdentifiers;
+        if (!changed)
+            return;
+
+        lastKnownMidiInputIdentifiers = identifiers;
+
+        bool selectedDeviceStillAvailable = false;
+        for (const auto &device : devices)
+        {
+            if (device.identifier == selectedMidiInputIdentifier)
+            {
+                selectedDeviceStillAvailable = true;
+                break;
+            }
+        }
+
+        if (!selectedDeviceStillAvailable)
+        {
+            if (!devices.isEmpty())
+                selectedMidiInputIdentifier = devices.getFirst().identifier;
+            else
+                selectedMidiInputIdentifier.clear();
+
+            applyMidiInputSelection(selectedMidiInputIdentifier, true);
+        }
+
+        previewPanel.setAvailableMidiInputDevices(devices, selectedMidiInputIdentifier);
+    }
+
+    void MainComponent::applyMidiInputSelection(const juce::String &deviceIdentifier, bool persistSelection)
+    {
+        selectedMidiInputIdentifier = deviceIdentifier;
+
+        midiRouter.disableAllDevices();
+        if (selectedMidiInputIdentifier.isNotEmpty())
+            midiRouter.enableDevice(selectedMidiInputIdentifier);
+
+        if (persistSelection)
+            persistMidiInputSelection(selectedMidiInputIdentifier);
+
+        previewPanel.setAvailableMidiInputDevices(juce::MidiInput::getAvailableDevices(), selectedMidiInputIdentifier);
     }
 
     void MainComponent::restoreAudioDeviceSettings()
@@ -385,6 +529,11 @@ namespace sw
         catalogDb.setAppSetting("audio.outputDeviceName", deviceName.toStdString());
     }
 
+    void MainComponent::persistMidiInputSelection(const juce::String &deviceIdentifier)
+    {
+        catalogDb.setAppSetting("midi.inputDeviceIdentifier", deviceIdentifier.toStdString());
+    }
+
     void MainComponent::restorePreviewSettings()
     {
         const auto savedPitch = catalogDb.getAppSetting("preview.pitchSemitones");
@@ -403,9 +552,58 @@ namespace sw
         }
     }
 
+    void MainComponent::restoreMidiInputSettings()
+    {
+        if (const auto saved = catalogDb.getAppSetting("midi.inputDeviceIdentifier"))
+            selectedMidiInputIdentifier = *saved;
+    }
+
     void MainComponent::persistPreviewPitch(double semitones)
     {
         catalogDb.setAppSetting("preview.pitchSemitones", juce::String(semitones).toStdString());
+    }
+
+    void MainComponent::restoreLayoutSettings()
+    {
+        if (const auto value = catalogDb.getAppSetting("layout.leftPanelRatio"))
+        {
+            try
+            {
+                leftPanelRatio = juce::jlimit(0.15f, 0.55f, std::stof(*value));
+            }
+            catch (const std::exception &)
+            {
+            }
+        }
+
+        if (const auto value = catalogDb.getAppSetting("layout.bottomPanelRatio"))
+        {
+            try
+            {
+                bottomPanelRatio = juce::jlimit(0.15f, 0.55f, std::stof(*value));
+            }
+            catch (const std::exception &)
+            {
+            }
+        }
+
+        if (const auto value = catalogDb.getAppSetting("layout.previewPanelRatio"))
+        {
+            try
+            {
+                previewPanelRatio = juce::jlimit(0.20f, 0.70f, std::stof(*value));
+            }
+            catch (const std::exception &)
+            {
+            }
+        }
+    }
+
+    void MainComponent::persistLayoutSettings()
+    {
+        catalogDb.setAppSetting("layout.leftPanelRatio", juce::String(leftPanelRatio, 4).toStdString());
+        catalogDb.setAppSetting("layout.bottomPanelRatio", juce::String(bottomPanelRatio, 4).toStdString());
+        catalogDb.setAppSetting("layout.previewPanelRatio", juce::String(previewPanelRatio, 4).toStdString());
     }
 
     void MainComponent::restoreLastSelection()
@@ -571,6 +769,22 @@ namespace sw
 
     void MainComponent::timerCallback()
     {
+        ++midiDeviceRefreshCounter;
+        if (midiDeviceRefreshCounter >= 30)
+        {
+            midiDeviceRefreshCounter = 0;
+            refreshMidiInputDeviceList(false);
+        }
+
+        if (toolbarFeedbackTicksRemaining > 0)
+        {
+            --toolbarFeedbackTicksRemaining;
+            repaint(0, 0, getWidth(), kToolbarHeight);
+
+            if (toolbarFeedbackTicksRemaining == 0)
+                toolbarFeedbackText.clear();
+        }
+
         if (!audioEngine.isPreviewPlaying())
         {
             waveformPanel.setPlayheadNormalized(-1.0f);
@@ -770,6 +984,18 @@ namespace sw
         cancelScanToolbarButton.setEnabled(inProgress);
     }
 
+    void MainComponent::resetLayout()
+    {
+        leftPanelRatio = kDefaultLeftPanelRatio;
+        bottomPanelRatio = kDefaultBottomPanelRatio;
+        previewPanelRatio = kDefaultPreviewPanelRatio;
+        resized();
+        persistLayoutSettings();
+        toolbarFeedbackText = "Layout reset";
+        toolbarFeedbackTicksRemaining = 60;
+        repaint(0, 0, getWidth(), kToolbarHeight);
+    }
+
     void MainComponent::resized()
     {
         auto area = getLocalBounds();
@@ -784,6 +1010,8 @@ namespace sw
         rescanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         cancelScanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        resetLayoutToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
 
         const int totalWidth = area.getWidth() - kSplitterThickness;
         int leftWidth = static_cast<int>(leftPanelRatio * static_cast<float>(totalWidth));

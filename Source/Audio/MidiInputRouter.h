@@ -22,6 +22,8 @@ namespace sw
         /// Stop listening to all MIDI inputs.
         void disableAllDevices();
 
+        juce::String getActiveDeviceIdentifier() const;
+
         /// Connect the on-screen keyboard state so note events are forwarded.
         void attachKeyboardState(juce::MidiKeyboardState &state);
 
@@ -40,6 +42,7 @@ namespace sw
         MidiCallback onMidi;
         std::vector<std::unique_ptr<juce::MidiInput>> openInputs;
         juce::MidiKeyboardState *attachedKeyboardState = nullptr;
+        juce::String activeDeviceIdentifier;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MidiInputRouter)
     };

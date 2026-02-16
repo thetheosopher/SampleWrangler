@@ -299,6 +299,117 @@ namespace sw
         return results;
     }
 
+    std::vector<FileRecord> CatalogDb::searchFilesByRoot(int64_t rootId, const std::string &query, int limit)
+    {
+        std::vector<FileRecord> results;
+
+        const char *sql = R"SQL(
+        SELECT f.id, f.root_id, f.relative_path, f.filename, f.extension,
+               f.size_bytes, f.modified_time, f.duration_sec, f.sample_rate,
+               f.channels, f.bit_depth, f.bpm, f.key, f.loop_type, f.index_only
+        FROM files f
+        JOIN files_fts fts ON fts.rowid = f.id
+        WHERE f.root_id = ? AND files_fts MATCH ?
+        LIMIT ?
+    )SQL";
+
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return results;
+
+        sqlite3_bind_int64(stmt, 1, rootId);
+        sqlite3_bind_text(stmt, 2, query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 3, limit);
+
+        while (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            FileRecord r;
+            r.id = sqlite3_column_int64(stmt, 0);
+            r.rootId = sqlite3_column_int64(stmt, 1);
+            r.relativePath = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+            r.filename = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3));
+            r.extension = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 4));
+            r.sizeBytes = sqlite3_column_int64(stmt, 5);
+            r.modifiedTime = sqlite3_column_int64(stmt, 6);
+
+            if (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
+                r.durationSec = sqlite3_column_double(stmt, 7);
+            if (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
+                r.sampleRate = sqlite3_column_int(stmt, 8);
+            if (sqlite3_column_type(stmt, 9) != SQLITE_NULL)
+                r.channels = sqlite3_column_int(stmt, 9);
+            if (sqlite3_column_type(stmt, 10) != SQLITE_NULL)
+                r.bitDepth = sqlite3_column_int(stmt, 10);
+            if (sqlite3_column_type(stmt, 11) != SQLITE_NULL)
+                r.bpm = sqlite3_column_double(stmt, 11);
+            if (sqlite3_column_type(stmt, 12) != SQLITE_NULL)
+                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 12));
+            if (sqlite3_column_type(stmt, 13) != SQLITE_NULL)
+                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+            r.indexOnly = sqlite3_column_int(stmt, 14) != 0;
+
+            results.push_back(std::move(r));
+        }
+
+        sqlite3_finalize(stmt);
+        return results;
+    }
+
+    std::vector<FileRecord> CatalogDb::listRecentFilesByRoot(int64_t rootId, int limit)
+    {
+        std::vector<FileRecord> results;
+
+        const char *sql = R"SQL(
+        SELECT id, root_id, relative_path, filename, extension,
+               size_bytes, modified_time, duration_sec, sample_rate,
+               channels, bit_depth, bpm, key, loop_type, index_only
+        FROM files
+        WHERE root_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+    )SQL";
+
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return results;
+
+        sqlite3_bind_int64(stmt, 1, rootId);
+        sqlite3_bind_int(stmt, 2, limit);
+
+        while (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            FileRecord r;
+            r.id = sqlite3_column_int64(stmt, 0);
+            r.rootId = sqlite3_column_int64(stmt, 1);
+            r.relativePath = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+            r.filename = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3));
+            r.extension = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 4));
+            r.sizeBytes = sqlite3_column_int64(stmt, 5);
+            r.modifiedTime = sqlite3_column_int64(stmt, 6);
+
+            if (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
+                r.durationSec = sqlite3_column_double(stmt, 7);
+            if (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
+                r.sampleRate = sqlite3_column_int(stmt, 8);
+            if (sqlite3_column_type(stmt, 9) != SQLITE_NULL)
+                r.channels = sqlite3_column_int(stmt, 9);
+            if (sqlite3_column_type(stmt, 10) != SQLITE_NULL)
+                r.bitDepth = sqlite3_column_int(stmt, 10);
+            if (sqlite3_column_type(stmt, 11) != SQLITE_NULL)
+                r.bpm = sqlite3_column_double(stmt, 11);
+            if (sqlite3_column_type(stmt, 12) != SQLITE_NULL)
+                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 12));
+            if (sqlite3_column_type(stmt, 13) != SQLITE_NULL)
+                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+            r.indexOnly = sqlite3_column_int(stmt, 14) != 0;
+
+            results.push_back(std::move(r));
+        }
+
+        sqlite3_finalize(stmt);
+        return results;
+    }
+
     std::optional<FileRecord> CatalogDb::fileById(int64_t fileId)
     {
         const char *sql = R"SQL(

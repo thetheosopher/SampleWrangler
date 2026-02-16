@@ -23,12 +23,15 @@ namespace sw
         void setPitchSemitones(double semitones);
         void setAvailableOutputDeviceTypes(const juce::StringArray &typeNames, const juce::String &currentTypeName);
         void setAvailableOutputDevices(const juce::StringArray &deviceNames, const juce::String &currentDeviceName);
+        void setAvailableMidiInputDevices(const juce::Array<juce::MidiDeviceInfo> &devices,
+                                          const juce::String &currentDeviceIdentifier);
 
         std::function<void()> onPlayRequested;
         std::function<void()> onStopRequested;
         std::function<void(double semitones)> onPitchChanged;
         std::function<void(const juce::String &typeName)> onApplyOutputDeviceTypeRequested;
         std::function<void(const juce::String &deviceName)> onApplyOutputDeviceRequested;
+        std::function<void(const juce::String &deviceIdentifier)> onMidiInputDeviceSelected;
 
     private:
         juce::TextButton playButton{"Play"};
@@ -38,6 +41,8 @@ namespace sw
         juce::TextButton applyOutputDeviceTypeButton{"Apply"};
         juce::ComboBox outputDeviceCombo;
         juce::TextButton applyOutputDeviceButton{"Apply"};
+        juce::ComboBox midiInputCombo;
+        juce::StringArray midiInputDeviceIdentifiers;
         juce::MidiKeyboardState keyboardState;
         juce::MidiKeyboardComponent keyboard;
         bool isPlaying = false;

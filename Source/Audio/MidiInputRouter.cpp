@@ -17,6 +17,8 @@ namespace sw
 
     void MidiInputRouter::enableDevice(const juce::String &deviceIdentifier)
     {
+        disableAllDevices();
+
         auto devices = juce::MidiInput::getAvailableDevices();
         for (const auto &d : devices)
         {
@@ -26,6 +28,7 @@ namespace sw
                 {
                     input->start();
                     openInputs.push_back(std::move(input));
+                    activeDeviceIdentifier = d.identifier;
                 }
                 break;
             }
@@ -40,6 +43,12 @@ namespace sw
                 input->stop();
         }
         openInputs.clear();
+        activeDeviceIdentifier.clear();
+    }
+
+    juce::String MidiInputRouter::getActiveDeviceIdentifier() const
+    {
+        return activeDeviceIdentifier;
     }
 
     void MidiInputRouter::attachKeyboardState(juce::MidiKeyboardState &state)
@@ -59,6 +68,15 @@ namespace sw
     void MidiInputRouter::handleIncomingMidiMessage(juce::MidiInput * /*source*/,
                                                     const juce::MidiMessage &message)
     {
+        if (attachedKeyboardState != nullptr)
+            attachedKeyboardState->processNextMidiEvent(message);
+
+        if (message.isNoteOnOrOff())
+        {
+            if (attachedKeyboardState != nullptr)
+                return;
+        }
+
         if (onMidi)
             onMidi(message);
     }

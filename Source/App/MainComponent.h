@@ -14,6 +14,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace sw
 {
@@ -34,12 +35,18 @@ namespace sw
         void refreshResults(const std::string &query = "");
         void refreshOutputDeviceTypeList();
         void refreshOutputDeviceList();
+        void refreshMidiInputDeviceList(bool forceRefresh = false);
+        void applyMidiInputSelection(const juce::String &deviceIdentifier, bool persistSelection);
         void restoreAudioDeviceSettings();
         void restorePreviewSettings();
+        void restoreMidiInputSettings();
         void restoreLastSelection();
+        void restoreLayoutSettings();
         void restoreScanSummaryStatus();
         void persistAudioDeviceType(const juce::String &typeName);
         void persistAudioDeviceName(const juce::String &deviceName);
+        void persistMidiInputSelection(const juce::String &deviceIdentifier);
+        void persistLayoutSettings();
         void persistPreviewPitch(double semitones);
         void persistLastSelectedFile(const FileRecord &file);
         void persistScanSummaryStatus(const juce::String &statusText);
@@ -49,6 +56,7 @@ namespace sw
                            std::function<void()> onCompleted = {});
         void handleRescanAllClicked();
         void cancelScan();
+        void resetLayout();
         void handleAddRootClicked();
         void handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert);
         std::string rootPathForId(int64_t rootId);
@@ -67,10 +75,12 @@ namespace sw
             explicit SplitterBar(Orientation orientation);
 
             std::function<void(int deltaPixels)> onDragged;
+            std::function<void()> onDragEnded;
 
             void paint(juce::Graphics &g) override;
             void mouseDown(const juce::MouseEvent &event) override;
             void mouseDrag(const juce::MouseEvent &event) override;
+            void mouseUp(const juce::MouseEvent &event) override;
 
         private:
             Orientation orientation;
@@ -82,6 +92,7 @@ namespace sw
         juce::DrawableButton addRootToolbarButton{"Add Root", juce::DrawableButton::ImageFitted};
         juce::DrawableButton rescanToolbarButton{"Rescan All", juce::DrawableButton::ImageFitted};
         juce::DrawableButton cancelScanToolbarButton{"Cancel Scan", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton resetLayoutToolbarButton{"Reset Layout", juce::DrawableButton::ImageFitted};
         juce::TooltipWindow tooltipWindow{this};
 
         BrowserPanel browserPanel;
@@ -108,6 +119,13 @@ namespace sw
         bool rescanAllInProgress = false;
         int rescanCurrentRootIndex = 0;
         int rescanTotalRoots = 0;
+        std::optional<int64_t> selectedRootFilterId;
+        std::string currentSearchQuery;
+        juce::String selectedMidiInputIdentifier;
+        juce::StringArray lastKnownMidiInputIdentifiers;
+        int midiDeviceRefreshCounter = 0;
+        juce::String toolbarFeedbackText;
+        int toolbarFeedbackTicksRemaining = 0;
         std::chrono::steady_clock::time_point scanStartTime{};
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)

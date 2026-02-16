@@ -41,6 +41,8 @@ namespace sw
         bool removeFilesByRoot(int64_t rootId);
         std::vector<FileRecord> searchFiles(const std::string &query, int limit = 200);
         std::vector<FileRecord> listRecentFiles(int limit = 200);
+        std::vector<FileRecord> searchFilesByRoot(int64_t rootId, const std::string &query, int limit = 200);
+        std::vector<FileRecord> listRecentFilesByRoot(int64_t rootId, int limit = 200);
         std::optional<FileRecord> fileById(int64_t fileId);
         std::optional<FileRecord> fileByRootAndRelativePath(int64_t rootId, const std::string &relativePath);
 

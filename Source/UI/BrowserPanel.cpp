@@ -33,14 +33,23 @@ namespace sw
             return;
         }
 
-        g.setColour(juce::Colours::lightgrey);
         for (const auto &root : roots)
         {
             if (listArea.getHeight() < 18)
                 break;
 
+            auto rowArea = listArea.removeFromTop(18);
+            const bool isSelected = selectedRootId.has_value() && *selectedRootId == root.id;
+
+            if (isSelected)
+            {
+                g.setColour(juce::Colour(0xff35506b));
+                g.fillRect(rowArea);
+            }
+
+            g.setColour(juce::Colours::lightgrey);
             const juce::String line = juce::String(root.label) + "  (" + juce::String(root.path) + ")";
-            g.drawFittedText(line, listArea.removeFromTop(18), juce::Justification::left, 1);
+            g.drawFittedText(line, rowArea.reduced(2, 0), juce::Justification::left, 1);
         }
     }
 
@@ -63,6 +72,44 @@ namespace sw
     void BrowserPanel::setScanInProgress(bool inProgress)
     {
         (void)inProgress;
+    }
+
+    void BrowserPanel::setSelectedRootId(std::optional<int64_t> rootId)
+    {
+        selectedRootId = rootId;
+        repaint();
+    }
+
+    void BrowserPanel::mouseDown(const juce::MouseEvent &event)
+    {
+        constexpr int controlsBottomY = 30;
+        constexpr int scanRowHeight = 16;
+        constexpr int rowGap = 4;
+        constexpr int rowHeight = 18;
+
+        auto listArea = getLocalBounds().reduced(8);
+        listArea.removeFromTop(controlsBottomY + scanRowHeight + rowGap);
+
+        if (!listArea.contains(event.getPosition()))
+            return;
+
+        const int yOffset = event.y - listArea.getY();
+        if (yOffset < 0)
+            return;
+
+        const int rowIndex = yOffset / rowHeight;
+        if (rowIndex < 0 || rowIndex >= static_cast<int>(roots.size()))
+            return;
+
+        const auto clickedRootId = roots[static_cast<size_t>(rowIndex)].id;
+        if (selectedRootId.has_value() && *selectedRootId == clickedRootId)
+            selectedRootId.reset();
+        else
+            selectedRootId = clickedRootId;
+
+        repaint();
+        if (onRootSelected)
+            onRootSelected(selectedRootId);
     }
 
 } // namespace sw

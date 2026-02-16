@@ -54,6 +54,23 @@ namespace sw
         };
         addAndMakeVisible(applyOutputDeviceButton);
 
+        midiInputCombo.setTextWhenNoChoicesAvailable("No MIDI inputs");
+        midiInputCombo.onChange = [this]
+        {
+            if (!onMidiInputDeviceSelected)
+                return;
+
+            const int index = midiInputCombo.getSelectedItemIndex();
+            if (index < 0 || index >= midiInputDeviceIdentifiers.size())
+            {
+                onMidiInputDeviceSelected({});
+                return;
+            }
+
+            onMidiInputDeviceSelected(midiInputDeviceIdentifiers[index]);
+        };
+        addAndMakeVisible(midiInputCombo);
+
         keyboard.setAvailableRange(36, 96); // C2–C7 range for preview
         addAndMakeVisible(keyboard);
 
@@ -91,6 +108,10 @@ namespace sw
         outputDeviceCombo.setBounds(deviceRow.removeFromLeft(jmax(100, deviceRow.getWidth() - 58)));
         deviceRow.removeFromLeft(4);
         applyOutputDeviceButton.setBounds(deviceRow);
+
+        area.removeFromTop(rowSpacing);
+        auto midiRow = area.removeFromTop(comboRowHeight);
+        midiInputCombo.setBounds(midiRow);
 
         area.removeFromTop(rowSpacing);
         keyboard.setBounds(area);
@@ -131,6 +152,31 @@ namespace sw
             outputDeviceCombo.setText("", juce::dontSendNotification);
         else
             outputDeviceCombo.setSelectedItemIndex(0, juce::dontSendNotification);
+    }
+
+    void PreviewPanel::setAvailableMidiInputDevices(const juce::Array<juce::MidiDeviceInfo> &devices,
+                                                    const juce::String &currentDeviceIdentifier)
+    {
+        midiInputCombo.clear(juce::dontSendNotification);
+        midiInputDeviceIdentifiers.clear();
+
+        int id = 1;
+        int selectedIndex = -1;
+        for (const auto &device : devices)
+        {
+            midiInputCombo.addItem(device.name, id++);
+            midiInputDeviceIdentifiers.add(device.identifier);
+
+            if (device.identifier == currentDeviceIdentifier)
+                selectedIndex = midiInputDeviceIdentifiers.size() - 1;
+        }
+
+        if (selectedIndex >= 0)
+            midiInputCombo.setSelectedItemIndex(selectedIndex, juce::dontSendNotification);
+        else if (devices.isEmpty())
+            midiInputCombo.setText("", juce::dontSendNotification);
+        else
+            midiInputCombo.setSelectedItemIndex(0, juce::dontSendNotification);
     }
 
     bool PreviewPanel::keyPressed(const juce::KeyPress &key)

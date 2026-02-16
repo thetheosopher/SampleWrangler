@@ -5,6 +5,11 @@
 
 #include <JuceHeader.h>
 #include "MainComponent.h"
+#include "BinaryData.h"
+
+#if JUCE_WINDOWS
+#include <windows.h>
+#endif
 
 //==============================================================================
 class SampleWranglerApplication final : public juce::JUCEApplication
@@ -45,7 +50,29 @@ public:
                                  .findColour(ResizableWindow::backgroundColourId),
                              DocumentWindow::allButtons)
         {
+            constexpr int kMainIconResourceId = 101;
+
             setUsingNativeTitleBar(true);
+
+            const auto appIcon = juce::ImageFileFormat::loadFrom(BinaryData::SampleWrangler_ico,
+                                                                 BinaryData::SampleWrangler_icoSize);
+            if (appIcon.isValid())
+                setIcon(appIcon);
+
+#if JUCE_WINDOWS
+            if (auto *nativeHandle = getWindowHandle())
+            {
+                auto hwnd = static_cast<HWND>(nativeHandle);
+                auto module = reinterpret_cast<HINSTANCE>(::GetModuleHandleW(nullptr));
+
+                if (auto *bigIcon = reinterpret_cast<HICON>(::LoadImageW(module, MAKEINTRESOURCEW(kMainIconResourceId), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR)))
+                    ::SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(bigIcon));
+
+                if (auto *smallIcon = reinterpret_cast<HICON>(::LoadImageW(module, MAKEINTRESOURCEW(kMainIconResourceId), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR)))
+                    ::SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
+            }
+#endif
+
             setContentOwned(new sw::MainComponent(), true);
 
 #if JUCE_IOS || JUCE_ANDROID

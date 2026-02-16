@@ -31,6 +31,7 @@ set(APP_SOURCES
     Source/App/Main.cpp
     Source/App/MainComponent.cpp
     Source/App/MainComponent.h
+    Source/App/SampleWranglerIcon.rc
 )
 
 set(UI_SOURCES
@@ -89,6 +90,11 @@ juce_add_gui_app(SampleWrangler
     COMPANY_NAME "SampleWrangler"
 )
 
+juce_add_binary_data(SampleWranglerAssets
+    SOURCES
+        images/SampleWrangler.ico
+)
+
 juce_generate_juce_header(SampleWrangler)
 
 target_sources(SampleWrangler PRIVATE
@@ -131,6 +137,7 @@ target_link_libraries(SampleWrangler PRIVATE
     juce::juce_dsp
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
+    SampleWranglerAssets
     sqlite3
 )
 

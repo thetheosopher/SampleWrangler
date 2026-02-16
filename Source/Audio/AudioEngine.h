@@ -62,6 +62,9 @@ namespace sw
         juce::String getCurrentOutputDeviceName() const;
         bool setCurrentOutputDevice(const juce::String &deviceName, juce::String *errorMessage = nullptr);
 
+        bool isPreviewPlaying() const noexcept;
+        double getPreviewPlaybackProgressNormalized() const noexcept;
+
     private:
         void applyCurrentPitch();
 

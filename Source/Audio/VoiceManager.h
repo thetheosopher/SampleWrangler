@@ -34,6 +34,12 @@ namespace sw
         /// Set resample-style pitch shift in semitones.
         void setPitchSemitones(double semitones);
 
+        /// True while the current buffer is actively playing.
+        bool isPlaying() const noexcept;
+
+        /// Normalized playback position in [0..1] for the loaded sample.
+        double getPlaybackProgressNormalized() const noexcept;
+
     private:
         // Sample data — swapped atomically from message thread, read on audio thread.
         // Using a simple pointer swap; real implementation should use a lock-free
@@ -45,6 +51,7 @@ namespace sw
         std::atomic<bool> playing{false};
         std::atomic<double> playbackPos{0.0};
         std::atomic<double> playbackRate{1.0}; // ratio: 1.0 = original pitch
+        std::atomic<int> loadedSampleLength{0};
 
         double currentSampleRate = 44100.0;
 

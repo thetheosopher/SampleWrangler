@@ -23,14 +23,7 @@ namespace sw
         void setScanStatus(const juce::String &statusText);
         void setScanInProgress(bool inProgress);
 
-        std::function<void()> onAddRootRequested;
-        std::function<void()> onRescanAllRequested;
-        std::function<void()> onCancelScanRequested;
-
     private:
-        juce::TextButton addRootButton{"Add Root..."};
-        juce::TextButton rescanAllButton{"Rescan All"};
-        juce::TextButton cancelScanButton{"Cancel Scan"};
         std::vector<RootRecord> roots;
         juce::String scanStatus{"Idle"};
 

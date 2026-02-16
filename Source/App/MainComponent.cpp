@@ -8,16 +8,187 @@
 #include <cmath>
 #include <limits>
 #include <exception>
+#include <algorithm>
 
 namespace sw
 {
 
+    namespace
+    {
+        constexpr int kToolbarHeight = 36;
+        constexpr int kSplitterThickness = 5;
+        constexpr int kMinLeftPanelWidth = 180;
+        constexpr int kMinRightPanelWidth = 320;
+        constexpr int kMinResultsHeight = 120;
+        constexpr int kMinBottomHeight = 120;
+        constexpr int kMinPreviewWidth = 220;
+        constexpr int kMinWaveformWidth = 220;
+    }
+
+    namespace
+    {
+        std::unique_ptr<juce::Drawable> createFolderIcon(const juce::Colour colour)
+        {
+            auto drawable = std::make_unique<juce::DrawablePath>();
+            juce::Path icon;
+            icon.addRoundedRectangle(2.0f, 8.0f, 20.0f, 12.0f, 2.0f);
+            icon.addRoundedRectangle(4.0f, 4.0f, 9.0f, 5.0f, 1.5f);
+            drawable->setPath(icon);
+            drawable->setFill(colour);
+            return drawable;
+        }
+
+        std::unique_ptr<juce::Drawable> createRescanIcon(const juce::Colour colour)
+        {
+            auto drawable = std::make_unique<juce::DrawablePath>();
+            juce::Path icon;
+            icon.addCentredArc(12.0f, 12.0f, 8.0f, 8.0f, 0.0f,
+                               juce::MathConstants<float>::pi * 0.25f,
+                               juce::MathConstants<float>::pi * 1.75f,
+                               true);
+            icon.addTriangle(20.0f, 9.0f, 23.0f, 12.0f, 19.0f, 14.0f);
+            drawable->setPath(icon);
+            drawable->setStrokeFill(colour);
+            drawable->setStrokeType(juce::PathStrokeType(2.2f));
+            return drawable;
+        }
+
+        std::unique_ptr<juce::Drawable> createCancelIcon(const juce::Colour colour)
+        {
+            auto drawable = std::make_unique<juce::DrawablePath>();
+            juce::Path icon;
+            icon.addEllipse(3.0f, 3.0f, 18.0f, 18.0f);
+            icon.startNewSubPath(8.0f, 8.0f);
+            icon.lineTo(16.0f, 16.0f);
+            icon.startNewSubPath(16.0f, 8.0f);
+            icon.lineTo(8.0f, 16.0f);
+            drawable->setPath(icon);
+            drawable->setStrokeFill(colour);
+            drawable->setStrokeType(juce::PathStrokeType(2.0f));
+            return drawable;
+        }
+    }
+
     MainComponent::MainComponent()
     {
+        addAndMakeVisible(toolbar);
+        addAndMakeVisible(addRootToolbarButton);
+        addAndMakeVisible(rescanToolbarButton);
+        addAndMakeVisible(cancelScanToolbarButton);
         addAndMakeVisible(browserPanel);
+        addAndMakeVisible(leftRightSplitter);
         addAndMakeVisible(resultsPanel);
+        addAndMakeVisible(resultsBottomSplitter);
         addAndMakeVisible(waveformPanel);
         addAndMakeVisible(previewPanel);
+        addAndMakeVisible(previewWaveformSplitter);
+
+        leftRightSplitter.onDragged = [this](int deltaPixels)
+        {
+            auto content = getLocalBounds();
+            content.removeFromTop(kToolbarHeight);
+
+            const int totalWidth = content.getWidth() - kSplitterThickness;
+            if (totalWidth <= (kMinLeftPanelWidth + kMinRightPanelWidth))
+                return;
+
+            int currentLeftWidth = static_cast<int>(leftPanelRatio * static_cast<float>(totalWidth));
+            int nextLeftWidth = currentLeftWidth + deltaPixels;
+            nextLeftWidth = juce::jlimit(kMinLeftPanelWidth, totalWidth - kMinRightPanelWidth, nextLeftWidth);
+
+            leftPanelRatio = static_cast<float>(nextLeftWidth) / static_cast<float>(totalWidth);
+            resized();
+        };
+
+        resultsBottomSplitter.onDragged = [this](int deltaPixels)
+        {
+            auto content = getLocalBounds();
+            content.removeFromTop(kToolbarHeight);
+
+            const int totalWidth = content.getWidth() - kSplitterThickness;
+            if (totalWidth <= (kMinLeftPanelWidth + kMinRightPanelWidth))
+                return;
+
+            int leftWidth = static_cast<int>(leftPanelRatio * static_cast<float>(totalWidth));
+            leftWidth = juce::jlimit(kMinLeftPanelWidth, totalWidth - kMinRightPanelWidth, leftWidth);
+
+            juce::Rectangle<int> rightArea = content;
+            rightArea.removeFromLeft(leftWidth + kSplitterThickness);
+
+            const int totalHeight = rightArea.getHeight() - kSplitterThickness;
+            if (totalHeight <= (kMinResultsHeight + kMinBottomHeight))
+                return;
+
+            int currentBottomHeight = static_cast<int>(bottomPanelRatio * static_cast<float>(totalHeight));
+            int nextBottomHeight = currentBottomHeight - deltaPixels;
+            nextBottomHeight = juce::jlimit(kMinBottomHeight, totalHeight - kMinResultsHeight, nextBottomHeight);
+
+            bottomPanelRatio = static_cast<float>(nextBottomHeight) / static_cast<float>(totalHeight);
+            resized();
+        };
+
+        previewWaveformSplitter.onDragged = [this](int deltaPixels)
+        {
+            auto content = getLocalBounds();
+            content.removeFromTop(kToolbarHeight);
+
+            const int totalWidth = content.getWidth() - kSplitterThickness;
+            if (totalWidth <= (kMinLeftPanelWidth + kMinRightPanelWidth))
+                return;
+
+            int leftWidth = static_cast<int>(leftPanelRatio * static_cast<float>(totalWidth));
+            leftWidth = juce::jlimit(kMinLeftPanelWidth, totalWidth - kMinRightPanelWidth, leftWidth);
+
+            juce::Rectangle<int> rightArea = content;
+            rightArea.removeFromLeft(leftWidth + kSplitterThickness);
+
+            const int totalHeight = rightArea.getHeight() - kSplitterThickness;
+            if (totalHeight <= (kMinResultsHeight + kMinBottomHeight))
+                return;
+
+            int bottomHeight = static_cast<int>(bottomPanelRatio * static_cast<float>(totalHeight));
+            bottomHeight = juce::jlimit(kMinBottomHeight, totalHeight - kMinResultsHeight, bottomHeight);
+
+            juce::Rectangle<int> bottomArea = rightArea;
+            bottomArea.removeFromTop(rightArea.getHeight() - bottomHeight);
+
+            const int splitWidth = bottomArea.getWidth() - kSplitterThickness;
+            if (splitWidth <= (kMinPreviewWidth + kMinWaveformWidth))
+                return;
+
+            int currentPreviewWidth = static_cast<int>(previewPanelRatio * static_cast<float>(splitWidth));
+            int nextPreviewWidth = currentPreviewWidth + deltaPixels;
+            nextPreviewWidth = juce::jlimit(kMinPreviewWidth, splitWidth - kMinWaveformWidth, nextPreviewWidth);
+
+            previewPanelRatio = static_cast<float>(nextPreviewWidth) / static_cast<float>(splitWidth);
+            resized();
+        };
+
+        addRootToolbarButton.setImages(createFolderIcon(juce::Colours::white).release(),
+                                       createFolderIcon(juce::Colours::lightgrey).release());
+        addRootToolbarButton.setTooltip("Add a root folder to the library");
+        addRootToolbarButton.onClick = [this]
+        {
+            handleAddRootClicked();
+        };
+
+        rescanToolbarButton.setImages(createRescanIcon(juce::Colours::white).release(),
+                                      createRescanIcon(juce::Colours::lightgrey).release());
+        rescanToolbarButton.setTooltip("Rescan all configured roots");
+        rescanToolbarButton.onClick = [this]
+        {
+            handleRescanAllClicked();
+        };
+
+        cancelScanToolbarButton.setImages(createCancelIcon(juce::Colours::white).release(),
+                                          createCancelIcon(juce::Colours::lightgrey).release());
+        cancelScanToolbarButton.setTooltip("Cancel the active scan");
+        cancelScanToolbarButton.onClick = [this]
+        {
+            cancelScan();
+        };
+
+        updateToolbarScanState(false);
 
         const auto appDataDir = defaultCacheDirectory();
         std::filesystem::create_directories(std::filesystem::path(appDataDir).parent_path());
@@ -29,21 +200,6 @@ namespace sw
                                                    "Database Error",
                                                    "Failed to open catalog database:\n" + juce::String(dbPath));
         }
-
-        browserPanel.onAddRootRequested = [this]
-        {
-            handleAddRootClicked();
-        };
-
-        browserPanel.onCancelScanRequested = [this]
-        {
-            cancelScan();
-        };
-
-        browserPanel.onRescanAllRequested = [this]
-        {
-            handleRescanAllClicked();
-        };
 
         resultsPanel.onSearchQueryChanged = [this](const std::string &query)
         {
@@ -63,11 +219,13 @@ namespace sw
         previewPanel.onPlayRequested = [this]
         {
             audioEngine.play();
+            waveformPanel.setPlayheadNormalized(0.0f);
         };
 
         previewPanel.onStopRequested = [this]
         {
             audioEngine.stop();
+            waveformPanel.setPlayheadNormalized(-1.0f);
         };
 
         previewPanel.onPitchChanged = [this](double semitones)
@@ -129,11 +287,53 @@ namespace sw
         restoreLastSelection();
         restoreScanSummaryStatus();
         browserPanel.setScanInProgress(false);
+        updateToolbarScanState(false);
+        startTimerHz(30);
 
         setSize(1200, 800);
     }
 
     MainComponent::~MainComponent() = default;
+
+    void MainComponent::paint(juce::Graphics &g)
+    {
+        auto toolbarBounds = getLocalBounds().removeFromTop(kToolbarHeight);
+        g.setColour(juce::Colour(0xff272c33));
+        g.fillRect(toolbarBounds);
+
+        g.setColour(juce::Colours::darkgrey.withAlpha(0.9f));
+        g.drawHorizontalLine(toolbarBounds.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
+    }
+
+    MainComponent::SplitterBar::SplitterBar(Orientation orientationIn)
+        : orientation(orientationIn)
+    {
+        setMouseCursor(orientation == Orientation::vertical
+                           ? juce::MouseCursor::LeftRightResizeCursor
+                           : juce::MouseCursor::UpDownResizeCursor);
+    }
+
+    void MainComponent::SplitterBar::paint(juce::Graphics &g)
+    {
+        g.fillAll(juce::Colours::darkgrey.withAlpha(0.75f));
+    }
+
+    void MainComponent::SplitterBar::mouseDown(const juce::MouseEvent &event)
+    {
+        lastScreenPosition = event.getScreenPosition();
+    }
+
+    void MainComponent::SplitterBar::mouseDrag(const juce::MouseEvent &event)
+    {
+        const auto screenPosition = event.getScreenPosition();
+        const int delta = orientation == Orientation::vertical
+                              ? (screenPosition.x - lastScreenPosition.x)
+                              : (screenPosition.y - lastScreenPosition.y);
+
+        lastScreenPosition = screenPosition;
+        if (onDragged != nullptr)
+            onDragged(delta);
+    }
 
     void MainComponent::refreshRoots()
     {
@@ -272,6 +472,7 @@ namespace sw
         if (file.indexOnly)
         {
             waveformPanel.setPeaks({});
+            waveformPanel.setPlayheadNormalized(-1.0f);
             if (showIndexOnlyAlert)
             {
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
@@ -361,10 +562,23 @@ namespace sw
 
                     safeThis->audioEngine.loadPreviewBuffer(std::move(previewBuffer), sampleRate);
                     safeThis->waveformPanel.setPeaks(*peaks);
+                    safeThis->waveformPanel.setPlayheadNormalized(-1.0f);
                     if (playWhenReady)
                         safeThis->audioEngine.play(); });
             },
             JobPriority::High});
+    }
+
+    void MainComponent::timerCallback()
+    {
+        if (!audioEngine.isPreviewPlaying())
+        {
+            waveformPanel.setPlayheadNormalized(-1.0f);
+            return;
+        }
+
+        const float progress = static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized());
+        waveformPanel.setPlayheadNormalized(progress);
     }
 
     void MainComponent::handleAddRootClicked()
@@ -417,6 +631,7 @@ namespace sw
                                       std::function<void()> onCompleted)
     {
         scanInProgress = true;
+        updateToolbarScanState(true);
         scannedFilesCount = 0;
         scanStartTime = std::chrono::steady_clock::now();
         const juce::String rootProgressPrefix = rescanAllInProgress
@@ -459,6 +674,7 @@ namespace sw
                     browserPanel.setScanStatus(summary);
                     persistScanSummaryStatus(summary);
                     browserPanel.setScanInProgress(false);
+                    updateToolbarScanState(false);
                     refreshResults();
                     resultsPanel.selectFirstRowIfNoneSelected();
 
@@ -542,27 +758,56 @@ namespace sw
             browserPanel.setScanStatus(summary);
             persistScanSummaryStatus(summary);
             browserPanel.setScanInProgress(false);
+            updateToolbarScanState(false);
             refreshResults();
             resultsPanel.selectFirstRowIfNoneSelected(); });
+    }
+
+    void MainComponent::updateToolbarScanState(bool inProgress)
+    {
+        addRootToolbarButton.setEnabled(!inProgress);
+        rescanToolbarButton.setEnabled(!inProgress);
+        cancelScanToolbarButton.setEnabled(inProgress);
     }
 
     void MainComponent::resized()
     {
         auto area = getLocalBounds();
 
-        // Left panel – browser / roots tree (250 px wide)
-        browserPanel.setBounds(area.removeFromLeft(250));
+        auto toolbarArea = area.removeFromTop(kToolbarHeight).reduced(6, 4);
+        toolbar.setBounds(toolbarArea);
 
-        // Bottom strip – preview controls (160 px tall)
-        auto bottomArea = area.removeFromBottom(160);
+        constexpr int iconButtonSize = 28;
+        constexpr int toolbarGap = 6;
+        addRootToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        rescanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        cancelScanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
 
-        // Right portion of bottom – waveform (takes remaining width)
-        // Left portion of bottom – preview controls (300 px)
-        previewPanel.setBounds(bottomArea.removeFromLeft(300));
+        const int totalWidth = area.getWidth() - kSplitterThickness;
+        int leftWidth = static_cast<int>(leftPanelRatio * static_cast<float>(totalWidth));
+        leftWidth = juce::jlimit(kMinLeftPanelWidth, juce::jmax(kMinLeftPanelWidth, totalWidth - kMinRightPanelWidth), leftWidth);
+
+        browserPanel.setBounds(area.removeFromLeft(leftWidth));
+        leftRightSplitter.setBounds(area.removeFromLeft(kSplitterThickness));
+
+        auto rightArea = area;
+        const int totalHeight = rightArea.getHeight() - kSplitterThickness;
+        int bottomHeight = static_cast<int>(bottomPanelRatio * static_cast<float>(totalHeight));
+        bottomHeight = juce::jlimit(kMinBottomHeight, juce::jmax(kMinBottomHeight, totalHeight - kMinResultsHeight), bottomHeight);
+
+        resultsPanel.setBounds(rightArea.removeFromTop(rightArea.getHeight() - bottomHeight));
+        resultsBottomSplitter.setBounds(rightArea.removeFromTop(kSplitterThickness));
+
+        auto bottomArea = rightArea;
+        const int bottomWidth = bottomArea.getWidth() - kSplitterThickness;
+        int previewWidth = static_cast<int>(previewPanelRatio * static_cast<float>(bottomWidth));
+        previewWidth = juce::jlimit(kMinPreviewWidth, juce::jmax(kMinPreviewWidth, bottomWidth - kMinWaveformWidth), previewWidth);
+
+        previewPanel.setBounds(bottomArea.removeFromLeft(previewWidth));
+        previewWaveformSplitter.setBounds(bottomArea.removeFromLeft(kSplitterThickness));
         waveformPanel.setBounds(bottomArea);
-
-        // Center – results / search list
-        resultsPanel.setBounds(area);
     }
 
 } // namespace sw

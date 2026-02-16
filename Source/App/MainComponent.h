@@ -19,12 +19,14 @@ namespace sw
 {
 
     /// Top-level component that owns the main layout and sub-panels.
-    class MainComponent final : public juce::Component
+    class MainComponent final : public juce::Component,
+                                private juce::Timer
     {
     public:
         MainComponent();
         ~MainComponent() override;
 
+        void paint(juce::Graphics &g) override;
         void resized() override;
 
     private:
@@ -50,12 +52,49 @@ namespace sw
         void handleAddRootClicked();
         void handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert);
         std::string rootPathForId(int64_t rootId);
+        void timerCallback() override;
+        void updateToolbarScanState(bool inProgress);
+
+        class SplitterBar final : public juce::Component
+        {
+        public:
+            enum class Orientation
+            {
+                vertical,
+                horizontal
+            };
+
+            explicit SplitterBar(Orientation orientation);
+
+            std::function<void(int deltaPixels)> onDragged;
+
+            void paint(juce::Graphics &g) override;
+            void mouseDown(const juce::MouseEvent &event) override;
+            void mouseDrag(const juce::MouseEvent &event) override;
+
+        private:
+            Orientation orientation;
+            juce::Point<int> lastScreenPosition;
+        };
 
         // Owned sub-panels
+        juce::Component toolbar;
+        juce::DrawableButton addRootToolbarButton{"Add Root", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton rescanToolbarButton{"Rescan All", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton cancelScanToolbarButton{"Cancel Scan", juce::DrawableButton::ImageFitted};
+        juce::TooltipWindow tooltipWindow{this};
+
         BrowserPanel browserPanel;
+        SplitterBar leftRightSplitter{SplitterBar::Orientation::vertical};
         ResultsPanel resultsPanel;
+        SplitterBar resultsBottomSplitter{SplitterBar::Orientation::horizontal};
         WaveformPanel waveformPanel;
         PreviewPanel previewPanel;
+        SplitterBar previewWaveformSplitter{SplitterBar::Orientation::vertical};
+
+        float leftPanelRatio = 0.24f;
+        float bottomPanelRatio = 0.24f;
+        float previewPanelRatio = 0.35f;
 
         // Core subsystems (non-UI)
         CatalogDb catalogDb;

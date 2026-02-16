@@ -167,6 +167,16 @@ namespace sw
         return error.isEmpty();
     }
 
+    bool AudioEngine::isPreviewPlaying() const noexcept
+    {
+        return voiceManager.isPlaying();
+    }
+
+    double AudioEngine::getPreviewPlaybackProgressNormalized() const noexcept
+    {
+        return voiceManager.getPlaybackProgressNormalized();
+    }
+
     void AudioEngine::applyCurrentPitch()
     {
         const double base = basePitchSemitones.load(std::memory_order_relaxed);

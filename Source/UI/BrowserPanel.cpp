@@ -3,31 +3,7 @@
 namespace sw
 {
 
-    BrowserPanel::BrowserPanel()
-    {
-        addAndMakeVisible(addRootButton);
-        addAndMakeVisible(rescanAllButton);
-        addAndMakeVisible(cancelScanButton);
-
-        addRootButton.onClick = [this]
-        {
-            if (onAddRootRequested)
-                onAddRootRequested();
-        };
-
-        rescanAllButton.onClick = [this]
-        {
-            if (onRescanAllRequested)
-                onRescanAllRequested();
-        };
-
-        cancelScanButton.onClick = [this]
-        {
-            if (onCancelScanRequested)
-                onCancelScanRequested();
-        };
-        cancelScanButton.setEnabled(false);
-    }
+    BrowserPanel::BrowserPanel() = default;
 
     void BrowserPanel::paint(juce::Graphics &g)
     {
@@ -36,11 +12,12 @@ namespace sw
         g.setFont(14.0f);
         g.drawText("Browser", getLocalBounds().removeFromTop(24), juce::Justification::centred);
 
-        constexpr int controlsBottomY = 68;
+        constexpr int controlsBottomY = 30;
         g.setColour(juce::Colours::darkgrey.withAlpha(0.8f));
         g.drawHorizontalLine(controlsBottomY - 2, 8.0f, static_cast<float>(getWidth() - 8));
 
-        auto listArea = getLocalBounds().reduced(8).withTrimmedTop(controlsBottomY);
+        auto listArea = getLocalBounds().reduced(8);
+        listArea.removeFromTop(controlsBottomY);
 
         g.setColour(juce::Colours::lightgreen);
         g.setFont(11.0f);
@@ -69,14 +46,6 @@ namespace sw
 
     void BrowserPanel::resized()
     {
-        auto area = getLocalBounds().reduced(4);
-        auto topRow = area.removeFromTop(28);
-        addRootButton.setBounds(topRow.removeFromLeft(topRow.getWidth() / 2 - 2));
-        topRow.removeFromLeft(4);
-        rescanAllButton.setBounds(topRow);
-
-        area.removeFromTop(4);
-        cancelScanButton.setBounds(area.removeFromTop(28));
     }
 
     void BrowserPanel::setRoots(std::vector<RootRecord> newRoots)
@@ -93,9 +62,7 @@ namespace sw
 
     void BrowserPanel::setScanInProgress(bool inProgress)
     {
-        addRootButton.setEnabled(!inProgress);
-        rescanAllButton.setEnabled(!inProgress);
-        cancelScanButton.setEnabled(inProgress);
+        (void)inProgress;
     }
 
 } // namespace sw

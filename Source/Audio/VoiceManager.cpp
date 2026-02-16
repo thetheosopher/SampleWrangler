@@ -77,6 +77,7 @@ namespace sw
     void VoiceManager::loadBuffer(std::unique_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate)
     {
         stop();
+        loadedSampleLength.store(buffer != nullptr ? buffer->getNumSamples() : 0, std::memory_order_relaxed);
         ownedBuffer = std::move(buffer);
         bufferSampleRate = fileSampleRate;
         sampleBuffer.store(ownedBuffer.get(), std::memory_order_release);
@@ -101,6 +102,21 @@ namespace sw
         // Resample-style: ratio = 2^(semitones/12)
         double ratio = std::pow(2.0, semitones / 12.0);
         playbackRate.store(ratio, std::memory_order_relaxed);
+    }
+
+    bool VoiceManager::isPlaying() const noexcept
+    {
+        return playing.load(std::memory_order_relaxed);
+    }
+
+    double VoiceManager::getPlaybackProgressNormalized() const noexcept
+    {
+        const int length = loadedSampleLength.load(std::memory_order_relaxed);
+        if (length <= 0)
+            return 0.0;
+
+        const double position = playbackPos.load(std::memory_order_relaxed);
+        return juce::jlimit(0.0, 1.0, position / static_cast<double>(length));
     }
 
 } // namespace sw

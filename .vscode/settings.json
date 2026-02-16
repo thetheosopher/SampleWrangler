@@ -1,0 +1,19 @@
+{
+    "cmake.configureOnOpen": true,
+    "cmake.configurePreset": "vs2022-debug",
+    "cmake.buildPreset": "vs2022-debug",
+    "cmake.buildDirectory": "${workspaceFolder}/build/${buildPreset}",
+    "cmake.useCMakePresets": "always",
+    "C_Cpp.default.cppStandard": "c++20",
+    "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+    "files.associations": {
+        "*.h": "cpp",
+        "*.hpp": "cpp"
+    },
+    "files.exclude": {
+        "**/build": true,
+        "**/.git": true,
+        "**/JUCE": true
+    },
+    "editor.formatOnSave": true
+}

@@ -1,0 +1,32 @@
+#pragma once
+
+#include <JuceHeader.h>
+
+namespace sw
+{
+
+    /// Waveform overview display with cached peaks.
+    class WaveformPanel final : public juce::Component
+    {
+    public:
+        WaveformPanel();
+        ~WaveformPanel() override = default;
+
+        void paint(juce::Graphics &g) override;
+        void resized() override;
+
+        /// Load waveform peaks for display. Called from a background thread result.
+        void setPeaks(const std::vector<float> &peaks);
+        void setPlayheadNormalized(float playheadPosition);
+        void setLoopRegionNormalized(float loopStart, float loopEnd);
+
+    private:
+        std::vector<float> currentPeaks;
+        float playheadNormalized = -1.0f;
+        float loopStartNormalized = -1.0f;
+        float loopEndNormalized = -1.0f;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformPanel)
+    };
+
+} // namespace sw

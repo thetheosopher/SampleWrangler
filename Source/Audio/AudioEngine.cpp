@@ -82,6 +82,16 @@ namespace sw
         applyCurrentPitch();
     }
 
+    void AudioEngine::setLoopEnabled(bool enabled)
+    {
+        voiceManager.setLoopEnabled(enabled);
+    }
+
+    bool AudioEngine::isLoopEnabled() const noexcept
+    {
+        return voiceManager.isLoopEnabled();
+    }
+
     void AudioEngine::handleMidiMessage(const juce::MidiMessage &message)
     {
         if (message.isNoteOn())
@@ -177,6 +187,27 @@ namespace sw
         return voiceManager.getPlaybackProgressNormalized();
     }
 
+    void AudioEngine::setPreviewPlaybackProgressNormalized(double normalizedProgress)
+    {
+        voiceManager.setPlaybackProgressNormalized(normalizedProgress);
+    }
+
+    void AudioEngine::setPreviewRootMidiNote(int midiNote)
+    {
+        voiceManager.setPreviewRootMidiNote(midiNote);
+        applyCurrentPitch();
+    }
+
+    void AudioEngine::clearPreviewLoopRegion()
+    {
+        voiceManager.setLoopRegionSamples(-1, -1);
+    }
+
+    void AudioEngine::setPreviewLoopRegionSamples(int64_t startSample, int64_t endSample)
+    {
+        voiceManager.setLoopRegionSamples(startSample, endSample);
+    }
+
     void AudioEngine::applyCurrentPitch()
     {
         const double base = basePitchSemitones.load(std::memory_order_relaxed);
@@ -188,8 +219,8 @@ namespace sw
             return;
         }
 
-        constexpr int middleC = 60;
-        const double midiOffset = static_cast<double>(note - middleC);
+        const int rootNote = voiceManager.getPreviewRootMidiNote();
+        const double midiOffset = static_cast<double>(note - rootNote);
         voiceManager.setPitchSemitones(base + midiOffset);
     }
 

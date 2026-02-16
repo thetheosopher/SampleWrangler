@@ -49,9 +49,21 @@ namespace sw
                 else
                     rec.durationSec = std::nullopt;
 
+                rec.totalSamples = static_cast<int64_t>(reader->lengthInSamples);
                 rec.sampleRate = static_cast<int>(reader->sampleRate);
                 rec.channels = static_cast<int>(reader->numChannels);
                 rec.bitDepth = reader->bitsPerSample;
+                rec.codec = reader->getFormatName().toStdString();
+
+                if (rec.durationSec.has_value() && *rec.durationSec > 0.0 && rec.sizeBytes > 0)
+                {
+                    const auto kbps = static_cast<int>((static_cast<double>(rec.sizeBytes) * 8.0) / (*rec.durationSec * 1000.0));
+                    rec.bitrateKbps = kbps;
+                }
+                else
+                {
+                    rec.bitrateKbps = std::nullopt;
+                }
 
                 catalogDb.upsertFile(rec);
             },

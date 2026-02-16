@@ -34,11 +34,18 @@ namespace sw
         /// Set resample-style pitch shift in semitones.
         void setPitchSemitones(double semitones);
 
+        void setLoopEnabled(bool enabled);
+        bool isLoopEnabled() const noexcept;
+        void setLoopRegionSamples(int64_t startSample, int64_t endSample);
+        void setPreviewRootMidiNote(int midiNote);
+        int getPreviewRootMidiNote() const noexcept;
+
         /// True while the current buffer is actively playing.
         bool isPlaying() const noexcept;
 
         /// Normalized playback position in [0..1] for the loaded sample.
         double getPlaybackProgressNormalized() const noexcept;
+        void setPlaybackProgressNormalized(double normalizedProgress);
 
     private:
         // Sample data — swapped atomically from message thread, read on audio thread.
@@ -49,6 +56,10 @@ namespace sw
         double bufferSampleRate = 44100.0;
 
         std::atomic<bool> playing{false};
+        std::atomic<bool> loopEnabled{false};
+        std::atomic<int64_t> loopStartSample{-1};
+        std::atomic<int64_t> loopEndSample{-1};
+        std::atomic<int> previewRootMidiNote{60};
         std::atomic<double> playbackPos{0.0};
         std::atomic<double> playbackRate{1.0}; // ratio: 1.0 = original pitch
         std::atomic<int> loadedSampleLength{0};

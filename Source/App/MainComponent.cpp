@@ -84,15 +84,94 @@ namespace sw
             drawable->setStrokeType(juce::PathStrokeType(1.8f));
             return drawable;
         }
+
+        std::unique_ptr<juce::Drawable> createDeleteIcon(const juce::Colour colour)
+        {
+            auto drawable = std::make_unique<juce::DrawablePath>();
+            juce::Path icon;
+            icon.addRectangle(6.0f, 8.0f, 12.0f, 12.0f);
+            icon.addRectangle(5.0f, 6.0f, 14.0f, 2.0f);
+            icon.addRectangle(9.0f, 4.0f, 6.0f, 2.0f);
+            icon.startNewSubPath(10.0f, 10.0f);
+            icon.lineTo(10.0f, 18.0f);
+            icon.startNewSubPath(14.0f, 10.0f);
+            icon.lineTo(14.0f, 18.0f);
+            drawable->setPath(icon);
+            drawable->setStrokeFill(colour);
+            drawable->setStrokeType(juce::PathStrokeType(1.8f));
+            return drawable;
+        }
+
+        std::unique_ptr<juce::Drawable> createExplorerIcon(const juce::Colour colour)
+        {
+            auto drawable = std::make_unique<juce::DrawablePath>();
+            juce::Path icon;
+            icon.addRoundedRectangle(3.0f, 8.0f, 14.0f, 10.0f, 1.8f);
+            icon.addRoundedRectangle(4.0f, 5.0f, 7.0f, 3.0f, 1.2f);
+            icon.startNewSubPath(12.0f, 6.0f);
+            icon.lineTo(20.0f, 6.0f);
+            icon.lineTo(20.0f, 14.0f);
+            icon.startNewSubPath(15.0f, 11.0f);
+            icon.lineTo(20.0f, 6.0f);
+            icon.startNewSubPath(16.0f, 6.0f);
+            icon.lineTo(20.0f, 6.0f);
+            icon.lineTo(20.0f, 10.0f);
+            drawable->setPath(icon);
+            drawable->setStrokeFill(colour);
+            drawable->setStrokeType(juce::PathStrokeType(1.8f));
+            return drawable;
+        }
+
+        std::unique_ptr<juce::Drawable> createThemeIcon(const juce::Colour colour, bool showSun)
+        {
+            auto drawable = std::make_unique<juce::DrawablePath>();
+            juce::Path icon;
+
+            if (showSun)
+            {
+                icon.addEllipse(8.0f, 8.0f, 8.0f, 8.0f);
+                icon.startNewSubPath(12.0f, 3.0f);
+                icon.lineTo(12.0f, 6.0f);
+                icon.startNewSubPath(12.0f, 18.0f);
+                icon.lineTo(12.0f, 21.0f);
+                icon.startNewSubPath(3.0f, 12.0f);
+                icon.lineTo(6.0f, 12.0f);
+                icon.startNewSubPath(18.0f, 12.0f);
+                icon.lineTo(21.0f, 12.0f);
+                icon.startNewSubPath(5.4f, 5.4f);
+                icon.lineTo(7.2f, 7.2f);
+                icon.startNewSubPath(16.8f, 16.8f);
+                icon.lineTo(18.6f, 18.6f);
+                icon.startNewSubPath(16.8f, 7.2f);
+                icon.lineTo(18.6f, 5.4f);
+                icon.startNewSubPath(5.4f, 18.6f);
+                icon.lineTo(7.2f, 16.8f);
+            }
+            else
+            {
+                icon.addCentredArc(12.0f, 12.0f, 7.0f, 7.0f, 0.0f,
+                                   juce::MathConstants<float>::pi * 0.2f,
+                                   juce::MathConstants<float>::pi * 1.8f,
+                                   true);
+            }
+
+            drawable->setPath(icon);
+            drawable->setStrokeFill(colour);
+            drawable->setStrokeType(juce::PathStrokeType(1.8f));
+            return drawable;
+        }
     }
 
     MainComponent::MainComponent()
     {
         addAndMakeVisible(toolbar);
         addAndMakeVisible(addRootToolbarButton);
+        addAndMakeVisible(openSourceInExplorerToolbarButton);
+        addAndMakeVisible(deleteRootToolbarButton);
         addAndMakeVisible(rescanToolbarButton);
         addAndMakeVisible(cancelScanToolbarButton);
         addAndMakeVisible(resetLayoutToolbarButton);
+        addAndMakeVisible(themeToolbarButton);
         addAndMakeVisible(browserPanel);
         addAndMakeVisible(leftRightSplitter);
         addAndMakeVisible(resultsPanel);
@@ -197,7 +276,13 @@ namespace sw
         browserPanel.onRootSelected = [this](std::optional<int64_t> rootId)
         {
             selectedRootFilterId = rootId;
+            updateToolbarScanState(scanInProgress);
             refreshResults(currentSearchQuery);
+        };
+
+        browserPanel.onDeleteSelectedRootRequested = [this]()
+        {
+            handleDeleteRootClicked();
         };
 
         addRootToolbarButton.setImages(createFolderIcon(juce::Colours::white).release(),
@@ -206,6 +291,22 @@ namespace sw
         addRootToolbarButton.onClick = [this]
         {
             handleAddRootClicked();
+        };
+
+        openSourceInExplorerToolbarButton.setImages(createExplorerIcon(juce::Colours::white).release(),
+                                                    createExplorerIcon(juce::Colours::lightgrey).release());
+        openSourceInExplorerToolbarButton.setTooltip("Open selected source in Windows File Explorer");
+        openSourceInExplorerToolbarButton.onClick = [this]
+        {
+            handleOpenSourceInExplorerClicked();
+        };
+
+        deleteRootToolbarButton.setImages(createDeleteIcon(juce::Colours::white).release(),
+                                          createDeleteIcon(juce::Colours::lightgrey).release());
+        deleteRootToolbarButton.setTooltip("Delete selected source and its indexed files");
+        deleteRootToolbarButton.onClick = [this]
+        {
+            handleDeleteRootClicked();
         };
 
         rescanToolbarButton.setImages(createRescanIcon(juce::Colours::white).release(),
@@ -232,6 +333,11 @@ namespace sw
             resetLayout();
         };
 
+        themeToolbarButton.onClick = [this]
+        {
+            applyThemeMode(!darkModeEnabled, true);
+        };
+
         updateToolbarScanState(false);
 
         const auto appDataDir = defaultCacheDirectory();
@@ -247,7 +353,10 @@ namespace sw
         else
         {
             restoreLayoutSettings();
+            restoreThemeSettings();
         }
+
+        applyThemeMode(darkModeEnabled, false);
 
         resultsPanel.onSearchQueryChanged = [this](const std::string &query)
         {
@@ -267,13 +376,26 @@ namespace sw
         previewPanel.onPlayRequested = [this]
         {
             audioEngine.play();
-            waveformPanel.setPlayheadNormalized(0.0f);
+            waveformPanel.setPlayheadNormalized(static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized()));
         };
 
         previewPanel.onStopRequested = [this]
         {
             audioEngine.stop();
-            waveformPanel.setPlayheadNormalized(-1.0f);
+            waveformPanel.setPlayheadNormalized(static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized()));
+        };
+
+        waveformPanel.onScrubRequested = [this](float normalizedPosition)
+        {
+            audioEngine.setPreviewPlaybackProgressNormalized(static_cast<double>(normalizedPosition));
+            waveformPanel.setPlayheadNormalized(normalizedPosition);
+        };
+
+        previewPanel.onLoopPlaybackChanged = [this](bool enabled)
+        {
+            audioEngine.setLoopEnabled(enabled);
+            persistPreviewLoopEnabled(enabled);
+            updateWaveformLoopOverlay();
         };
 
         previewPanel.onPitchChanged = [this](double semitones)
@@ -351,12 +473,12 @@ namespace sw
     void MainComponent::paint(juce::Graphics &g)
     {
         auto toolbarBounds = getLocalBounds().removeFromTop(kToolbarHeight);
-        g.setColour(juce::Colour(0xff272c33));
+        g.setColour(darkModeEnabled ? juce::Colour(0xff272c33) : juce::Colour(0xffe8eaee));
         g.fillRect(toolbarBounds);
 
         if (toolbarFeedbackTicksRemaining > 0 && toolbarFeedbackText.isNotEmpty())
         {
-            g.setColour(juce::Colours::lightgreen);
+            g.setColour(darkModeEnabled ? juce::Colours::lightgreen : juce::Colour(0xff1f7a43));
             g.setFont(12.0f);
             g.drawFittedText(toolbarFeedbackText,
                              toolbarBounds.reduced(10, 0),
@@ -364,7 +486,7 @@ namespace sw
                              1);
         }
 
-        g.setColour(juce::Colours::darkgrey.withAlpha(0.9f));
+        g.setColour(darkModeEnabled ? juce::Colours::darkgrey.withAlpha(0.9f) : juce::Colour(0xffbcbcbc));
         g.drawHorizontalLine(toolbarBounds.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
     }
 
@@ -419,6 +541,7 @@ namespace sw
 
         browserPanel.setRoots(roots);
         browserPanel.setSelectedRootId(selectedRootFilterId);
+        updateToolbarScanState(scanInProgress);
     }
 
     void MainComponent::refreshResults(const std::string &query)
@@ -537,19 +660,27 @@ namespace sw
     void MainComponent::restorePreviewSettings()
     {
         const auto savedPitch = catalogDb.getAppSetting("preview.pitchSemitones");
-        if (!savedPitch.has_value())
-            return;
+        if (savedPitch.has_value())
+        {
+            try
+            {
+                const double parsed = std::stod(*savedPitch);
+                const double clamped = juce::jlimit(-24.0, 24.0, parsed);
+                previewPanel.setPitchSemitones(clamped);
+                audioEngine.setPitchSemitones(clamped);
+            }
+            catch (const std::exception &)
+            {
+            }
+        }
 
-        try
-        {
-            const double parsed = std::stod(*savedPitch);
-            const double clamped = juce::jlimit(-24.0, 24.0, parsed);
-            previewPanel.setPitchSemitones(clamped);
-            audioEngine.setPitchSemitones(clamped);
-        }
-        catch (const std::exception &)
-        {
-        }
+        bool loopEnabled = false;
+        if (const auto savedLoop = catalogDb.getAppSetting("preview.loopEnabled"))
+            loopEnabled = (*savedLoop == "1" || *savedLoop == "true" || *savedLoop == "True");
+
+        previewPanel.setLoopEnabled(loopEnabled);
+        audioEngine.setLoopEnabled(loopEnabled);
+        updateWaveformLoopOverlay();
     }
 
     void MainComponent::restoreMidiInputSettings()
@@ -558,9 +689,45 @@ namespace sw
             selectedMidiInputIdentifier = *saved;
     }
 
+    void MainComponent::restoreThemeSettings()
+    {
+        if (const auto savedThemeMode = catalogDb.getAppSetting("ui.themeMode"))
+            darkModeEnabled = (*savedThemeMode != "light");
+    }
+
     void MainComponent::persistPreviewPitch(double semitones)
     {
         catalogDb.setAppSetting("preview.pitchSemitones", juce::String(semitones).toStdString());
+    }
+
+    void MainComponent::persistPreviewLoopEnabled(bool enabled)
+    {
+        catalogDb.setAppSetting("preview.loopEnabled", enabled ? "1" : "0");
+    }
+
+    void MainComponent::persistThemeMode(bool darkMode)
+    {
+        catalogDb.setAppSetting("ui.themeMode", darkMode ? "dark" : "light");
+    }
+
+    void MainComponent::applyThemeMode(bool darkMode, bool persist)
+    {
+        darkModeEnabled = darkMode;
+
+        browserPanel.setDarkMode(darkModeEnabled);
+        resultsPanel.setDarkMode(darkModeEnabled);
+        previewPanel.setDarkMode(darkModeEnabled);
+        waveformPanel.setDarkMode(darkModeEnabled);
+
+        themeToolbarButton.setImages(
+            createThemeIcon(darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020), !darkModeEnabled).release(),
+            createThemeIcon(darkModeEnabled ? juce::Colours::lightgrey : juce::Colour(0xff4a4a4a), !darkModeEnabled).release());
+        themeToolbarButton.setTooltip(darkModeEnabled ? "Switch to Light Mode" : "Switch to Dark Mode");
+
+        if (persist)
+            persistThemeMode(darkModeEnabled);
+
+        repaint();
     }
 
     void MainComponent::restoreLayoutSettings()
@@ -666,11 +833,36 @@ namespace sw
     void MainComponent::handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert)
     {
         persistLastSelectedFile(file);
+        currentSelectedFile = file;
+
+        const bool isAcidized = file.loopType.has_value() && *file.loopType == "acidized";
+        const bool hasValidAcidLoopRegion = isAcidized && file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
+                                            *file.loopEndSample > *file.loopStartSample;
+
+        audioEngine.setPreviewRootMidiNote(isAcidized && file.acidRootNote.has_value() ? *file.acidRootNote : 60);
+
+        if (hasValidAcidLoopRegion)
+        {
+            audioEngine.setPreviewLoopRegionSamples(*file.loopStartSample, *file.loopEndSample);
+
+            if (!previewPanel.isLoopEnabled())
+            {
+                previewPanel.setLoopEnabled(true);
+                audioEngine.setLoopEnabled(true);
+            }
+        }
+        else
+        {
+            audioEngine.clearPreviewLoopRegion();
+        }
+
+        updateWaveformLoopOverlay();
 
         if (file.indexOnly)
         {
             waveformPanel.setPeaks({});
             waveformPanel.setPlayheadNormalized(-1.0f);
+            waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
             if (showIndexOnlyAlert)
             {
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
@@ -760,11 +952,43 @@ namespace sw
 
                     safeThis->audioEngine.loadPreviewBuffer(std::move(previewBuffer), sampleRate);
                     safeThis->waveformPanel.setPeaks(*peaks);
-                    safeThis->waveformPanel.setPlayheadNormalized(-1.0f);
+                    safeThis->waveformPanel.setPlayheadNormalized(0.0f);
+                    safeThis->updateWaveformLoopOverlay();
                     if (playWhenReady)
                         safeThis->audioEngine.play(); });
             },
             JobPriority::High});
+    }
+
+    void MainComponent::updateWaveformLoopOverlay()
+    {
+        if (!currentSelectedFile.has_value() || currentSelectedFile->indexOnly)
+        {
+            waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
+            return;
+        }
+
+        const auto &file = *currentSelectedFile;
+        if (file.loopType.has_value() && *file.loopType == "acidized" &&
+            file.totalSamples.has_value() && *file.totalSamples > 1 &&
+            file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
+            *file.loopEndSample > *file.loopStartSample)
+        {
+            const double length = static_cast<double>(*file.totalSamples);
+            const float loopStartNorm = static_cast<float>(juce::jlimit(0.0, 1.0, static_cast<double>(*file.loopStartSample) / length));
+            const float loopEndNorm = static_cast<float>(juce::jlimit(0.0, 1.0, static_cast<double>(*file.loopEndSample) / length));
+
+            if (loopEndNorm > loopStartNorm)
+            {
+                waveformPanel.setLoopRegionNormalized(loopStartNorm, loopEndNorm);
+                return;
+            }
+        }
+
+        if (previewPanel.isLoopEnabled())
+            waveformPanel.setLoopRegionNormalized(0.0f, 1.0f);
+        else
+            waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
     }
 
     void MainComponent::timerCallback()
@@ -783,12 +1007,6 @@ namespace sw
 
             if (toolbarFeedbackTicksRemaining == 0)
                 toolbarFeedbackText.clear();
-        }
-
-        if (!audioEngine.isPreviewPlaying())
-        {
-            waveformPanel.setPlayheadNormalized(-1.0f);
-            return;
         }
 
         const float progress = static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized());
@@ -977,9 +1195,78 @@ namespace sw
             resultsPanel.selectFirstRowIfNoneSelected(); });
     }
 
+    void MainComponent::handleDeleteRootClicked()
+    {
+        if (!selectedRootFilterId.has_value() || scanInProgress)
+            return;
+
+        const auto roots = catalogDb.allRoots();
+        const auto it = std::find_if(roots.begin(), roots.end(), [this](const RootRecord &root)
+                                     { return root.id == *selectedRootFilterId; });
+        if (it == roots.end())
+            return;
+
+        const auto rootIdToDelete = it->id;
+        const auto rootLabel = juce::String(it->label);
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+
+        juce::AlertWindow::showOkCancelBox(
+            juce::AlertWindow::WarningIcon,
+            "Delete Source",
+            "Delete source '" + rootLabel + "' and all indexed files under it?",
+            "Delete",
+            "Cancel",
+            nullptr,
+            juce::ModalCallbackFunction::create([safeThis, rootIdToDelete](int result)
+                                                {
+                if (safeThis == nullptr || result != 1)
+                    return;
+
+                if (!safeThis->catalogDb.removeRoot(rootIdToDelete))
+                {
+                    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                           "Delete Source Failed",
+                                                           "Unable to delete selected source.");
+                    return;
+                }
+
+                if (safeThis->selectedRootFilterId.has_value() && *safeThis->selectedRootFilterId == rootIdToDelete)
+                    safeThis->selectedRootFilterId.reset();
+
+                safeThis->refreshRoots();
+                safeThis->refreshResults(safeThis->currentSearchQuery);
+
+                safeThis->toolbarFeedbackText = "Source deleted";
+                safeThis->toolbarFeedbackTicksRemaining = 60;
+                safeThis->repaint(0, 0, safeThis->getWidth(), kToolbarHeight); }));
+    }
+
+    void MainComponent::handleOpenSourceInExplorerClicked()
+    {
+        if (!selectedRootFilterId.has_value())
+            return;
+
+        const auto rootPath = rootPathForId(*selectedRootFilterId);
+        if (rootPath.empty())
+            return;
+
+        juce::File rootFolder(rootPath);
+        if (!rootFolder.exists() || !rootFolder.isDirectory())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                   "Source Missing",
+                                                   "The selected source folder is not available:\n" + rootFolder.getFullPathName());
+            return;
+        }
+
+        rootFolder.revealToUser();
+    }
+
     void MainComponent::updateToolbarScanState(bool inProgress)
     {
         addRootToolbarButton.setEnabled(!inProgress);
+        openSourceInExplorerToolbarButton.setEnabled(selectedRootFilterId.has_value());
+        deleteRootToolbarButton.setEnabled(!inProgress && selectedRootFilterId.has_value());
         rescanToolbarButton.setEnabled(!inProgress);
         cancelScanToolbarButton.setEnabled(inProgress);
     }
@@ -1007,11 +1294,17 @@ namespace sw
         constexpr int toolbarGap = 6;
         addRootToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
+        openSourceInExplorerToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        deleteRootToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
         rescanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         cancelScanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         resetLayoutToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        themeToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
 
         const int totalWidth = area.getWidth() - kSplitterThickness;
         int leftWidth = static_cast<int>(leftPanelRatio * static_cast<float>(totalWidth));

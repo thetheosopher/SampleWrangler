@@ -35,20 +35,40 @@ namespace sw
         const int numOutChannels = info.buffer->getNumChannels();
         const int numSrcChannels = buf->getNumChannels();
         const int srcLength = buf->getNumSamples();
+        const int64_t configuredLoopStart = loopStartSample.load(std::memory_order_relaxed);
+        const int64_t configuredLoopEnd = loopEndSample.load(std::memory_order_relaxed);
+
+        const int loopStart = static_cast<int>(juce::jlimit<int64_t>(0, srcLength - 1, configuredLoopStart));
+        const int loopEnd = static_cast<int>(juce::jlimit<int64_t>(0, srcLength - 1, configuredLoopEnd));
+        const bool hasLoopRegion = loopEnabled.load(std::memory_order_relaxed) && configuredLoopStart >= 0 && configuredLoopEnd >= 0 && loopEnd > loopStart;
+        const double loopEndExclusive = static_cast<double>(loopEnd) + 1.0;
+        const double loopLength = static_cast<double>(loopEnd - loopStart) + 1.0;
 
         double pos = playbackPos.load(std::memory_order_relaxed);
         double rate = playbackRate.load(std::memory_order_relaxed) * (bufferSampleRate / currentSampleRate);
 
         for (int i = 0; i < info.numSamples; ++i)
         {
+            if (hasLoopRegion && pos >= loopEndExclusive)
+            {
+                pos = static_cast<double>(loopStart) + std::fmod(pos - static_cast<double>(loopStart), loopLength);
+            }
+
             if (pos >= static_cast<double>(srcLength))
             {
-                // End of sample — stop and zero-fill remainder
-                for (int ch = 0; ch < numOutChannels; ++ch)
-                    info.buffer->clear(ch, info.startSample + i, info.numSamples - i);
-                playing.store(false, std::memory_order_relaxed);
-                pos = 0.0;
-                break;
+                if (loopEnabled.load(std::memory_order_relaxed) && srcLength > 0)
+                {
+                    pos = std::fmod(pos, static_cast<double>(srcLength));
+                }
+                else
+                {
+                    // End of sample — stop and zero-fill remainder
+                    for (int ch = 0; ch < numOutChannels; ++ch)
+                        info.buffer->clear(ch, info.startSample + i, info.numSamples - i);
+                    playing.store(false, std::memory_order_relaxed);
+                    pos = 0.0;
+                    break;
+                }
             }
 
             // Linear interpolation between two samples
@@ -94,7 +114,6 @@ namespace sw
     void VoiceManager::stop()
     {
         playing.store(false, std::memory_order_relaxed);
-        playbackPos.store(0.0, std::memory_order_relaxed);
     }
 
     void VoiceManager::setPitchSemitones(double semitones)
@@ -102,6 +121,32 @@ namespace sw
         // Resample-style: ratio = 2^(semitones/12)
         double ratio = std::pow(2.0, semitones / 12.0);
         playbackRate.store(ratio, std::memory_order_relaxed);
+    }
+
+    void VoiceManager::setLoopEnabled(bool enabled)
+    {
+        loopEnabled.store(enabled, std::memory_order_relaxed);
+    }
+
+    bool VoiceManager::isLoopEnabled() const noexcept
+    {
+        return loopEnabled.load(std::memory_order_relaxed);
+    }
+
+    void VoiceManager::setLoopRegionSamples(int64_t startSample, int64_t endSample)
+    {
+        loopStartSample.store(startSample, std::memory_order_relaxed);
+        loopEndSample.store(endSample, std::memory_order_relaxed);
+    }
+
+    void VoiceManager::setPreviewRootMidiNote(int midiNote)
+    {
+        previewRootMidiNote.store(juce::jlimit(0, 127, midiNote), std::memory_order_relaxed);
+    }
+
+    int VoiceManager::getPreviewRootMidiNote() const noexcept
+    {
+        return previewRootMidiNote.load(std::memory_order_relaxed);
     }
 
     bool VoiceManager::isPlaying() const noexcept
@@ -117,6 +162,16 @@ namespace sw
 
         const double position = playbackPos.load(std::memory_order_relaxed);
         return juce::jlimit(0.0, 1.0, position / static_cast<double>(length));
+    }
+
+    void VoiceManager::setPlaybackProgressNormalized(double normalizedProgress)
+    {
+        const int length = loadedSampleLength.load(std::memory_order_relaxed);
+        if (length <= 0)
+            return;
+
+        const double clamped = juce::jlimit(0.0, 1.0, normalizedProgress);
+        playbackPos.store(clamped * static_cast<double>(length), std::memory_order_relaxed);
     }
 
 } // namespace sw

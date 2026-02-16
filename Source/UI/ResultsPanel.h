@@ -22,6 +22,7 @@ namespace sw
         void setResults(std::vector<FileRecord> newResults);
         void selectFirstRowIfNoneSelected();
         bool selectFile(int64_t rootId, const std::string &relativePath);
+        void setDarkMode(bool enabled);
 
         std::function<void(const std::string &query)> onSearchQueryChanged;
         std::function<void(const FileRecord &file)> onFileSelected;
@@ -36,6 +37,7 @@ namespace sw
         juce::TextEditor searchBox;
         juce::ListBox resultsList;
         std::vector<FileRecord> results;
+        bool darkModeEnabled = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ResultsPanel)
     };

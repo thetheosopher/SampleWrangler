@@ -51,6 +51,10 @@ namespace sw
         /// Set pitch shift in semitones (resample-style, changes duration).
         void setPitchSemitones(double semitones);
 
+        /// Enable/disable loop playback for preview.
+        void setLoopEnabled(bool enabled);
+        bool isLoopEnabled() const noexcept;
+
         /// Handle MIDI input (physical device or on-screen keyboard).
         void handleMidiMessage(const juce::MidiMessage &message);
 
@@ -64,6 +68,10 @@ namespace sw
 
         bool isPreviewPlaying() const noexcept;
         double getPreviewPlaybackProgressNormalized() const noexcept;
+        void setPreviewPlaybackProgressNormalized(double normalizedProgress);
+        void setPreviewRootMidiNote(int midiNote);
+        void clearPreviewLoopRegion();
+        void setPreviewLoopRegionSamples(int64_t startSample, int64_t endSample);
 
     private:
         void applyCurrentPitch();

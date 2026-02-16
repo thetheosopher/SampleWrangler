@@ -108,21 +108,30 @@ namespace sw
     {
         const char *sql = R"SQL(
         INSERT INTO files (root_id, relative_path, filename, extension,
-                           size_bytes, modified_time, duration_sec, sample_rate,
-                           channels, bit_depth, bpm, key, loop_type, index_only)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           size_bytes, modified_time, duration_sec, total_samples,
+                           sample_rate, channels, bit_depth, bitrate_kbps, codec,
+                           bpm, key, loop_type, acid_root_note, acid_beats,
+                           loop_start_sample, loop_end_sample, index_only)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(root_id, relative_path) DO UPDATE SET
             filename      = excluded.filename,
             extension     = excluded.extension,
             size_bytes    = excluded.size_bytes,
             modified_time = excluded.modified_time,
             duration_sec  = excluded.duration_sec,
+            total_samples = excluded.total_samples,
             sample_rate   = excluded.sample_rate,
             channels      = excluded.channels,
             bit_depth     = excluded.bit_depth,
+            bitrate_kbps  = excluded.bitrate_kbps,
+            codec         = excluded.codec,
             bpm           = excluded.bpm,
             key           = excluded.key,
             loop_type     = excluded.loop_type,
+                acid_root_note = excluded.acid_root_note,
+                acid_beats     = excluded.acid_beats,
+                loop_start_sample = excluded.loop_start_sample,
+                loop_end_sample   = excluded.loop_end_sample,
             index_only    = excluded.index_only
     )SQL";
 
@@ -142,37 +151,72 @@ namespace sw
         else
             sqlite3_bind_null(stmt, 7);
 
-        if (rec.sampleRate)
-            sqlite3_bind_int(stmt, 8, *rec.sampleRate);
+        if (rec.totalSamples)
+            sqlite3_bind_int64(stmt, 8, *rec.totalSamples);
         else
             sqlite3_bind_null(stmt, 8);
 
-        if (rec.channels)
-            sqlite3_bind_int(stmt, 9, *rec.channels);
+        if (rec.sampleRate)
+            sqlite3_bind_int(stmt, 9, *rec.sampleRate);
         else
             sqlite3_bind_null(stmt, 9);
 
-        if (rec.bitDepth)
-            sqlite3_bind_int(stmt, 10, *rec.bitDepth);
+        if (rec.channels)
+            sqlite3_bind_int(stmt, 10, *rec.channels);
         else
             sqlite3_bind_null(stmt, 10);
 
-        if (rec.bpm)
-            sqlite3_bind_double(stmt, 11, *rec.bpm);
+        if (rec.bitDepth)
+            sqlite3_bind_int(stmt, 11, *rec.bitDepth);
         else
             sqlite3_bind_null(stmt, 11);
 
-        if (rec.key)
-            sqlite3_bind_text(stmt, 12, rec.key->c_str(), -1, SQLITE_TRANSIENT);
+        if (rec.bitrateKbps)
+            sqlite3_bind_int(stmt, 12, *rec.bitrateKbps);
         else
             sqlite3_bind_null(stmt, 12);
 
-        if (rec.loopType)
-            sqlite3_bind_text(stmt, 13, rec.loopType->c_str(), -1, SQLITE_TRANSIENT);
+        if (rec.codec)
+            sqlite3_bind_text(stmt, 13, rec.codec->c_str(), -1, SQLITE_TRANSIENT);
         else
             sqlite3_bind_null(stmt, 13);
 
-        sqlite3_bind_int(stmt, 14, rec.indexOnly ? 1 : 0);
+        if (rec.bpm)
+            sqlite3_bind_double(stmt, 14, *rec.bpm);
+        else
+            sqlite3_bind_null(stmt, 14);
+
+        if (rec.key)
+            sqlite3_bind_text(stmt, 15, rec.key->c_str(), -1, SQLITE_TRANSIENT);
+        else
+            sqlite3_bind_null(stmt, 15);
+
+        if (rec.loopType)
+            sqlite3_bind_text(stmt, 16, rec.loopType->c_str(), -1, SQLITE_TRANSIENT);
+        else
+            sqlite3_bind_null(stmt, 16);
+
+        if (rec.acidRootNote)
+            sqlite3_bind_int(stmt, 17, *rec.acidRootNote);
+        else
+            sqlite3_bind_null(stmt, 17);
+
+        if (rec.acidBeats)
+            sqlite3_bind_int(stmt, 18, *rec.acidBeats);
+        else
+            sqlite3_bind_null(stmt, 18);
+
+        if (rec.loopStartSample)
+            sqlite3_bind_int64(stmt, 19, *rec.loopStartSample);
+        else
+            sqlite3_bind_null(stmt, 19);
+
+        if (rec.loopEndSample)
+            sqlite3_bind_int64(stmt, 20, *rec.loopEndSample);
+        else
+            sqlite3_bind_null(stmt, 20);
+
+        sqlite3_bind_int(stmt, 21, rec.indexOnly ? 1 : 0);
 
         bool ok = sqlite3_step(stmt) == SQLITE_DONE;
         sqlite3_finalize(stmt);
@@ -199,8 +243,10 @@ namespace sw
         // Use FTS5 match for searching
         const char *sql = R"SQL(
         SELECT f.id, f.root_id, f.relative_path, f.filename, f.extension,
-               f.size_bytes, f.modified_time, f.duration_sec, f.sample_rate,
-               f.channels, f.bit_depth, f.bpm, f.key, f.loop_type, f.index_only
+             f.size_bytes, f.modified_time, f.duration_sec, f.total_samples,
+             f.sample_rate, f.channels, f.bit_depth, f.bitrate_kbps, f.codec,
+               f.bpm, f.key, f.loop_type, f.acid_root_note, f.acid_beats,
+               f.loop_start_sample, f.loop_end_sample, f.index_only
         FROM files f
         JOIN files_fts fts ON fts.rowid = f.id
         WHERE files_fts MATCH ?
@@ -228,18 +274,32 @@ namespace sw
             if (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
                 r.durationSec = sqlite3_column_double(stmt, 7);
             if (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
-                r.sampleRate = sqlite3_column_int(stmt, 8);
+                r.totalSamples = sqlite3_column_int64(stmt, 8);
             if (sqlite3_column_type(stmt, 9) != SQLITE_NULL)
-                r.channels = sqlite3_column_int(stmt, 9);
+                r.sampleRate = sqlite3_column_int(stmt, 9);
             if (sqlite3_column_type(stmt, 10) != SQLITE_NULL)
-                r.bitDepth = sqlite3_column_int(stmt, 10);
+                r.channels = sqlite3_column_int(stmt, 10);
             if (sqlite3_column_type(stmt, 11) != SQLITE_NULL)
-                r.bpm = sqlite3_column_double(stmt, 11);
+                r.bitDepth = sqlite3_column_int(stmt, 11);
             if (sqlite3_column_type(stmt, 12) != SQLITE_NULL)
-                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 12));
+                r.bitrateKbps = sqlite3_column_int(stmt, 12);
             if (sqlite3_column_type(stmt, 13) != SQLITE_NULL)
-                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
-            r.indexOnly = sqlite3_column_int(stmt, 14) != 0;
+                r.codec = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+            if (sqlite3_column_type(stmt, 14) != SQLITE_NULL)
+                r.bpm = sqlite3_column_double(stmt, 14);
+            if (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
+                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 15));
+            if (sqlite3_column_type(stmt, 16) != SQLITE_NULL)
+                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 16));
+            if (sqlite3_column_type(stmt, 17) != SQLITE_NULL)
+                r.acidRootNote = sqlite3_column_int(stmt, 17);
+            if (sqlite3_column_type(stmt, 18) != SQLITE_NULL)
+                r.acidBeats = sqlite3_column_int(stmt, 18);
+            if (sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+                r.loopStartSample = sqlite3_column_int64(stmt, 19);
+            if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
+                r.loopEndSample = sqlite3_column_int64(stmt, 20);
+            r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
 
             results.push_back(std::move(r));
         }
@@ -253,8 +313,10 @@ namespace sw
 
         const char *sql = R"SQL(
         SELECT id, root_id, relative_path, filename, extension,
-               size_bytes, modified_time, duration_sec, sample_rate,
-               channels, bit_depth, bpm, key, loop_type, index_only
+             size_bytes, modified_time, duration_sec, total_samples,
+             sample_rate, channels, bit_depth, bitrate_kbps, codec,
+               bpm, key, loop_type, acid_root_note, acid_beats,
+               loop_start_sample, loop_end_sample, index_only
         FROM files
         ORDER BY id DESC
         LIMIT ?
@@ -280,18 +342,32 @@ namespace sw
             if (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
                 r.durationSec = sqlite3_column_double(stmt, 7);
             if (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
-                r.sampleRate = sqlite3_column_int(stmt, 8);
+                r.totalSamples = sqlite3_column_int64(stmt, 8);
             if (sqlite3_column_type(stmt, 9) != SQLITE_NULL)
-                r.channels = sqlite3_column_int(stmt, 9);
+                r.sampleRate = sqlite3_column_int(stmt, 9);
             if (sqlite3_column_type(stmt, 10) != SQLITE_NULL)
-                r.bitDepth = sqlite3_column_int(stmt, 10);
+                r.channels = sqlite3_column_int(stmt, 10);
             if (sqlite3_column_type(stmt, 11) != SQLITE_NULL)
-                r.bpm = sqlite3_column_double(stmt, 11);
+                r.bitDepth = sqlite3_column_int(stmt, 11);
             if (sqlite3_column_type(stmt, 12) != SQLITE_NULL)
-                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 12));
+                r.bitrateKbps = sqlite3_column_int(stmt, 12);
             if (sqlite3_column_type(stmt, 13) != SQLITE_NULL)
-                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
-            r.indexOnly = sqlite3_column_int(stmt, 14) != 0;
+                r.codec = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+            if (sqlite3_column_type(stmt, 14) != SQLITE_NULL)
+                r.bpm = sqlite3_column_double(stmt, 14);
+            if (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
+                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 15));
+            if (sqlite3_column_type(stmt, 16) != SQLITE_NULL)
+                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 16));
+            if (sqlite3_column_type(stmt, 17) != SQLITE_NULL)
+                r.acidRootNote = sqlite3_column_int(stmt, 17);
+            if (sqlite3_column_type(stmt, 18) != SQLITE_NULL)
+                r.acidBeats = sqlite3_column_int(stmt, 18);
+            if (sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+                r.loopStartSample = sqlite3_column_int64(stmt, 19);
+            if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
+                r.loopEndSample = sqlite3_column_int64(stmt, 20);
+            r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
 
             results.push_back(std::move(r));
         }
@@ -305,8 +381,10 @@ namespace sw
 
         const char *sql = R"SQL(
         SELECT f.id, f.root_id, f.relative_path, f.filename, f.extension,
-               f.size_bytes, f.modified_time, f.duration_sec, f.sample_rate,
-               f.channels, f.bit_depth, f.bpm, f.key, f.loop_type, f.index_only
+             f.size_bytes, f.modified_time, f.duration_sec, f.total_samples,
+             f.sample_rate, f.channels, f.bit_depth, f.bitrate_kbps, f.codec,
+               f.bpm, f.key, f.loop_type, f.acid_root_note, f.acid_beats,
+               f.loop_start_sample, f.loop_end_sample, f.index_only
         FROM files f
         JOIN files_fts fts ON fts.rowid = f.id
         WHERE f.root_id = ? AND files_fts MATCH ?
@@ -335,18 +413,32 @@ namespace sw
             if (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
                 r.durationSec = sqlite3_column_double(stmt, 7);
             if (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
-                r.sampleRate = sqlite3_column_int(stmt, 8);
+                r.totalSamples = sqlite3_column_int64(stmt, 8);
             if (sqlite3_column_type(stmt, 9) != SQLITE_NULL)
-                r.channels = sqlite3_column_int(stmt, 9);
+                r.sampleRate = sqlite3_column_int(stmt, 9);
             if (sqlite3_column_type(stmt, 10) != SQLITE_NULL)
-                r.bitDepth = sqlite3_column_int(stmt, 10);
+                r.channels = sqlite3_column_int(stmt, 10);
             if (sqlite3_column_type(stmt, 11) != SQLITE_NULL)
-                r.bpm = sqlite3_column_double(stmt, 11);
+                r.bitDepth = sqlite3_column_int(stmt, 11);
             if (sqlite3_column_type(stmt, 12) != SQLITE_NULL)
-                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 12));
+                r.bitrateKbps = sqlite3_column_int(stmt, 12);
             if (sqlite3_column_type(stmt, 13) != SQLITE_NULL)
-                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
-            r.indexOnly = sqlite3_column_int(stmt, 14) != 0;
+                r.codec = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+            if (sqlite3_column_type(stmt, 14) != SQLITE_NULL)
+                r.bpm = sqlite3_column_double(stmt, 14);
+            if (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
+                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 15));
+            if (sqlite3_column_type(stmt, 16) != SQLITE_NULL)
+                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 16));
+            if (sqlite3_column_type(stmt, 17) != SQLITE_NULL)
+                r.acidRootNote = sqlite3_column_int(stmt, 17);
+            if (sqlite3_column_type(stmt, 18) != SQLITE_NULL)
+                r.acidBeats = sqlite3_column_int(stmt, 18);
+            if (sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+                r.loopStartSample = sqlite3_column_int64(stmt, 19);
+            if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
+                r.loopEndSample = sqlite3_column_int64(stmt, 20);
+            r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
 
             results.push_back(std::move(r));
         }
@@ -361,8 +453,10 @@ namespace sw
 
         const char *sql = R"SQL(
         SELECT id, root_id, relative_path, filename, extension,
-               size_bytes, modified_time, duration_sec, sample_rate,
-               channels, bit_depth, bpm, key, loop_type, index_only
+             size_bytes, modified_time, duration_sec, total_samples,
+             sample_rate, channels, bit_depth, bitrate_kbps, codec,
+               bpm, key, loop_type, acid_root_note, acid_beats,
+               loop_start_sample, loop_end_sample, index_only
         FROM files
         WHERE root_id = ?
         ORDER BY id DESC
@@ -390,18 +484,32 @@ namespace sw
             if (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
                 r.durationSec = sqlite3_column_double(stmt, 7);
             if (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
-                r.sampleRate = sqlite3_column_int(stmt, 8);
+                r.totalSamples = sqlite3_column_int64(stmt, 8);
             if (sqlite3_column_type(stmt, 9) != SQLITE_NULL)
-                r.channels = sqlite3_column_int(stmt, 9);
+                r.sampleRate = sqlite3_column_int(stmt, 9);
             if (sqlite3_column_type(stmt, 10) != SQLITE_NULL)
-                r.bitDepth = sqlite3_column_int(stmt, 10);
+                r.channels = sqlite3_column_int(stmt, 10);
             if (sqlite3_column_type(stmt, 11) != SQLITE_NULL)
-                r.bpm = sqlite3_column_double(stmt, 11);
+                r.bitDepth = sqlite3_column_int(stmt, 11);
             if (sqlite3_column_type(stmt, 12) != SQLITE_NULL)
-                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 12));
+                r.bitrateKbps = sqlite3_column_int(stmt, 12);
             if (sqlite3_column_type(stmt, 13) != SQLITE_NULL)
-                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
-            r.indexOnly = sqlite3_column_int(stmt, 14) != 0;
+                r.codec = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+            if (sqlite3_column_type(stmt, 14) != SQLITE_NULL)
+                r.bpm = sqlite3_column_double(stmt, 14);
+            if (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
+                r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 15));
+            if (sqlite3_column_type(stmt, 16) != SQLITE_NULL)
+                r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 16));
+            if (sqlite3_column_type(stmt, 17) != SQLITE_NULL)
+                r.acidRootNote = sqlite3_column_int(stmt, 17);
+            if (sqlite3_column_type(stmt, 18) != SQLITE_NULL)
+                r.acidBeats = sqlite3_column_int(stmt, 18);
+            if (sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+                r.loopStartSample = sqlite3_column_int64(stmt, 19);
+            if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
+                r.loopEndSample = sqlite3_column_int64(stmt, 20);
+            r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
 
             results.push_back(std::move(r));
         }
@@ -414,8 +522,10 @@ namespace sw
     {
         const char *sql = R"SQL(
         SELECT id, root_id, relative_path, filename, extension,
-               size_bytes, modified_time, duration_sec, sample_rate,
-               channels, bit_depth, bpm, key, loop_type, index_only
+             size_bytes, modified_time, duration_sec, total_samples,
+             sample_rate, channels, bit_depth, bitrate_kbps, codec,
+               bpm, key, loop_type, acid_root_note, acid_beats,
+               loop_start_sample, loop_end_sample, index_only
         FROM files WHERE id = ?
     )SQL";
 
@@ -443,18 +553,32 @@ namespace sw
         if (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
             r.durationSec = sqlite3_column_double(stmt, 7);
         if (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
-            r.sampleRate = sqlite3_column_int(stmt, 8);
+            r.totalSamples = sqlite3_column_int64(stmt, 8);
         if (sqlite3_column_type(stmt, 9) != SQLITE_NULL)
-            r.channels = sqlite3_column_int(stmt, 9);
+            r.sampleRate = sqlite3_column_int(stmt, 9);
         if (sqlite3_column_type(stmt, 10) != SQLITE_NULL)
-            r.bitDepth = sqlite3_column_int(stmt, 10);
+            r.channels = sqlite3_column_int(stmt, 10);
         if (sqlite3_column_type(stmt, 11) != SQLITE_NULL)
-            r.bpm = sqlite3_column_double(stmt, 11);
+            r.bitDepth = sqlite3_column_int(stmt, 11);
         if (sqlite3_column_type(stmt, 12) != SQLITE_NULL)
-            r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 12));
+            r.bitrateKbps = sqlite3_column_int(stmt, 12);
         if (sqlite3_column_type(stmt, 13) != SQLITE_NULL)
-            r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
-        r.indexOnly = sqlite3_column_int(stmt, 14) != 0;
+            r.codec = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+        if (sqlite3_column_type(stmt, 14) != SQLITE_NULL)
+            r.bpm = sqlite3_column_double(stmt, 14);
+        if (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
+            r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 15));
+        if (sqlite3_column_type(stmt, 16) != SQLITE_NULL)
+            r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 16));
+        if (sqlite3_column_type(stmt, 17) != SQLITE_NULL)
+            r.acidRootNote = sqlite3_column_int(stmt, 17);
+        if (sqlite3_column_type(stmt, 18) != SQLITE_NULL)
+            r.acidBeats = sqlite3_column_int(stmt, 18);
+        if (sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+            r.loopStartSample = sqlite3_column_int64(stmt, 19);
+        if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
+            r.loopEndSample = sqlite3_column_int64(stmt, 20);
+        r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
 
         sqlite3_finalize(stmt);
         return r;
@@ -464,8 +588,10 @@ namespace sw
     {
         const char *sql = R"SQL(
         SELECT id, root_id, relative_path, filename, extension,
-               size_bytes, modified_time, duration_sec, sample_rate,
-               channels, bit_depth, bpm, key, loop_type, index_only
+             size_bytes, modified_time, duration_sec, total_samples,
+             sample_rate, channels, bit_depth, bitrate_kbps, codec,
+               bpm, key, loop_type, acid_root_note, acid_beats,
+               loop_start_sample, loop_end_sample, index_only
         FROM files
         WHERE root_id = ? AND relative_path = ?
         LIMIT 1
@@ -496,18 +622,32 @@ namespace sw
         if (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
             r.durationSec = sqlite3_column_double(stmt, 7);
         if (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
-            r.sampleRate = sqlite3_column_int(stmt, 8);
+            r.totalSamples = sqlite3_column_int64(stmt, 8);
         if (sqlite3_column_type(stmt, 9) != SQLITE_NULL)
-            r.channels = sqlite3_column_int(stmt, 9);
+            r.sampleRate = sqlite3_column_int(stmt, 9);
         if (sqlite3_column_type(stmt, 10) != SQLITE_NULL)
-            r.bitDepth = sqlite3_column_int(stmt, 10);
+            r.channels = sqlite3_column_int(stmt, 10);
         if (sqlite3_column_type(stmt, 11) != SQLITE_NULL)
-            r.bpm = sqlite3_column_double(stmt, 11);
+            r.bitDepth = sqlite3_column_int(stmt, 11);
         if (sqlite3_column_type(stmt, 12) != SQLITE_NULL)
-            r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 12));
+            r.bitrateKbps = sqlite3_column_int(stmt, 12);
         if (sqlite3_column_type(stmt, 13) != SQLITE_NULL)
-            r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
-        r.indexOnly = sqlite3_column_int(stmt, 14) != 0;
+            r.codec = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+        if (sqlite3_column_type(stmt, 14) != SQLITE_NULL)
+            r.bpm = sqlite3_column_double(stmt, 14);
+        if (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
+            r.key = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 15));
+        if (sqlite3_column_type(stmt, 16) != SQLITE_NULL)
+            r.loopType = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 16));
+        if (sqlite3_column_type(stmt, 17) != SQLITE_NULL)
+            r.acidRootNote = sqlite3_column_int(stmt, 17);
+        if (sqlite3_column_type(stmt, 18) != SQLITE_NULL)
+            r.acidBeats = sqlite3_column_int(stmt, 18);
+        if (sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+            r.loopStartSample = sqlite3_column_int64(stmt, 19);
+        if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
+            r.loopEndSample = sqlite3_column_int64(stmt, 20);
+        r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
 
         sqlite3_finalize(stmt);
         return r;

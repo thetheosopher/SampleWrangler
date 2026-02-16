@@ -1,5 +1,72 @@
 #include "ResultsPanel.h"
 
+namespace
+{
+    juce::String formatDuration(const std::optional<double> &durationSec)
+    {
+        if (!durationSec.has_value() || *durationSec < 0.0)
+            return "--";
+
+        const int totalMs = static_cast<int>(*durationSec * 1000.0);
+        const int minutes = totalMs / 60000;
+        const int seconds = (totalMs / 1000) % 60;
+        const int ms = totalMs % 1000;
+        return juce::String::formatted("%02d:%02d.%03d", minutes, seconds, ms);
+    }
+
+    juce::String midiNoteToName(int note)
+    {
+        static constexpr const char *kNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+        if (note < 0 || note > 127)
+            return "--";
+
+        const int octave = (note / 12) - 1;
+        return juce::String(kNames[note % 12]) + juce::String(octave);
+    }
+
+    juce::String formatMetadataLine(const sw::FileRecord &item)
+    {
+        auto valueOrDash = [](const auto &opt, const juce::String &suffix = juce::String())
+        {
+            if (!opt.has_value())
+                return juce::String("--");
+            return juce::String(*opt) + suffix;
+        };
+
+        const juce::String sampleRate = valueOrDash(item.sampleRate, " Hz");
+        const juce::String channels = valueOrDash(item.channels);
+        const juce::String bitDepth = valueOrDash(item.bitDepth);
+        const juce::String bitrate = valueOrDash(item.bitrateKbps, " kbps");
+        const juce::String totalSamples = item.totalSamples.has_value() ? juce::String(*item.totalSamples) : juce::String("--");
+        const juce::String codec = item.codec.has_value() ? juce::String(*item.codec) : juce::String("--");
+
+        juce::String metadata = "SR: " + sampleRate +
+                                "  Ch: " + channels +
+                                "  Bit Depth: " + bitDepth +
+                                "  Bitrate: " + bitrate +
+                                "  Duration: " + formatDuration(item.durationSec) +
+                                "  Samples: " + totalSamples +
+                                "  Codec/Enc: " + codec;
+
+        if (item.loopType.has_value() && *item.loopType == "acidized")
+        {
+            const juce::String acidRoot = item.acidRootNote.has_value() ? midiNoteToName(*item.acidRootNote) : juce::String("--");
+            const juce::String acidBeats = item.acidBeats.has_value() ? juce::String(*item.acidBeats) : juce::String("--");
+            const juce::String acidBpm = item.bpm.has_value() ? juce::String(*item.bpm, 2) : juce::String("--");
+            const juce::String loopStart = item.loopStartSample.has_value() ? juce::String(*item.loopStartSample) : juce::String("--");
+            const juce::String loopEnd = item.loopEndSample.has_value() ? juce::String(*item.loopEndSample) : juce::String("--");
+
+            metadata += "  Acid: yes";
+            metadata += "  Root: " + acidRoot;
+            metadata += "  Beats: " + acidBeats;
+            metadata += "  Tempo: " + acidBpm;
+            metadata += "  Loop: " + loopStart + "-" + loopEnd;
+        }
+
+        return metadata;
+    }
+}
+
 namespace sw
 {
 
@@ -14,12 +81,15 @@ namespace sw
         addAndMakeVisible(searchBox);
 
         resultsList.setModel(this);
+        resultsList.setRowHeight(40);
         addAndMakeVisible(resultsList);
+
+        setDarkMode(true);
     }
 
     void ResultsPanel::paint(juce::Graphics &g)
     {
-        g.fillAll(juce::Colour(0xff1e1e1e));
+        g.fillAll(darkModeEnabled ? juce::Colour(0xff1e1e1e) : juce::Colour(0xfffafafa));
     }
 
     void ResultsPanel::resized()
@@ -58,28 +128,72 @@ namespace sw
         return false;
     }
 
+    void ResultsPanel::setDarkMode(bool enabled)
+    {
+        if (darkModeEnabled == enabled)
+            return;
+
+        darkModeEnabled = enabled;
+
+        const auto textColour = darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020);
+        const auto editorBg = darkModeEnabled ? juce::Colour(0xff2b2b2b) : juce::Colour(0xffffffff);
+        const auto outline = darkModeEnabled ? juce::Colour(0xff4d4d4d) : juce::Colour(0xffb8b8b8);
+        const auto placeholder = darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff7a7a7a);
+
+        searchBox.setColour(juce::TextEditor::textColourId, textColour);
+        searchBox.setColour(juce::TextEditor::backgroundColourId, editorBg);
+        searchBox.setColour(juce::TextEditor::outlineColourId, outline);
+        searchBox.setColour(juce::TextEditor::focusedOutlineColourId, darkModeEnabled ? juce::Colour(0xff6b9bc8) : juce::Colour(0xff2f6fa8));
+        searchBox.setTextToShowWhenEmpty("Search samples...", placeholder);
+
+        resultsList.setColour(juce::ListBox::backgroundColourId, darkModeEnabled ? juce::Colour(0xff1e1e1e) : juce::Colour(0xfffafafa));
+
+        repaint();
+    }
+
     int ResultsPanel::getNumRows()
     {
         return static_cast<int>(results.size());
     }
 
-    void ResultsPanel::paintListBoxItem(int rowNumber, juce::Graphics &g, int width, int height, bool rowIsSelected)
+    void ResultsPanel::paintListBoxItem(int rowNumber, juce::Graphics &g, int width, int /*height*/, bool rowIsSelected)
     {
         if (rowNumber < 0 || rowNumber >= static_cast<int>(results.size()))
             return;
 
         if (rowIsSelected)
-            g.fillAll(juce::Colour(0xff2a3d55));
+            g.fillAll(darkModeEnabled ? juce::Colour(0xff2a3d55) : juce::Colour(0xffd8e8f8));
 
         const auto &item = results[static_cast<size_t>(rowNumber)];
 
-        g.setColour(juce::Colours::white);
+        g.setColour(darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020));
         g.setFont(13.0f);
-        g.drawText(juce::String(item.filename), 8, 0, width / 2, height, juce::Justification::centredLeft);
+        g.drawText(juce::String(item.filename), 8, 0, width / 2, 18, juce::Justification::centredLeft);
 
-        g.setColour(juce::Colours::lightgrey);
+        g.setColour(darkModeEnabled ? juce::Colours::lightgrey : juce::Colour(0xff4a4a4a));
         const juce::String rightText = juce::String(item.relativePath) + (item.indexOnly ? "  [index-only]" : "");
-        g.drawText(rightText, width / 2, 0, width / 2 - 8, height, juce::Justification::centredRight);
+        g.drawText(rightText, width / 2, 0, width / 2 - 8, 18, juce::Justification::centredRight);
+
+        if (item.loopType.has_value() && *item.loopType == "acidized")
+        {
+            const juce::String badgeText = "Acidized";
+            const int badgeWidth = 64;
+            const int badgeHeight = 14;
+            const int badgeX = juce::jmax(8, (width / 2) - badgeWidth - 4);
+            const int badgeY = 2;
+
+            g.setColour(darkModeEnabled ? juce::Colour(0xff2f8f5b) : juce::Colour(0xff2f9f61));
+            g.fillRoundedRectangle(static_cast<float>(badgeX), static_cast<float>(badgeY),
+                                   static_cast<float>(badgeWidth), static_cast<float>(badgeHeight), 4.0f);
+
+            g.setColour(juce::Colours::white);
+            g.setFont(10.0f);
+            g.drawText(badgeText, badgeX, badgeY, badgeWidth, badgeHeight, juce::Justification::centred);
+        }
+
+        g.setColour(darkModeEnabled ? juce::Colours::silver : juce::Colour(0xff6a6a6a));
+        g.setFont(11.0f);
+        g.drawFittedText(formatMetadataLine(item), 8, 19, width - 16, 18, juce::Justification::centredLeft, 1);
     }
 
     void ResultsPanel::selectedRowsChanged(int lastRowSelected)

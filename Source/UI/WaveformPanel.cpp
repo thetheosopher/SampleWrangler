@@ -8,11 +8,11 @@ namespace sw
 
     void WaveformPanel::paint(juce::Graphics &g)
     {
-        g.fillAll(juce::Colour(0xff1a1a2e));
+        g.fillAll(darkModeEnabled ? juce::Colour(0xff1a1a2e) : juce::Colour(0xffedf2fb));
 
         if (currentPeaks.empty())
         {
-            g.setColour(juce::Colours::grey);
+            g.setColour(darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff6a6a6a));
             g.setFont(12.0f);
             g.drawText("No waveform loaded", getLocalBounds(), juce::Justification::centred);
             return;
@@ -23,7 +23,7 @@ namespace sw
         const float midY = bounds.getCentreY();
         const float halfH = bounds.getHeight() * 0.5f;
 
-        g.setColour(juce::Colour(0xff4fc3f7));
+        g.setColour(darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff2b78c6));
 
         const int numPeaks = static_cast<int>(currentPeaks.size());
         const float step = bounds.getWidth() / static_cast<float>(numPeaks);
@@ -39,20 +39,44 @@ namespace sw
         {
             const float loopStartX = bounds.getX() + bounds.getWidth() * juce::jlimit(0.0f, 1.0f, loopStartNormalized);
             const float loopEndX = bounds.getX() + bounds.getWidth() * juce::jlimit(0.0f, 1.0f, loopEndNormalized);
-            g.setColour(juce::Colours::yellow.withAlpha(0.12f));
+            g.setColour((darkModeEnabled ? juce::Colours::yellow : juce::Colour(0xffd8ab00)).withAlpha(0.12f));
             g.fillRect(juce::Rectangle<float>(loopStartX, bounds.getY(), juce::jmax(1.0f, loopEndX - loopStartX), bounds.getHeight()));
         }
 
         if (playheadNormalized >= 0.0f)
         {
             const float playheadX = bounds.getX() + bounds.getWidth() * juce::jlimit(0.0f, 1.0f, playheadNormalized);
-            g.setColour(juce::Colours::orange);
+            g.setColour(darkModeEnabled ? juce::Colours::orange : juce::Colour(0xffc86b00));
             g.drawLine(playheadX, bounds.getY(), playheadX, bounds.getBottom(), 1.5f);
         }
     }
 
     void WaveformPanel::resized()
     {
+    }
+
+    void WaveformPanel::mouseDown(const juce::MouseEvent &event)
+    {
+        if (currentPeaks.empty())
+            return;
+
+        const float normalized = normalizedPositionFromX(event.x);
+        setPlayheadNormalized(normalized);
+
+        if (onScrubRequested)
+            onScrubRequested(normalized);
+    }
+
+    void WaveformPanel::mouseDrag(const juce::MouseEvent &event)
+    {
+        if (currentPeaks.empty())
+            return;
+
+        const float normalized = normalizedPositionFromX(event.x);
+        setPlayheadNormalized(normalized);
+
+        if (onScrubRequested)
+            onScrubRequested(normalized);
     }
 
     void WaveformPanel::setPeaks(const std::vector<float> &peaks)
@@ -76,6 +100,25 @@ namespace sw
         loopStartNormalized = juce::jlimit(-1.0f, 1.0f, loopStart);
         loopEndNormalized = juce::jlimit(-1.0f, 1.0f, loopEnd);
         repaint();
+    }
+
+    void WaveformPanel::setDarkMode(bool enabled)
+    {
+        if (darkModeEnabled == enabled)
+            return;
+
+        darkModeEnabled = enabled;
+        repaint();
+    }
+
+    float WaveformPanel::normalizedPositionFromX(int x) const
+    {
+        const auto bounds = getLocalBounds().toFloat().reduced(2.0f);
+        if (bounds.getWidth() <= 0.0f)
+            return 0.0f;
+
+        const float normalized = (static_cast<float>(x) - bounds.getX()) / bounds.getWidth();
+        return juce::jlimit(0.0f, 1.0f, normalized);
     }
 
 } // namespace sw

@@ -40,6 +40,7 @@ namespace sw
         void restoreAudioDeviceSettings();
         void restorePreviewSettings();
         void restoreMidiInputSettings();
+        void restoreThemeSettings();
         void restoreLastSelection();
         void restoreLayoutSettings();
         void restoreScanSummaryStatus();
@@ -48,6 +49,8 @@ namespace sw
         void persistMidiInputSelection(const juce::String &deviceIdentifier);
         void persistLayoutSettings();
         void persistPreviewPitch(double semitones);
+        void persistPreviewLoopEnabled(bool enabled);
+        void persistThemeMode(bool darkMode);
         void persistLastSelectedFile(const FileRecord &file);
         void persistScanSummaryStatus(const juce::String &statusText);
         void startRootScan(int64_t rootId,
@@ -56,12 +59,16 @@ namespace sw
                            std::function<void()> onCompleted = {});
         void handleRescanAllClicked();
         void cancelScan();
+        void handleOpenSourceInExplorerClicked();
+        void handleDeleteRootClicked();
         void resetLayout();
         void handleAddRootClicked();
         void handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert);
+        void updateWaveformLoopOverlay();
         std::string rootPathForId(int64_t rootId);
         void timerCallback() override;
         void updateToolbarScanState(bool inProgress);
+        void applyThemeMode(bool darkMode, bool persist);
 
         class SplitterBar final : public juce::Component
         {
@@ -90,9 +97,12 @@ namespace sw
         // Owned sub-panels
         juce::Component toolbar;
         juce::DrawableButton addRootToolbarButton{"Add Root", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton openSourceInExplorerToolbarButton{"Open Source In Explorer", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton deleteRootToolbarButton{"Delete Source", juce::DrawableButton::ImageFitted};
         juce::DrawableButton rescanToolbarButton{"Rescan All", juce::DrawableButton::ImageFitted};
         juce::DrawableButton cancelScanToolbarButton{"Cancel Scan", juce::DrawableButton::ImageFitted};
         juce::DrawableButton resetLayoutToolbarButton{"Reset Layout", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton themeToolbarButton{"Theme", juce::DrawableButton::ImageFitted};
         juce::TooltipWindow tooltipWindow{this};
 
         BrowserPanel browserPanel;
@@ -120,12 +130,14 @@ namespace sw
         int rescanCurrentRootIndex = 0;
         int rescanTotalRoots = 0;
         std::optional<int64_t> selectedRootFilterId;
+        std::optional<FileRecord> currentSelectedFile;
         std::string currentSearchQuery;
         juce::String selectedMidiInputIdentifier;
         juce::StringArray lastKnownMidiInputIdentifiers;
         int midiDeviceRefreshCounter = 0;
         juce::String toolbarFeedbackText;
         int toolbarFeedbackTicksRemaining = 0;
+        bool darkModeEnabled = true;
         std::chrono::steady_clock::time_point scanStartTime{};
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)

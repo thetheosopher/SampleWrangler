@@ -1,6 +1,7 @@
 #include "CatalogSchema.h"
 #include "Util/Logging.h"
 #include <sqlite3.h>
+#include <string>
 
 namespace sw
 {
@@ -47,12 +48,19 @@ namespace sw
             size_bytes      INTEGER NOT NULL DEFAULT 0,
             modified_time   INTEGER NOT NULL DEFAULT 0,
             duration_sec    REAL,
+            total_samples   INTEGER,
             sample_rate     INTEGER,
             channels        INTEGER,
             bit_depth       INTEGER,
+            bitrate_kbps    INTEGER,
+            codec           TEXT,
             bpm             REAL,
             key             TEXT,
             loop_type       TEXT,
+            acid_root_note  INTEGER,
+            acid_beats      INTEGER,
+            loop_start_sample INTEGER,
+            loop_end_sample   INTEGER,
             index_only      INTEGER NOT NULL DEFAULT 0,
             UNIQUE(root_id, relative_path)
         );
@@ -62,6 +70,39 @@ namespace sw
         if (!exec(db, R"SQL(
         CREATE INDEX IF NOT EXISTS idx_files_root ON files(root_id);
     )SQL"))
+            return false;
+
+        const auto addColumnIfMissing = [db](const char *sql)
+        {
+            char *errMsg = nullptr;
+            const int rc = sqlite3_exec(db, sql, nullptr, nullptr, &errMsg);
+            if (rc == SQLITE_OK)
+                return true;
+
+            if (errMsg != nullptr)
+            {
+                const std::string error(errMsg);
+                sqlite3_free(errMsg);
+                if (error.find("duplicate column name") != std::string::npos)
+                    return true;
+            }
+
+            return false;
+        };
+
+        if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN total_samples INTEGER;"))
+            return false;
+        if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN bitrate_kbps INTEGER;"))
+            return false;
+        if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN codec TEXT;"))
+            return false;
+        if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN acid_root_note INTEGER;"))
+            return false;
+        if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN acid_beats INTEGER;"))
+            return false;
+        if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN loop_start_sample INTEGER;"))
+            return false;
+        if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN loop_end_sample INTEGER;"))
             return false;
 
         // --- FTS virtual table for fast filename / path search ---

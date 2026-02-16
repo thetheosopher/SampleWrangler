@@ -30,12 +30,19 @@ namespace sw
 
         // Analysis results (nullable)
         std::optional<double> durationSec;
+        std::optional<int64_t> totalSamples;
         std::optional<int> sampleRate;
         std::optional<int> channels;
         std::optional<int> bitDepth;
+        std::optional<int> bitrateKbps;
+        std::optional<std::string> codec;
         std::optional<double> bpm;
         std::optional<std::string> key;
         std::optional<std::string> loopType; // e.g. "acidized", "apple-loop"
+        std::optional<int> acidRootNote;
+        std::optional<int> acidBeats;
+        std::optional<int64_t> loopStartSample;
+        std::optional<int64_t> loopEndSample;
 
         /// True if this format is index-only (REX, NKI, SFZ) and cannot be auditioned.
         bool indexOnly = false;

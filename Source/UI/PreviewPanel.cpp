@@ -12,6 +12,7 @@ namespace sw
             if (onPlayRequested)
                 onPlayRequested();
         };
+        playButton.setTooltip("Start preview playback");
 
         stopButton.onClick = [this]
         {
@@ -19,9 +20,18 @@ namespace sw
             if (onStopRequested)
                 onStopRequested();
         };
+        stopButton.setTooltip("Stop preview playback");
+
+        loopButton.onClick = [this]
+        {
+            if (onLoopPlaybackChanged)
+                onLoopPlaybackChanged(loopButton.getToggleState());
+        };
+        loopButton.setTooltip("Loop playback (restarts sample when it reaches the end)");
 
         addAndMakeVisible(playButton);
         addAndMakeVisible(stopButton);
+        addAndMakeVisible(loopButton);
 
         pitchSlider.setSliderStyle(juce::Slider::Rotary);
         pitchSlider.setRange(-24.0, 24.0, 0.5); // semitones
@@ -75,11 +85,12 @@ namespace sw
         addAndMakeVisible(keyboard);
 
         setWantsKeyboardFocus(true);
+        setDarkMode(true);
     }
 
     void PreviewPanel::paint(juce::Graphics &g)
     {
-        g.fillAll(juce::Colour(0xff333333));
+        g.fillAll(darkModeEnabled ? juce::Colour(0xff333333) : juce::Colour(0xfff4f4f4));
     }
 
     void PreviewPanel::resized()
@@ -94,6 +105,8 @@ namespace sw
         playButton.setBounds(topRow.removeFromLeft(60));
         topRow.removeFromLeft(4);
         stopButton.setBounds(topRow.removeFromLeft(60));
+        topRow.removeFromLeft(8);
+        loopButton.setBounds(topRow.removeFromLeft(62));
         topRow.removeFromLeft(8);
         pitchSlider.setBounds(topRow.removeFromLeft(70));
 
@@ -136,6 +149,47 @@ namespace sw
     void PreviewPanel::setPitchSemitones(double semitones)
     {
         pitchSlider.setValue(semitones, juce::dontSendNotification);
+    }
+
+    void PreviewPanel::setDarkMode(bool enabled)
+    {
+        if (darkModeEnabled == enabled)
+            return;
+
+        darkModeEnabled = enabled;
+
+        const auto textColour = darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020);
+        const auto controlBg = darkModeEnabled ? juce::Colour(0xff2b2b2b) : juce::Colour(0xffffffff);
+        const auto outline = darkModeEnabled ? juce::Colour(0xff4d4d4d) : juce::Colour(0xffb8b8b8);
+
+        outputDeviceTypeCombo.setColour(juce::ComboBox::backgroundColourId, controlBg);
+        outputDeviceTypeCombo.setColour(juce::ComboBox::textColourId, textColour);
+        outputDeviceTypeCombo.setColour(juce::ComboBox::outlineColourId, outline);
+
+        outputDeviceCombo.setColour(juce::ComboBox::backgroundColourId, controlBg);
+        outputDeviceCombo.setColour(juce::ComboBox::textColourId, textColour);
+        outputDeviceCombo.setColour(juce::ComboBox::outlineColourId, outline);
+
+        midiInputCombo.setColour(juce::ComboBox::backgroundColourId, controlBg);
+        midiInputCombo.setColour(juce::ComboBox::textColourId, textColour);
+        midiInputCombo.setColour(juce::ComboBox::outlineColourId, outline);
+
+        pitchSlider.setColour(juce::Slider::textBoxTextColourId, textColour);
+        pitchSlider.setColour(juce::Slider::textBoxBackgroundColourId, controlBg);
+        pitchSlider.setColour(juce::Slider::textBoxOutlineColourId, outline);
+        pitchSlider.setColour(juce::Slider::rotarySliderFillColourId, darkModeEnabled ? juce::Colour(0xff4fc3f7) : juce::Colour(0xff2b78c6));
+
+        repaint();
+    }
+
+    void PreviewPanel::setLoopEnabled(bool enabled)
+    {
+        loopButton.setToggleState(enabled, juce::dontSendNotification);
+    }
+
+    bool PreviewPanel::isLoopEnabled() const noexcept
+    {
+        return loopButton.getToggleState();
     }
 
     void PreviewPanel::setAvailableOutputDevices(const juce::StringArray &deviceNames, const juce::String &currentDeviceName)

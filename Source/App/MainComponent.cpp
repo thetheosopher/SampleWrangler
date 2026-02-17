@@ -536,32 +536,16 @@ namespace sw
             }
             else
             {
-                juce::Path moonOuter;
-                moonOuter.addEllipse(6.1f, 4.9f, 11.8f, 13.8f);
-
-                juce::Path moonInnerCut;
-                moonInnerCut.addEllipse(9.6f, 4.6f, 10.6f, 13.8f);
-
                 juce::Path moonCrescent;
-                moonCrescent.addPath(moonOuter);
-                moonCrescent.setUsingNonZeroWinding(false);
-                moonCrescent.addPath(moonInnerCut);
+                moonCrescent.startNewSubPath(16.8f, 3.4f);
+                moonCrescent.cubicTo(8.6f, 3.7f, 4.7f, 8.0f, 4.6f, 12.0f);
+                moonCrescent.cubicTo(4.7f, 16.0f, 8.6f, 20.3f, 16.8f, 20.6f);
+                moonCrescent.cubicTo(13.0f, 18.1f, 11.3f, 15.3f, 11.2f, 12.0f);
+                moonCrescent.cubicTo(11.3f, 8.7f, 13.0f, 5.9f, 16.8f, 3.4f);
+                moonCrescent.closeSubPath();
 
-                juce::Path sparkle;
-                sparkle.startNewSubPath(17.4f, 6.4f);
-                sparkle.lineTo(17.4f, 8.8f);
-                sparkle.startNewSubPath(16.2f, 7.6f);
-                sparkle.lineTo(18.6f, 7.6f);
-
-                g.setColour(juce::Colour(0xff9fc6ff));
+                g.setColour(colour);
                 g.fillPath(moonCrescent);
-                g.setColour(juce::Colour(0x55ffffff));
-                g.fillEllipse(8.2f, 8.1f, 3.9f, 2.0f);
-
-                g.setColour(juce::Colour(0xff6f9be1));
-                g.strokePath(moonOuter, juce::PathStrokeType(0.85f));
-                g.setColour(juce::Colour(0xffc8dcff));
-                g.strokePath(sparkle, juce::PathStrokeType(1.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             }
 
             const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f

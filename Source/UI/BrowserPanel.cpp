@@ -48,7 +48,7 @@ namespace sw
         g.fillAll(background);
         g.setColour(titleColour);
         g.setFont(14.0f);
-        g.drawText("Browser", getLocalBounds().removeFromTop(24), juce::Justification::centred);
+        g.drawText("Sources", getLocalBounds().removeFromTop(24), juce::Justification::centred);
 
         constexpr int controlsBottomY = 30;
         g.setColour(separatorColour);

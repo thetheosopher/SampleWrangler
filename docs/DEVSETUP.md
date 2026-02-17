@@ -36,11 +36,11 @@ cmake --build --preset vs2022-release
 
 ```bash
 cmake --preset vs2022-release
-cmake --build --preset vs2022-release-package-msi-zip
+cmake --build --preset vs2022-release --target PACKAGE
 ```
 
-If WIX is available, this generates both `.msi` and `.zip` in one run.
-If WIX is not available, package generation will fail; install WIX tooling on the build machine.
+If WiX is available, this generates both `.msi` and `.zip` in one run.
+If WiX is not available, package generation will fail; install WiX tooling on the build machine.
 
 Package artifacts are written under:
 
@@ -48,8 +48,15 @@ Package artifacts are written under:
 build/vs2022-release/
 ```
 
-On Windows, if NSIS is installed (`makensis` on PATH), an `.exe` installer is generated.
-Otherwise, CPack generates a `.zip` package.
+### Installer options (MSI)
+
+The MSI uses the WiX feature selection UI.
+During install, users can choose whether to create:
+
+- a **Start Menu Shortcut**
+- a **Desktop Shortcut**
+
+Both shortcut options are optional installer features.
 
 ### Preset cache recovery (VS instance changed)
 

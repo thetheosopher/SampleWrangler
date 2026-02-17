@@ -33,14 +33,24 @@ namespace sw
         std::function<void(const FileRecord &file)> onFileActivated;
 
     private:
+        enum class SortMode
+        {
+            Name,
+            Path
+        };
+
+        void applySort();
+
         int getNumRows() override;
         void paintListBoxItem(int rowNumber, juce::Graphics &g, int width, int height, bool rowIsSelected) override;
         void selectedRowsChanged(int lastRowSelected) override;
         void listBoxItemDoubleClicked(int row, const juce::MouseEvent &) override;
 
         juce::TextEditor searchBox;
+        juce::ComboBox sortSelector;
         juce::ListBox resultsList;
         std::vector<FileRecord> results;
+        SortMode sortMode = SortMode::Name;
         bool darkModeEnabled = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ResultsPanel)

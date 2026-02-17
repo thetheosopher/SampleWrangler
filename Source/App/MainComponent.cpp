@@ -24,7 +24,7 @@ namespace sw
         }
 
         constexpr int kToolbarHeight = 48;
-        constexpr int kStatusBarHeight = 24;
+        constexpr int kStatusBarHeight = 30;
         constexpr int kUiTimerHz = 60;
         constexpr int kMidiDeviceRefreshIntervalTicks = kUiTimerHz;
         constexpr int kSplitterThickness = 5;
@@ -1030,16 +1030,20 @@ namespace sw
         g.setColour(darkModeEnabled ? juce::Colour(0xff272c33) : juce::Colour(0xffe8eaee));
         g.fillRect(toolbarBounds);
 
-        g.setColour(darkModeEnabled ? juce::Colour(0xff252a30) : juce::Colour(0xffe6e8ec));
+        g.setColour(darkModeEnabled ? juce::Colour(0xff1f242b) : juce::Colour(0xffedf1f5));
         g.fillRect(statusBarBounds);
 
-        g.setColour(darkModeEnabled ? juce::Colours::lightgreen : juce::Colour(0xff1f7a43));
-        g.setFont(11.0f);
+        g.setColour(scanInProgress ? (darkModeEnabled ? juce::Colour(0xff8fe3a8) : juce::Colour(0xff1c6a3c))
+                       : (darkModeEnabled ? juce::Colour(0xff95a89b) : juce::Colour(0xff62756a)));
+        g.setFont(16.0f);
         g.drawFittedText("Scan: " + scanStatusText,
                          statusBarBounds.reduced(10, 0),
                          juce::Justification::centredLeft,
                          1);
 
+        const bool autoPlayEnabled = previewPanel.isAutoPlayEnabled();
+        g.setColour(autoPlayEnabled ? (darkModeEnabled ? juce::Colour(0xff8cc8ff) : juce::Colour(0xff1f5f9b))
+                                    : (darkModeEnabled ? juce::Colour(0xff9aa3ad) : juce::Colour(0xff5f6974)));
         g.drawFittedText("Auto: " + juce::String(previewPanel.isAutoPlayEnabled() ? "On" : "Off"),
                          statusBarBounds.reduced(10, 0),
                          juce::Justification::centredRight,

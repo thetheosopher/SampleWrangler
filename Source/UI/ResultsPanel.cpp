@@ -3,6 +3,9 @@
 
 namespace
 {
+    constexpr int kSortByNameId = 1;
+    constexpr int kSortByPathId = 2;
+
     bool isAcidizedLoop(const sw::FileRecord &item)
     {
         return item.loopType.has_value() && *item.loopType == "acidized";
@@ -93,6 +96,32 @@ namespace sw
         };
         addAndMakeVisible(searchBox);
 
+        sortSelector.addItem("Name", kSortByNameId);
+        sortSelector.addItem("Path", kSortByPathId);
+        sortSelector.setSelectedId(kSortByNameId, juce::dontSendNotification);
+        sortSelector.onChange = [this]
+        {
+            const int selectedRow = resultsList.getSelectedRow();
+            std::optional<int64_t> selectedRootId;
+            std::optional<std::string> selectedRelativePath;
+            if (const auto *selectedFile = getResultAt(selectedRow); selectedFile != nullptr)
+            {
+                selectedRootId = selectedFile->rootId;
+                selectedRelativePath = selectedFile->relativePath;
+            }
+
+            const auto selectedId = sortSelector.getSelectedId();
+            sortMode = (selectedId == kSortByPathId) ? SortMode::Path : SortMode::Name;
+            applySort();
+            resultsList.updateContent();
+
+            if (selectedRootId.has_value() && selectedRelativePath.has_value())
+                selectFile(*selectedRootId, *selectedRelativePath);
+
+            repaint();
+        };
+        addAndMakeVisible(sortSelector);
+
         resultsList.setModel(this);
         resultsList.setRowHeight(40);
         addAndMakeVisible(resultsList);
@@ -108,7 +137,12 @@ namespace sw
     void ResultsPanel::resized()
     {
         auto area = getLocalBounds().reduced(4);
-        searchBox.setBounds(area.removeFromTop(28));
+        auto topRow = area.removeFromTop(28);
+        constexpr int selectorWidth = 110;
+        constexpr int controlGap = 6;
+        sortSelector.setBounds(topRow.removeFromRight(selectorWidth));
+        topRow.removeFromRight(controlGap);
+        searchBox.setBounds(topRow);
         area.removeFromTop(4);
         resultsList.setBounds(area);
     }
@@ -119,13 +153,35 @@ namespace sw
         resultsList.deselectAllRows();
 
         results = std::move(newResults);
-
-        // Sort results alphabetically by filename (case-insensitive)
-        std::sort(results.begin(), results.end(), [](const FileRecord &a, const FileRecord &b)
-                  { return juce::String(a.filename).compareIgnoreCase(juce::String(b.filename)) < 0; });
+        applySort();
 
         resultsList.updateContent();
         repaint();
+    }
+
+    void ResultsPanel::applySort()
+    {
+        std::sort(results.begin(), results.end(), [this](const FileRecord &a, const FileRecord &b)
+                  {
+            if (sortMode == SortMode::Path)
+            {
+                if (a.rootId != b.rootId)
+                    return a.rootId < b.rootId;
+
+                const auto relCmp = juce::String(a.relativePath).compareIgnoreCase(juce::String(b.relativePath));
+                if (relCmp != 0)
+                    return relCmp < 0;
+            }
+
+            const auto nameCmp = juce::String(a.filename).compareIgnoreCase(juce::String(b.filename));
+            if (nameCmp != 0)
+                return nameCmp < 0;
+
+            const auto relCmp = juce::String(a.relativePath).compareIgnoreCase(juce::String(b.relativePath));
+            if (relCmp != 0)
+                return relCmp < 0;
+
+            return a.id < b.id; });
     }
 
     void ResultsPanel::selectFirstRowIfNoneSelected()
@@ -187,12 +243,18 @@ namespace sw
         const auto editorBg = darkModeEnabled ? juce::Colour(0xff2b2b2b) : juce::Colour(0xffffffff);
         const auto outline = darkModeEnabled ? juce::Colour(0xff4d4d4d) : juce::Colour(0xffb8b8b8);
         const auto placeholder = darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff7a7a7a);
+        const auto comboBg = darkModeEnabled ? juce::Colour(0xff2b2b2b) : juce::Colour(0xffffffff);
 
         searchBox.setColour(juce::TextEditor::textColourId, textColour);
         searchBox.setColour(juce::TextEditor::backgroundColourId, editorBg);
         searchBox.setColour(juce::TextEditor::outlineColourId, outline);
         searchBox.setColour(juce::TextEditor::focusedOutlineColourId, darkModeEnabled ? juce::Colour(0xff6b9bc8) : juce::Colour(0xff2f6fa8));
         searchBox.setTextToShowWhenEmpty("Search samples...", placeholder);
+
+        sortSelector.setColour(juce::ComboBox::textColourId, textColour);
+        sortSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
+        sortSelector.setColour(juce::ComboBox::outlineColourId, outline);
+        sortSelector.setColour(juce::ComboBox::arrowColourId, textColour);
 
         resultsList.setColour(juce::ListBox::backgroundColourId, darkModeEnabled ? juce::Colour(0xff1e1e1e) : juce::Colour(0xfffafafa));
 
@@ -249,20 +311,22 @@ namespace sw
 
     void ResultsPanel::selectedRowsChanged(int lastRowSelected)
     {
-        if (lastRowSelected < 0 || lastRowSelected >= static_cast<int>(results.size()))
+        const auto *selectedFile = getResultAt(lastRowSelected);
+        if (selectedFile == nullptr)
             return;
 
         if (onFileSelected)
-            onFileSelected(results[static_cast<size_t>(lastRowSelected)]);
+            onFileSelected(*selectedFile);
     }
 
     void ResultsPanel::listBoxItemDoubleClicked(int row, const juce::MouseEvent &)
     {
-        if (row < 0 || row >= static_cast<int>(results.size()))
+        const auto *selectedFile = getResultAt(row);
+        if (selectedFile == nullptr)
             return;
 
         if (onFileActivated)
-            onFileActivated(results[static_cast<size_t>(row)]);
+            onFileActivated(*selectedFile);
     }
 
 } // namespace sw

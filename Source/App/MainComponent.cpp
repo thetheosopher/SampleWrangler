@@ -1034,7 +1034,7 @@ namespace sw
         g.fillRect(statusBarBounds);
 
         g.setColour(scanInProgress ? (darkModeEnabled ? juce::Colour(0xff8fe3a8) : juce::Colour(0xff1c6a3c))
-                       : (darkModeEnabled ? juce::Colour(0xff95a89b) : juce::Colour(0xff62756a)));
+                                   : (darkModeEnabled ? juce::Colour(0xff95a89b) : juce::Colour(0xff62756a)));
         g.setFont(16.0f);
         g.drawFittedText("Scan: " + scanStatusText,
                          statusBarBounds.reduced(10, 0),

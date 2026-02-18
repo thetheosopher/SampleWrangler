@@ -839,6 +839,15 @@ namespace sw
             handleFileSelected(file, true, true);
         };
 
+        resultsPanel.onResolveAbsolutePathForFile = [this](const FileRecord &file) -> std::optional<juce::String>
+        {
+            const auto rootPath = rootPathForId(file.rootId);
+            if (rootPath.empty())
+                return std::nullopt;
+
+            return juce::String(resolveAbsolutePath(rootPath, file.relativePath));
+        };
+
         previewPanel.onPlayRequested = [this]
         {
             audioEngine.play();

@@ -266,6 +266,44 @@ namespace sw
         return static_cast<int>(results.size());
     }
 
+    juce::var ResultsPanel::getDragSourceDescription(const juce::SparseSet<int> &rowsToDescribe)
+    {
+        if (rowsToDescribe.isEmpty() || onResolveAbsolutePathForFile == nullptr)
+            return {};
+
+        const int row = rowsToDescribe[0];
+        const auto *file = getResultAt(row);
+        if (file == nullptr)
+            return {};
+
+        const auto absolutePath = onResolveAbsolutePathForFile(*file);
+        if (!absolutePath.has_value() || absolutePath->isEmpty())
+            return {};
+
+        const juce::File sourceFile(*absolutePath);
+        if (!sourceFile.existsAsFile())
+            return {};
+
+        return sourceFile.getFullPathName();
+    }
+
+    bool ResultsPanel::shouldDropFilesWhenDraggedExternally(const juce::DragAndDropTarget::SourceDetails &sourceDetails,
+                                                            juce::StringArray &files,
+                                                            bool &canMoveFiles)
+    {
+        const auto filePath = sourceDetails.description.toString();
+        if (filePath.isEmpty())
+            return false;
+
+        const juce::File file(filePath);
+        if (!file.existsAsFile())
+            return false;
+
+        files.add(file.getFullPathName());
+        canMoveFiles = false;
+        return true;
+    }
+
     void ResultsPanel::paintListBoxItem(int rowNumber, juce::Graphics &g, int width, int /*height*/, bool rowIsSelected)
     {
         if (rowNumber < 0 || rowNumber >= static_cast<int>(results.size()))

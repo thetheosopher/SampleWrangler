@@ -4,13 +4,16 @@
 #include "Catalog/CatalogModels.h"
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace sw
 {
 
     /// Centre panel: search bar + results list (file table/list).
-    class ResultsPanel final : public juce::Component, private juce::ListBoxModel
+    class ResultsPanel final : public juce::Component,
+                               public juce::DragAndDropContainer,
+                               private juce::ListBoxModel
     {
     public:
         ResultsPanel();
@@ -31,6 +34,7 @@ namespace sw
         std::function<void(const std::string &query)> onSearchQueryChanged;
         std::function<void(const FileRecord &file)> onFileSelected;
         std::function<void(const FileRecord &file)> onFileActivated;
+        std::function<std::optional<juce::String>(const FileRecord &file)> onResolveAbsolutePathForFile;
 
     private:
         enum class SortMode
@@ -41,10 +45,17 @@ namespace sw
 
         void applySort();
 
+        // --- ListBoxModel overrides ---
         int getNumRows() override;
         void paintListBoxItem(int rowNumber, juce::Graphics &g, int width, int height, bool rowIsSelected) override;
         void selectedRowsChanged(int lastRowSelected) override;
         void listBoxItemDoubleClicked(int row, const juce::MouseEvent &) override;
+        juce::var getDragSourceDescription(const juce::SparseSet<int> &rowsToDescribe) override;
+
+        // --- DragAndDropContainer override ---
+        bool shouldDropFilesWhenDraggedExternally(const juce::DragAndDropTarget::SourceDetails &sourceDetails,
+                              juce::StringArray &files,
+                              bool &canMoveFiles) override;
 
         juce::TextEditor searchBox;
         juce::ComboBox sortSelector;

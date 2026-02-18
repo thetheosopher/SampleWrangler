@@ -10,6 +10,12 @@ namespace sw
     class WaveformPanel final : public juce::Component
     {
     public:
+        enum class DisplayMode
+        {
+            waveform,
+            spectrogram
+        };
+
         WaveformPanel();
         ~WaveformPanel() override = default;
 
@@ -23,10 +29,14 @@ namespace sw
         void setPlayheadNormalized(float playheadPosition);
         void setLoopRegionNormalized(float loopStart, float loopEnd);
         void setDarkMode(bool enabled);
+        void setDisplayMode(DisplayMode mode);
+        DisplayMode getDisplayMode() const noexcept;
 
         std::function<void(float normalizedPosition)> onScrubRequested;
 
     private:
+        void paintWaveform(juce::Graphics &g, juce::Rectangle<float> bounds) const;
+        void paintSpectrogram(juce::Graphics &g, juce::Rectangle<float> bounds) const;
         float normalizedPositionFromX(int x) const;
 
         std::vector<std::vector<float>> currentPeaksByChannel;
@@ -34,6 +44,7 @@ namespace sw
         float loopStartNormalized = -1.0f;
         float loopEndNormalized = -1.0f;
         bool darkModeEnabled = true;
+        DisplayMode displayMode = DisplayMode::waveform;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformPanel)
     };

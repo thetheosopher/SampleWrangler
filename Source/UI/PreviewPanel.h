@@ -65,8 +65,35 @@ namespace sw
             void drawToggleButton(juce::Graphics &g, juce::ToggleButton &button,
                                   bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override
             {
-                // Call parent to draw everything
-                juce::LookAndFeel_V4::drawToggleButton(g, button, shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+                const auto font = juce::Font(juce::FontOptions(12.0f));
+                const int baseTickWidth = juce::jmin(20, button.getHeight() - 4);
+                const int tickWidth = juce::jlimit(10, 20,
+                                                   juce::jmin(button.getHeight() - 2,
+                                                              static_cast<int>(std::round(static_cast<float>(baseTickWidth) * 1.25f))));
+
+                drawTickBox(g,
+                            button,
+                            3.0f,
+                            (static_cast<float>(button.getHeight()) - static_cast<float>(tickWidth)) * 0.5f,
+                            static_cast<float>(tickWidth),
+                            static_cast<float>(tickWidth),
+                            button.getToggleState(),
+                            button.isEnabled(),
+                            shouldDrawButtonAsHighlighted,
+                            shouldDrawButtonAsDown);
+
+                g.setColour(button.findColour(juce::ToggleButton::textColourId));
+                if (!button.isEnabled())
+                    g.setOpacity(0.5f);
+
+                g.setFont(font);
+                g.drawFittedText(button.getButtonText(),
+                                 tickWidth + 8,
+                                 0,
+                                 button.getWidth() - tickWidth - 8,
+                                 button.getHeight(),
+                                 juce::Justification::centredLeft,
+                                 1);
             }
 
             juce::Font getTextButtonFont(juce::TextButton &, int) override

@@ -18,6 +18,9 @@ namespace sw
 
     PreviewPanel::PreviewPanel()
     {
+        playButton.setButtonText(juce::String::charToString(static_cast<juce_wchar>(0x25B6))); // ▶
+        stopButton.setButtonText(juce::String::charToString(static_cast<juce_wchar>(0x25A0))); // ■
+
         playButton.onClick = [this]
         {
             setPlaybackActive(true);
@@ -93,6 +96,7 @@ namespace sw
 
         pitchValueField.setJustificationType(juce::Justification::centred);
         pitchValueField.setEditable(false, false, false);
+        pitchValueField.setFont(juce::FontOptions(12.0f));
         pitchValueField.setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
         pitchValueField.onScrubStart = [this]
         {
@@ -150,21 +154,28 @@ namespace sw
         auto toggleArea = topRow.removeFromLeft(128);
         constexpr int col1Width = 64; // Width for first column (Auto, Stretch)
         constexpr int col2Width = 64; // Width for second column (Loop, HQ)
+        constexpr int toggleRowHeight = 16;
+        constexpr int toggleRowGap = 2;
 
-        auto toggleTopRow = toggleArea.removeFromTop(16);
+        auto toggleTopRow = toggleArea.removeFromTop(toggleRowHeight);
         autoPlayButton.setBounds(toggleTopRow.removeFromLeft(col1Width));
         loopButton.setBounds(toggleTopRow.removeFromLeft(col2Width));
 
-        toggleArea.removeFromTop(2); // Small spacing between rows
-        auto toggleBottomRow = toggleArea;
+        toggleArea.removeFromTop(toggleRowGap); // Small spacing between rows
+        auto toggleBottomRow = toggleArea.removeFromTop(toggleRowHeight);
         stretchButton.setBounds(toggleBottomRow.removeFromLeft(col1Width));
         stretchHighQualityButton.setBounds(toggleBottomRow.removeFromLeft(col2Width));
 
         topRow.removeFromLeft(8);
         auto pitchArea = topRow.removeFromLeft(90);
-        transposeLabel.setBounds(pitchArea.removeFromTop(14));
+        const auto transposeRow = pitchArea.removeFromTop(14);
         pitchArea.removeFromTop(2); // Padding between label and textbox
-        pitchValueField.setBounds(pitchArea.removeFromTop(16));
+        auto pitchValueBounds = pitchArea.removeFromTop(16);
+        const auto centeredPitchValueBounds = pitchValueBounds.withSizeKeepingCentre(pitchValueBounds.getWidth() / 2,
+                                                                                     pitchValueBounds.getHeight());
+        pitchValueField.setBounds(centeredPitchValueBounds);
+        transposeLabel.setBounds(transposeRow.withSizeKeepingCentre(centeredPitchValueBounds.getWidth(),
+                                                                    transposeRow.getHeight()));
 
         area.removeFromTop(rowSpacing);
         auto typeRow = area.removeFromTop(comboRowHeight);

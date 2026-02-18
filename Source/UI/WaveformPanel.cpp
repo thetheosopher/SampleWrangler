@@ -12,9 +12,18 @@ namespace sw
 
         if (currentPeaksByChannel.empty() || currentPeaksByChannel.front().empty())
         {
-            g.setColour(darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff6a6a6a));
-            g.setFont(12.0f);
-            g.drawText("No waveform loaded", getLocalBounds(), juce::Justification::centred);
+            if (loading)
+            {
+                g.setColour(darkModeEnabled ? juce::Colours::white : juce::Colour(0xff303030));
+                g.setFont(14.0f);
+                g.drawText("Loading...", getLocalBounds(), juce::Justification::centred);
+            }
+            else
+            {
+                g.setColour(darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff6a6a6a));
+                g.setFont(12.0f);
+                g.drawText("No waveform loaded", getLocalBounds(), juce::Justification::centred);
+            }
             return;
         }
 
@@ -28,8 +37,9 @@ namespace sw
         {
             const float loopStartX = bounds.getX() + bounds.getWidth() * juce::jlimit(0.0f, 1.0f, loopStartNormalized);
             const float loopEndX = bounds.getX() + bounds.getWidth() * juce::jlimit(0.0f, 1.0f, loopEndNormalized);
-            g.setColour((darkModeEnabled ? juce::Colours::yellow : juce::Colour(0xffd8ab00)).withAlpha(0.12f));
-            g.fillRect(juce::Rectangle<float>(loopStartX, bounds.getY(), juce::jmax(1.0f, loopEndX - loopStartX), bounds.getHeight()));
+            g.setColour(darkModeEnabled ? juce::Colour(0xffff4d4d) : juce::Colour(0xffc62828));
+            g.drawLine(loopStartX, bounds.getY(), loopStartX, bounds.getBottom(), 2.0f);
+            g.drawLine(loopEndX, bounds.getY(), loopEndX, bounds.getBottom(), 2.0f);
         }
 
         if (playheadNormalized >= 0.0f)
@@ -37,6 +47,15 @@ namespace sw
             const float playheadX = bounds.getX() + bounds.getWidth() * juce::jlimit(0.0f, 1.0f, playheadNormalized);
             g.setColour(darkModeEnabled ? juce::Colours::orange : juce::Colour(0xffc86b00));
             g.drawLine(playheadX, bounds.getY(), playheadX, bounds.getBottom(), 1.5f);
+        }
+
+        if (loading)
+        {
+            g.setColour((darkModeEnabled ? juce::Colours::black : juce::Colours::white).withAlpha(0.35f));
+            g.fillRect(getLocalBounds());
+            g.setColour(darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020));
+            g.setFont(14.0f);
+            g.drawText("Loading...", getLocalBounds(), juce::Justification::centred);
         }
     }
 
@@ -119,6 +138,15 @@ namespace sw
     {
         loopStartNormalized = juce::jlimit(-1.0f, 1.0f, loopStart);
         loopEndNormalized = juce::jlimit(-1.0f, 1.0f, loopEnd);
+        repaint();
+    }
+
+    void WaveformPanel::setLoading(bool isLoading)
+    {
+        if (loading == isLoading)
+            return;
+
+        loading = isLoading;
         repaint();
     }
 

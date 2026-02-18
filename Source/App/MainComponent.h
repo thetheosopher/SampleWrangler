@@ -72,6 +72,7 @@ namespace sw
         void resetLayout();
         void handleAddRootClicked();
         void handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert);
+        void setPreviewLoadingState(bool isLoading, uint64_t requestId);
         void applyEffectiveLoopPlaybackMode();
         void advanceAutoplaySelectionAndPlay();
         void updateWaveformLoopOverlay();
@@ -166,6 +167,8 @@ namespace sw
         std::optional<int64_t> selectedRootFilterId;
         std::optional<FileRecord> currentSelectedFile;
         std::atomic<uint64_t> previewLoadRequestCounter{0};
+        bool previewLoading = false;
+        uint64_t previewLoadingRequestId = 0;
         std::string currentSearchQuery;
         juce::String selectedMidiInputIdentifier;
         juce::StringArray lastKnownMidiInputIdentifiers;

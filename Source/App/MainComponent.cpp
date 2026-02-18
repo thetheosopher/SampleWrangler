@@ -1666,6 +1666,26 @@ namespace sw
         return it->path;
     }
 
+    void MainComponent::setPreviewLoadingState(bool isLoading, uint64_t requestId)
+    {
+        if (isLoading)
+        {
+            previewLoading = true;
+            previewLoadingRequestId = requestId;
+            waveformPanel.setLoading(true);
+            setMouseCursor(juce::MouseCursor::WaitCursor);
+            return;
+        }
+
+        if (requestId != 0 && requestId != previewLoadingRequestId)
+            return;
+
+        previewLoading = false;
+        previewLoadingRequestId = 0;
+        waveformPanel.setLoading(false);
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
+
     void MainComponent::handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert)
     {
         persistLastSelectedFile(file);
@@ -1707,6 +1727,7 @@ namespace sw
 
         if (file.indexOnly)
         {
+            setPreviewLoadingState(false, requestId);
             waveformPanel.setPeaks({});
             waveformPanel.setPlayheadNormalized(-1.0f);
             waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
@@ -1721,7 +1742,12 @@ namespace sw
 
         const auto rootPath = rootPathForId(file.rootId);
         if (rootPath.empty())
+        {
+            setPreviewLoadingState(false, requestId);
             return;
+        }
+
+        setPreviewLoadingState(true, requestId);
 
         const auto absolutePath = resolveAbsolutePath(rootPath, file.relativePath);
         juce::Component::SafePointer<MainComponent> safeThis(this);
@@ -1729,14 +1755,33 @@ namespace sw
         jobQueue.enqueue(Job{
             [safeThis, absolutePath, playWhenReady, requestId](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
             {
+                auto finishLoadingOnMessageThread = [safeThis, requestId]
+                {
+                    juce::MessageManager::callAsync([safeThis, requestId]
+                                                    {
+                                                        if (safeThis == nullptr)
+                                                            return;
+
+                                                        safeThis->setPreviewLoadingState(false, requestId); });
+                };
+
                 if (cancelGeneration.load(std::memory_order_relaxed) != jobGeneration)
+                {
+                    finishLoadingOnMessageThread();
                     return;
+                }
 
                 if (safeThis == nullptr)
+                {
+                    finishLoadingOnMessageThread();
                     return;
+                }
 
                 if (safeThis->previewLoadRequestCounter.load(std::memory_order_acquire) != requestId)
+                {
+                    finishLoadingOnMessageThread();
                     return;
+                }
 
                 juce::AudioFormatManager formatManager;
                 formatManager.registerBasicFormats();
@@ -1744,17 +1789,26 @@ namespace sw
                 juce::File sourceFile(absolutePath);
                 auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(sourceFile));
                 if (!reader)
+                {
+                    finishLoadingOnMessageThread();
                     return;
+                }
 
                 const int numChannels = std::max(1, static_cast<int>(std::min<uint32_t>(2, reader->numChannels)));
                 const int numSamples = static_cast<int>(std::min<int64_t>(reader->lengthInSamples, static_cast<int64_t>(std::numeric_limits<int>::max())));
 
                 if (numSamples <= 0)
+                {
+                    finishLoadingOnMessageThread();
                     return;
+                }
 
                 juce::AudioBuffer<float> tempBuffer(numChannels, numSamples);
                 if (!reader->read(&tempBuffer, 0, numSamples, 0, true, true))
+                {
+                    finishLoadingOnMessageThread();
                     return;
+                }
 
                 constexpr int targetPeakCount = 1600;
                 const int peakCount = std::max(1, std::min(targetPeakCount, numSamples));
@@ -1798,7 +1852,10 @@ namespace sw
                         return;
 
                     if (safeThis->previewLoadRequestCounter.load(std::memory_order_acquire) != requestId)
+                    {
+                        safeThis->setPreviewLoadingState(false, requestId);
                         return;
+                    }
 
                     auto previewBuffer = std::make_unique<juce::AudioBuffer<float>>(numChannels, numSamples);
                     for (int ch = 0; ch < numChannels; ++ch)
@@ -1813,6 +1870,7 @@ namespace sw
                     safeThis->waveformPanel.setPeaks(*peaks);
                     safeThis->waveformPanel.setPlayheadNormalized(0.0f);
                     safeThis->updateWaveformLoopOverlay();
+                    safeThis->setPreviewLoadingState(false, requestId);
                     if (playWhenReady)
                         safeThis->audioEngine.play(); });
             },
@@ -1822,6 +1880,12 @@ namespace sw
     void MainComponent::updateWaveformLoopOverlay()
     {
         if (!currentSelectedFile.has_value() || currentSelectedFile->indexOnly)
+        {
+            waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
+            return;
+        }
+
+        if (!previewPanel.isLoopEnabled())
         {
             waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
             return;
@@ -1851,10 +1915,7 @@ namespace sw
             return;
         }
 
-        if (previewPanel.isLoopEnabled())
-            waveformPanel.setLoopRegionNormalized(0.0f, 1.0f);
-        else
-            waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
+        waveformPanel.setLoopRegionNormalized(0.0f, 1.0f);
     }
 
     void MainComponent::timerCallback()

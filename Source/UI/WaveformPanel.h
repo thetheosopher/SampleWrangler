@@ -28,6 +28,7 @@ namespace sw
         void setPeaks(const std::vector<std::vector<float>> &peaksByChannel);
         void setPlayheadNormalized(float playheadPosition);
         void setLoopRegionNormalized(float loopStart, float loopEnd);
+        void setLoading(bool loading);
         void setDarkMode(bool enabled);
         void setDisplayMode(DisplayMode mode);
         DisplayMode getDisplayMode() const noexcept;
@@ -43,6 +44,7 @@ namespace sw
         float playheadNormalized = -1.0f;
         float loopStartNormalized = -1.0f;
         float loopEndNormalized = -1.0f;
+        bool loading = false;
         bool darkModeEnabled = true;
         DisplayMode displayMode = DisplayMode::waveform;
 

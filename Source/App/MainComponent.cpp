@@ -949,13 +949,6 @@ namespace sw
                         changed = true;
                     }
 
-                    if (!safeThis->previewPanel.isLoopEnabled())
-                    {
-                        safeThis->previewPanel.setLoopEnabled(true);
-                        safeThis->persistPreviewLoopEnabled(true);
-                        changed = true;
-                    }
-
                     if (changed)
                     {
                         safeThis->applyEffectiveLoopPlaybackMode();

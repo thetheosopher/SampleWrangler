@@ -271,10 +271,6 @@ namespace sw
         bufferSampleRate = fileSampleRate;
         sampleBuffer.store(std::move(sharedBuffer), std::memory_order_release);
         playbackPos.store(0.0, std::memory_order_relaxed);
-#if SW_HAVE_RUBBERBAND
-        initialiseRubberBandIfNeeded();
-        resetRubberBandState();
-#endif
     }
 
     void VoiceManager::play()

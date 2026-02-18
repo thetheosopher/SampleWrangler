@@ -91,6 +91,19 @@ namespace sw
 
     void WaveformPanel::setPeaks(const std::vector<std::vector<float>> &peaksByChannel)
     {
+        if (!juce::MessageManager::getInstance()->isThisTheMessageThread())
+        {
+            auto safeThis = juce::Component::SafePointer<WaveformPanel>(this);
+            auto peaksCopy = std::make_shared<std::vector<std::vector<float>>>(peaksByChannel);
+            juce::MessageManager::callAsync([safeThis, peaksCopy]
+                                            {
+                                                if (safeThis == nullptr)
+                                                    return;
+
+                                                safeThis->setPeaks(*peaksCopy); });
+            return;
+        }
+
         currentPeaksByChannel = peaksByChannel;
         repaint();
     }

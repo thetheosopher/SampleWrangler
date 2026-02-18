@@ -54,8 +54,8 @@ namespace sw
 
         // --- DragAndDropContainer override ---
         bool shouldDropFilesWhenDraggedExternally(const juce::DragAndDropTarget::SourceDetails &sourceDetails,
-                              juce::StringArray &files,
-                              bool &canMoveFiles) override;
+                                                  juce::StringArray &files,
+                                                  bool &canMoveFiles) override;
 
         juce::TextEditor searchBox;
         juce::ComboBox sortSelector;

@@ -98,7 +98,7 @@ namespace sw
 
             juce::Font getTextButtonFont(juce::TextButton &, int) override
             {
-                return juce::FontOptions(12.0f);
+                return juce::FontOptions(24.0f);
             }
         };
 

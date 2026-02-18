@@ -68,6 +68,9 @@ namespace sw
         addAndMakeVisible(playButton);
         addAndMakeVisible(stopButton);
 
+        playButton.setLookAndFeel(&fixedFontLookAndFeel);
+        stopButton.setLookAndFeel(&fixedFontLookAndFeel);
+
         // Apply fixed font LookAndFeel to toggle buttons
         autoPlayButton.setLookAndFeel(&fixedFontLookAndFeel);
         loopButton.setLookAndFeel(&fixedFontLookAndFeel);

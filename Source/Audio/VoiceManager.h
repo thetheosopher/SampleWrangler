@@ -8,7 +8,7 @@
 #if SW_HAVE_RUBBERBAND
 namespace RubberBand
 {
-    class RubberBandLiveShifter;
+    class RubberBandStretcher;
 }
 #endif
 
@@ -89,18 +89,23 @@ namespace sw
 #if SW_HAVE_RUBBERBAND
         static constexpr int kRubberBandMaxChannels = 2;
         static constexpr int kRubberBandMaxBlockSize = 4096;
+        static constexpr int kRubberBandOutputFifoSize = 32768;
 
-        std::unique_ptr<RubberBand::RubberBandLiveShifter> rubberBandLiveShifter;
-        int rubberBandBlockSize = 0;
+        std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandStretcher;
+        int rubberBandProcessBlockSize = 0;
         int rubberBandInputFill = 0;
-        int rubberBandOutputRead = 0;
-        int rubberBandOutputAvailable = 0;
         int rubberBandStartDelayRemaining = 0;
+        int rubberBandPreferredStartPadRemaining = 0;
         bool rubberBandInitialized = false;
+        double rubberBandLastPitchScale = 1.0;
         std::array<std::array<float, kRubberBandMaxBlockSize>, kRubberBandMaxChannels> rubberBandInput{};
-        std::array<std::array<float, kRubberBandMaxBlockSize>, kRubberBandMaxChannels> rubberBandOutput{};
+        std::array<std::array<float, kRubberBandMaxBlockSize>, kRubberBandMaxChannels> rubberBandProcessOutput{};
+        std::array<std::array<float, kRubberBandOutputFifoSize>, kRubberBandMaxChannels> rubberBandOutputFifo{};
+        int rubberBandOutputFifoRead = 0;
+        int rubberBandOutputFifoWrite = 0;
+        int rubberBandOutputFifoCount = 0;
         std::array<const float *, kRubberBandMaxChannels> rubberBandInputPtrs{};
-        std::array<float *, kRubberBandMaxChannels> rubberBandOutputPtrs{};
+        std::array<float *, kRubberBandMaxChannels> rubberBandProcessOutputPtrs{};
 
         void initialiseRubberBandIfNeeded();
         void resetRubberBandState();

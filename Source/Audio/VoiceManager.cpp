@@ -1,8 +1,9 @@
 #include "VoiceManager.h"
 #include <cmath>
+#include <cstring>
 
 #if SW_HAVE_RUBBERBAND
-#include <rubberband/RubberBandLiveShifter.h>
+#include <rubberband/RubberBandStretcher.h>
 #endif
 
 namespace sw
@@ -113,6 +114,74 @@ namespace sw
         constexpr int grainLengthSamples = 256;
         constexpr double grainSpacingSamples = 128.0;
 
+#if SW_HAVE_RUBBERBAND
+        auto processRubberBandIfReady = [&]()
+        {
+            if (rubberBandStretcher == nullptr)
+                return;
+
+            while (true)
+            {
+                int required = static_cast<int>(rubberBandStretcher->getSamplesRequired());
+                if (required <= 0 || required > kRubberBandMaxBlockSize)
+                    required = rubberBandProcessBlockSize;
+
+                required = juce::jlimit(1, kRubberBandMaxBlockSize, required);
+                if (rubberBandInputFill < required)
+                    break;
+
+                for (int ch = 0; ch < kRubberBandMaxChannels; ++ch)
+                {
+                    rubberBandInputPtrs[static_cast<size_t>(ch)] = rubberBandInput[static_cast<size_t>(ch)].data();
+                    rubberBandProcessOutputPtrs[static_cast<size_t>(ch)] = rubberBandProcessOutput[static_cast<size_t>(ch)].data();
+                }
+
+                rubberBandStretcher->process(rubberBandInputPtrs.data(), static_cast<size_t>(required), false);
+
+                const int remaining = rubberBandInputFill - required;
+                if (remaining > 0)
+                {
+                    for (int ch = 0; ch < kRubberBandMaxChannels; ++ch)
+                    {
+                        std::memmove(rubberBandInput[static_cast<size_t>(ch)].data(),
+                                     rubberBandInput[static_cast<size_t>(ch)].data() + required,
+                                     static_cast<size_t>(remaining) * sizeof(float));
+                    }
+                }
+                rubberBandInputFill = remaining;
+
+                int available = rubberBandStretcher->available();
+                while (available > 0)
+                {
+                    const size_t toRetrieve = static_cast<size_t>(juce::jmin(available, kRubberBandMaxBlockSize));
+                    const size_t retrieved = rubberBandStretcher->retrieve(rubberBandProcessOutputPtrs.data(), toRetrieve);
+                    if (retrieved == 0)
+                        break;
+
+                    for (size_t frame = 0; frame < retrieved; ++frame)
+                    {
+                        if (rubberBandOutputFifoCount >= kRubberBandOutputFifoSize)
+                        {
+                            rubberBandOutputFifoRead = (rubberBandOutputFifoRead + 1) % kRubberBandOutputFifoSize;
+                            --rubberBandOutputFifoCount;
+                        }
+
+                        for (int ch = 0; ch < kRubberBandMaxChannels; ++ch)
+                        {
+                            rubberBandOutputFifo[static_cast<size_t>(ch)][static_cast<size_t>(rubberBandOutputFifoWrite)] =
+                                rubberBandProcessOutput[static_cast<size_t>(ch)][frame];
+                        }
+
+                        rubberBandOutputFifoWrite = (rubberBandOutputFifoWrite + 1) % kRubberBandOutputFifoSize;
+                        ++rubberBandOutputFifoCount;
+                    }
+
+                    available = rubberBandStretcher->available();
+                }
+            }
+        };
+#endif
+
         for (int i = 0; i < info.numSamples; ++i)
         {
             if (hasLoopRegion && pos >= loopEndExclusive)
@@ -143,63 +212,70 @@ namespace sw
                 if (useRubberBandHq)
                 {
 #if SW_HAVE_RUBBERBAND
-                    if (rubberBandLiveShifter != nullptr)
-                        rubberBandLiveShifter->setPitchScale(currentPitchRatio);
-
-                    for (int ch = 0; ch < numOutChannels; ++ch)
+                    if (rubberBandStretcher != nullptr)
                     {
-                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                        rubberBandInput[static_cast<size_t>(ch)][static_cast<size_t>(rubberBandInputFill)] =
-                            readInterpolatedSample(srcCh, pos);
-                    }
-
-                    ++rubberBandInputFill;
-
-                    if (rubberBandInputFill >= rubberBandBlockSize)
-                    {
-                        for (int ch = 0; ch < kRubberBandMaxChannels; ++ch)
+                        if (std::abs(currentPitchRatio - rubberBandLastPitchScale) > 1.0e-6)
                         {
-                            rubberBandInputPtrs[static_cast<size_t>(ch)] = rubberBandInput[static_cast<size_t>(ch)].data();
-                            rubberBandOutputPtrs[static_cast<size_t>(ch)] = rubberBandOutput[static_cast<size_t>(ch)].data();
+                            rubberBandStretcher->setPitchScale(currentPitchRatio);
+                            rubberBandLastPitchScale = currentPitchRatio;
                         }
 
-                        rubberBandLiveShifter->shift(rubberBandInputPtrs.data(), rubberBandOutputPtrs.data());
-                        rubberBandInputFill = 0;
-                        rubberBandOutputRead = 0;
-                        rubberBandOutputAvailable = rubberBandBlockSize;
+                        const bool provideStartPadSample = (rubberBandPreferredStartPadRemaining > 0);
+
+                        for (int ch = 0; ch < kRubberBandMaxChannels; ++ch)
+                        {
+                            float inSample = 0.0f;
+                            if (!provideStartPadSample)
+                            {
+                                const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                                inSample = readInterpolatedSample(srcCh, pos);
+                            }
+                            rubberBandInput[static_cast<size_t>(ch)][static_cast<size_t>(rubberBandInputFill)] = inSample;
+                        }
+
+                        if (provideStartPadSample)
+                        {
+                            --rubberBandPreferredStartPadRemaining;
+                        }
+                        else
+                        {
+                            pos += (bufferSampleRate / currentSampleRate);
+                        }
+
+                        ++rubberBandInputFill;
+                        processRubberBandIfReady();
+
+                        while (rubberBandOutputFifoCount > 0 && rubberBandStartDelayRemaining > 0)
+                        {
+                            rubberBandOutputFifoRead = (rubberBandOutputFifoRead + 1) % kRubberBandOutputFifoSize;
+                            --rubberBandOutputFifoCount;
+                            --rubberBandStartDelayRemaining;
+                        }
+
+                        float outSampleLeft = 0.0f;
+                        float outSampleRight = 0.0f;
+                        if (rubberBandOutputFifoCount > 0)
+                        {
+                            outSampleLeft = rubberBandOutputFifo[0][static_cast<size_t>(rubberBandOutputFifoRead)];
+                            outSampleRight = rubberBandOutputFifo[1][static_cast<size_t>(rubberBandOutputFifoRead)];
+                            rubberBandOutputFifoRead = (rubberBandOutputFifoRead + 1) % kRubberBandOutputFifoSize;
+                            --rubberBandOutputFifoCount;
+                        }
+                        else
+                        {
+                            const int fallbackIndex = juce::jlimit(0, kRubberBandMaxBlockSize - 1, rubberBandInputFill > 0 ? rubberBandInputFill - 1 : 0);
+                            outSampleLeft = rubberBandInput[0][static_cast<size_t>(fallbackIndex)];
+                            outSampleRight = rubberBandInput[1][static_cast<size_t>(fallbackIndex)];
+                        }
+
+                        for (int ch = 0; ch < numOutChannels; ++ch)
+                        {
+                            const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
+                            info.buffer->setSample(ch, info.startSample + i, sample);
+                        }
+
+                        continue;
                     }
-
-                    float outSampleLeft = 0.0f;
-                    float outSampleRight = 0.0f;
-                    bool outputProduced = false;
-
-                    while (rubberBandOutputAvailable > 0 && rubberBandStartDelayRemaining > 0)
-                    {
-                        ++rubberBandOutputRead;
-                        --rubberBandOutputAvailable;
-                        --rubberBandStartDelayRemaining;
-                    }
-
-                    if (rubberBandOutputAvailable > 0)
-                    {
-                        const int rbIndex = rubberBandOutputRead;
-                        outSampleLeft = rubberBandOutput[0][static_cast<size_t>(rbIndex)];
-                        outSampleRight = rubberBandOutput[1][static_cast<size_t>(rbIndex)];
-                        ++rubberBandOutputRead;
-                        --rubberBandOutputAvailable;
-                        outputProduced = true;
-                    }
-
-                    for (int ch = 0; ch < numOutChannels; ++ch)
-                    {
-                        const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
-                        info.buffer->setSample(ch, info.startSample + i, sample);
-                    }
-
-                    // Only advance position when we're actually outputting audio (past startup delay)
-                    if (outputProduced || rubberBandStartDelayRemaining == 0)
-                        pos += (bufferSampleRate / currentSampleRate);
-                    continue;
 #endif
                 }
 
@@ -394,22 +470,37 @@ namespace sw
         if (rubberBandInitialized)
             return;
 
-        const auto options = RubberBand::RubberBandLiveShifter::OptionWindowMedium |
-                             RubberBand::RubberBandLiveShifter::OptionChannelsTogether |
-                             RubberBand::RubberBandLiveShifter::OptionFormantPreserved;
+        const auto options = RubberBand::RubberBandStretcher::OptionProcessRealTime |
+                             RubberBand::RubberBandStretcher::OptionEngineFiner |
+                             RubberBand::RubberBandStretcher::OptionThreadingNever |
+                             RubberBand::RubberBandStretcher::OptionWindowStandard |
+                             RubberBand::RubberBandStretcher::OptionChannelsTogether |
+                             RubberBand::RubberBandStretcher::OptionFormantPreserved |
+                             RubberBand::RubberBandStretcher::OptionPitchHighConsistency;
 
-        rubberBandLiveShifter = std::make_unique<RubberBand::RubberBandLiveShifter>(
+        rubberBandStretcher = std::make_unique<RubberBand::RubberBandStretcher>(
             static_cast<size_t>(juce::jlimit(8000, 192000, static_cast<int>(std::round(currentSampleRate)))),
             static_cast<size_t>(kRubberBandMaxChannels),
-            options);
+            options,
+            1.0,
+            pitchRatio.load(std::memory_order_relaxed));
 
-        rubberBandLiveShifter->setDebugLevel(0);
-        rubberBandLiveShifter->setPitchScale(playbackRate.load(std::memory_order_relaxed));
-
-        rubberBandBlockSize = static_cast<int>(rubberBandLiveShifter->getBlockSize());
-        if (rubberBandBlockSize <= 0 || rubberBandBlockSize > kRubberBandMaxBlockSize)
+        if (rubberBandStretcher == nullptr)
         {
-            rubberBandLiveShifter.reset();
+            rubberBandInitialized = false;
+            return;
+        }
+
+        rubberBandStretcher->setDebugLevel(0);
+        rubberBandStretcher->setMaxProcessSize(static_cast<size_t>(kRubberBandMaxBlockSize));
+
+        rubberBandProcessBlockSize = static_cast<int>(rubberBandStretcher->getSamplesRequired());
+        if (rubberBandProcessBlockSize <= 0 || rubberBandProcessBlockSize > kRubberBandMaxBlockSize)
+            rubberBandProcessBlockSize = 1024;
+
+        if (rubberBandProcessBlockSize <= 0 || rubberBandProcessBlockSize > kRubberBandMaxBlockSize)
+        {
+            rubberBandStretcher.reset();
             rubberBandInitialized = false;
             return;
         }
@@ -420,21 +511,30 @@ namespace sw
 
     void VoiceManager::resetRubberBandState()
     {
-        if (rubberBandLiveShifter == nullptr)
+        if (rubberBandStretcher == nullptr)
             return;
 
-        rubberBandLiveShifter->reset();
-        rubberBandLiveShifter->setPitchScale(playbackRate.load(std::memory_order_relaxed));
+        rubberBandStretcher->reset();
+        rubberBandStretcher->setTimeRatio(1.0);
+        rubberBandLastPitchScale = pitchRatio.load(std::memory_order_relaxed);
+        rubberBandStretcher->setPitchScale(rubberBandLastPitchScale);
 
         rubberBandInputFill = 0;
-        rubberBandOutputRead = 0;
-        rubberBandOutputAvailable = 0;
-        rubberBandStartDelayRemaining = static_cast<int>(rubberBandLiveShifter->getStartDelay());
+        rubberBandOutputFifoRead = 0;
+        rubberBandOutputFifoWrite = 0;
+        rubberBandOutputFifoCount = 0;
+        rubberBandPreferredStartPadRemaining = static_cast<int>(rubberBandStretcher->getPreferredStartPad());
+        rubberBandStartDelayRemaining = static_cast<int>(rubberBandStretcher->getStartDelay());
+
+        const int required = static_cast<int>(rubberBandStretcher->getSamplesRequired());
+        if (required > 0 && required <= kRubberBandMaxBlockSize)
+            rubberBandProcessBlockSize = required;
 
         for (int ch = 0; ch < kRubberBandMaxChannels; ++ch)
         {
             std::fill(rubberBandInput[static_cast<size_t>(ch)].begin(), rubberBandInput[static_cast<size_t>(ch)].end(), 0.0f);
-            std::fill(rubberBandOutput[static_cast<size_t>(ch)].begin(), rubberBandOutput[static_cast<size_t>(ch)].end(), 0.0f);
+            std::fill(rubberBandProcessOutput[static_cast<size_t>(ch)].begin(), rubberBandProcessOutput[static_cast<size_t>(ch)].end(), 0.0f);
+            std::fill(rubberBandOutputFifo[static_cast<size_t>(ch)].begin(), rubberBandOutputFifo[static_cast<size_t>(ch)].end(), 0.0f);
         }
     }
 #endif

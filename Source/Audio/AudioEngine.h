@@ -98,7 +98,7 @@ namespace sw
         std::atomic<double> basePitchSemitones{0.0};
 
         static constexpr int kOscilloscopeRingSize = 8192;
-        static constexpr int kOscilloscopeFrameSize = 1024;
+        static constexpr int kOscilloscopeFrameSize = 4096;
         std::array<float, kOscilloscopeRingSize> oscilloscopeRing{};
         std::atomic<uint32_t> oscilloscopeWriteIndex{0};
 

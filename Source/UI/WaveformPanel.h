@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 #include <functional>
 
 namespace sw
@@ -14,7 +15,8 @@ namespace sw
         {
             waveform,
             spectrogram,
-            compositeOscilloscope
+            compositeOscilloscope,
+            spectrumAnalyzer
         };
 
         WaveformPanel();
@@ -41,10 +43,20 @@ namespace sw
         void paintWaveform(juce::Graphics &g, juce::Rectangle<float> bounds) const;
         void paintSpectrogram(juce::Graphics &g, juce::Rectangle<float> bounds) const;
         void paintCompositeOscilloscope(juce::Graphics &g, juce::Rectangle<float> bounds) const;
+        void paintSpectrumAnalyzer(juce::Graphics &g, juce::Rectangle<float> bounds) const;
+        void updateSpectrumAnalyzer();
         float normalizedPositionFromX(int x) const;
+
+        static constexpr int kSpectrumBandCount = 32;
+        static constexpr int kSpectrumFftOrder = 12;
+        static constexpr int kSpectrumFftSize = 1 << kSpectrumFftOrder;
 
         std::vector<std::vector<float>> currentPeaksByChannel;
         std::vector<float> currentOscilloscopeSamples;
+        std::array<float, kSpectrumBandCount> spectrumBands{};
+        std::array<float, kSpectrumFftSize * 2> spectrumFftBuffer{};
+        juce::dsp::FFT spectrumFft{kSpectrumFftOrder};
+        juce::dsp::WindowingFunction<float> spectrumWindow{kSpectrumFftSize, juce::dsp::WindowingFunction<float>::hann, true};
         float playheadNormalized = -1.0f;
         float loopStartNormalized = -1.0f;
         float loopEndNormalized = -1.0f;

@@ -11,11 +11,29 @@ namespace sw
         g.fillAll(darkModeEnabled ? juce::Colour(0xff1a1a2e) : juce::Colour(0xffedf2fb));
 
         const bool isOscilloscope = (displayMode == DisplayMode::compositeOscilloscope);
+        const bool isSpectrumAnalyzer = (displayMode == DisplayMode::spectrumAnalyzer);
 
         if (isOscilloscope)
         {
             const auto bounds = getLocalBounds().toFloat().reduced(2.0f);
             paintCompositeOscilloscope(g, bounds);
+
+            if (loading)
+            {
+                g.setColour((darkModeEnabled ? juce::Colours::black : juce::Colours::white).withAlpha(0.35f));
+                g.fillRect(getLocalBounds());
+                g.setColour(darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020));
+                g.setFont(14.0f);
+                g.drawText("Loading...", getLocalBounds(), juce::Justification::centred);
+            }
+
+            return;
+        }
+
+        if (isSpectrumAnalyzer)
+        {
+            const auto bounds = getLocalBounds().toFloat().reduced(2.0f);
+            paintSpectrumAnalyzer(g, bounds);
 
             if (loading)
             {
@@ -92,6 +110,7 @@ namespace sw
             menu.addItem(1, "Waveform", true, displayMode == DisplayMode::waveform);
             menu.addItem(2, "Spectrogram", true, displayMode == DisplayMode::spectrogram);
             menu.addItem(3, "Oscilloscope", true, displayMode == DisplayMode::compositeOscilloscope);
+            menu.addItem(4, "Spectrum Analyzer", true, displayMode == DisplayMode::spectrumAnalyzer);
 
             auto safeThis = juce::Component::SafePointer<WaveformPanel>(this);
             menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
@@ -106,6 +125,8 @@ namespace sw
                                        safeThis->setDisplayMode(DisplayMode::spectrogram);
                                    else if (selected == 3)
                                        safeThis->setDisplayMode(DisplayMode::compositeOscilloscope);
+                                   else if (selected == 4)
+                                       safeThis->setDisplayMode(DisplayMode::spectrumAnalyzer);
                                });
             return;
         }
@@ -162,13 +183,14 @@ namespace sw
                                                 if (safeThis == nullptr)
                                                     return;
 
-                                                safeThis->setOscilloscopeSamples(*samplesCopy);
-                                            });
+                                                safeThis->setOscilloscopeSamples(*samplesCopy); });
             return;
         }
 
         currentOscilloscopeSamples = samples;
-        if (displayMode == DisplayMode::compositeOscilloscope)
+        updateSpectrumAnalyzer();
+
+        if (displayMode == DisplayMode::compositeOscilloscope || displayMode == DisplayMode::spectrumAnalyzer)
             repaint();
     }
 
@@ -359,6 +381,105 @@ namespace sw
 
         g.setColour(darkModeEnabled ? juce::Colour(0xff66e0ff) : juce::Colour(0xff1769aa));
         g.strokePath(scopePath, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void WaveformPanel::paintSpectrumAnalyzer(juce::Graphics &g, juce::Rectangle<float> bounds) const
+    {
+        g.setColour(darkModeEnabled ? juce::Colour(0xff0f1625) : juce::Colour(0xffdfe9f9));
+        g.fillRect(bounds);
+
+        const float barGap = 2.0f;
+        const float totalGap = barGap * static_cast<float>(kSpectrumBandCount - 1);
+        const float barWidth = juce::jmax(1.0f, (bounds.getWidth() - totalGap) / static_cast<float>(kSpectrumBandCount));
+
+        bool anyEnergy = false;
+        for (float band : spectrumBands)
+        {
+            if (band > 0.01f)
+            {
+                anyEnergy = true;
+                break;
+            }
+        }
+
+        for (int bandIndex = 0; bandIndex < kSpectrumBandCount; ++bandIndex)
+        {
+            const float normalized = juce::jlimit(0.0f, 1.0f, spectrumBands[static_cast<size_t>(bandIndex)]);
+            const float shaped = std::pow(normalized, 0.78f);
+            const float barHeight = shaped * bounds.getHeight();
+            const float x = bounds.getX() + static_cast<float>(bandIndex) * (barWidth + barGap);
+            const float y = bounds.getBottom() - barHeight;
+
+            const auto colour = darkModeEnabled
+                                    ? juce::Colour::fromHSV(0.62f - 0.48f * shaped,
+                                                            0.78f,
+                                                            0.28f + 0.72f * shaped,
+                                                            0.92f)
+                                    : juce::Colour::fromHSV(0.64f - 0.48f * shaped,
+                                                            0.62f,
+                                                            0.40f + 0.55f * shaped,
+                                                            0.86f);
+
+            g.setColour(colour);
+            g.fillRoundedRectangle(x, y, barWidth, juce::jmax(1.0f, barHeight), 1.6f);
+        }
+
+        if (!anyEnergy)
+        {
+            g.setColour(darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff6a6a6a));
+            g.setFont(12.0f);
+            g.drawText("No audio output", bounds.toNearestInt(), juce::Justification::centred);
+        }
+    }
+
+    void WaveformPanel::updateSpectrumAnalyzer()
+    {
+        constexpr float kDecay = 0.88f;
+        constexpr float kNoiseFloorDb = -80.0f;
+
+        for (auto &band : spectrumBands)
+            band *= kDecay;
+
+        if (currentOscilloscopeSamples.size() < 2)
+            return;
+
+        std::fill(spectrumFftBuffer.begin(), spectrumFftBuffer.end(), 0.0f);
+
+        const int available = juce::jmin(static_cast<int>(currentOscilloscopeSamples.size()), kSpectrumFftSize);
+        const int start = static_cast<int>(currentOscilloscopeSamples.size()) - available;
+        for (int i = 0; i < available; ++i)
+            spectrumFftBuffer[static_cast<size_t>(i)] = currentOscilloscopeSamples[static_cast<size_t>(start + i)];
+
+        spectrumWindow.multiplyWithWindowingTable(spectrumFftBuffer.data(), kSpectrumFftSize);
+        spectrumFft.performFrequencyOnlyForwardTransform(spectrumFftBuffer.data());
+
+        constexpr int maxBin = (kSpectrumFftSize / 2) - 1;
+
+        constexpr float minBinF = 1.0f;
+        const float maxBinF = static_cast<float>(maxBin);
+        const float binRatio = maxBinF / minBinF;
+
+        for (int bandIndex = 0; bandIndex < kSpectrumBandCount; ++bandIndex)
+        {
+            const float startNorm = static_cast<float>(bandIndex) / static_cast<float>(kSpectrumBandCount);
+            const float endNorm = static_cast<float>(bandIndex + 1) / static_cast<float>(kSpectrumBandCount);
+
+            const int binStart = juce::jlimit(1,
+                                              maxBin,
+                                              static_cast<int>(std::floor(minBinF * std::pow(binRatio, startNorm))));
+            const int binEnd = juce::jlimit(binStart + 1,
+                                            maxBin,
+                                            static_cast<int>(std::ceil(minBinF * std::pow(binRatio, endNorm))));
+
+            float maxMagnitude = 0.0f;
+            for (int bin = binStart; bin <= binEnd; ++bin)
+                maxMagnitude = juce::jmax(maxMagnitude, spectrumFftBuffer[static_cast<size_t>(bin)]);
+
+            const float normalizedMag = maxMagnitude / static_cast<float>(kSpectrumFftSize);
+            const float db = juce::Decibels::gainToDecibels(normalizedMag, kNoiseFloorDb);
+            const float mapped = juce::jlimit(0.0f, 1.0f, (db - kNoiseFloorDb) / -kNoiseFloorDb);
+            spectrumBands[static_cast<size_t>(bandIndex)] = juce::jmax(spectrumBands[static_cast<size_t>(bandIndex)], mapped);
+        }
     }
 
     float WaveformPanel::normalizedPositionFromX(int x) const

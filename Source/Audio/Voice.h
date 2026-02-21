@@ -14,11 +14,32 @@
 namespace sw
 {
 
+    // --- Lock-free MIDI command FIFO for thread-safe voice control. -----------
+    // Message/MIDI thread enqueues; audio thread dequeues and applies.
+    struct VoiceCommand
+    {
+        enum class Type : uint8_t
+        {
+            NoteOn,
+            NoteOff,
+            AllNotesOff,
+            UpdatePitch,
+            Play, // UI play button (non-MIDI, voice 0)
+            Stop,
+            SetPlaybackProgress
+        };
+
+        Type type = Type::NoteOn;
+        int midiNote = -1;
+        double playbackRate = 1.0;
+        double pitchRatio = 1.0;
+        double normalizedProgress = 0.0; // for SetPlaybackProgress
+    };
+
     /// Per-voice playback state for polyphonic sample preview.
     ///
-    /// All render methods are RT-SAFE (audio thread only).
-    /// Trigger/release methods are called from the message thread
-    /// and communicate via atomics.
+    /// All state is now exclusively owned by the audio thread.
+    /// Trigger/release happens via the VoiceCommand FIFO.
     struct Voice
     {
         // --- Constants -----------------------------------------------------------
@@ -41,15 +62,14 @@ namespace sw
             FadingOut
         };
 
-        // --- Voice state (atomics for message thread <-> audio thread) -----------
-        std::atomic<bool> active{false};
-        std::atomic<FadeState> fadeState{FadeState::Idle};
-        std::atomic<int> midiNote{-1};
-        std::atomic<double> playbackRate{1.0};
-        std::atomic<double> pitchRatio{1.0};
-        std::atomic<bool> granularResetRequested{true};
+        // --- Audio-thread-only state (ALL fields written only by audio thread) ---
+        bool active = false;
+        FadeState fadeState = FadeState::Idle;
+        int midiNote = -1;
+        double playbackRate = 1.0;
+        double pitchRatio = 1.0;
+        bool granularResetRequested = true;
 
-        // --- Audio-thread-only state --------------------------------------------
         double playbackPos = 0.0;
         float fadeGain = 0.0f;
 
@@ -80,42 +100,41 @@ namespace sw
         std::array<float *, kMaxChannels> rubberBandProcessOutputPtrs{};
 #endif
 
-        // --- Trigger / Release (message thread) ---------------------------------
+        // --- Trigger / Release (audio thread ONLY) --------------------------------
 
         void noteOn(int note, double rate, double pitch, uint64_t age)
         {
             playbackPos = 0.0;
             fadeGain = 0.0f;
             grainSamplesRemaining = 0;
-            granularResetRequested.store(true, std::memory_order_release);
-            midiNote.store(note, std::memory_order_relaxed);
-            playbackRate.store(rate, std::memory_order_relaxed);
-            pitchRatio.store(pitch, std::memory_order_relaxed);
+            granularResetRequested = true;
+            midiNote = note;
+            playbackRate = rate;
+            pitchRatio = pitch;
             triggerAge = age;
-            active.store(true, std::memory_order_relaxed);
-            fadeState.store(FadeState::FadingIn, std::memory_order_release);
+            active = true;
+            fadeState = FadeState::FadingIn;
         }
 
         void noteOff()
         {
-            FadeState fs = fadeState.load(std::memory_order_relaxed);
-            if (fs == FadeState::FadingIn || fs == FadeState::Active)
-                fadeState.store(FadeState::FadingOut, std::memory_order_relaxed);
+            if (fadeState == FadeState::FadingIn || fadeState == FadeState::Active)
+                fadeState = FadeState::FadingOut;
             else
                 forceOff();
         }
 
         void forceOff()
         {
-            active.store(false, std::memory_order_relaxed);
-            fadeState.store(FadeState::Idle, std::memory_order_relaxed);
-            midiNote.store(-1, std::memory_order_relaxed);
+            active = false;
+            fadeState = FadeState::Idle;
+            midiNote = -1;
         }
 
         void updatePitch(double rate, double pitch)
         {
-            playbackRate.store(rate, std::memory_order_relaxed);
-            pitchRatio.store(pitch, std::memory_order_relaxed);
+            playbackRate = rate;
+            pitchRatio = pitch;
         }
 
         // --- Render helpers (audio thread only) ----------------------------------
@@ -123,14 +142,13 @@ namespace sw
         /// Advance fade envelope by one sample. Returns current gain.
         float advanceFade(float fadeRate)
         {
-            FadeState fs = fadeState.load(std::memory_order_relaxed);
-            if (fs == FadeState::FadingIn)
+            if (fadeState == FadeState::FadingIn)
             {
                 fadeGain = juce::jmin(1.0f, fadeGain + fadeRate);
                 if (fadeGain >= 1.0f)
-                    fadeState.store(FadeState::Active, std::memory_order_relaxed);
+                    fadeState = FadeState::Active;
             }
-            else if (fs == FadeState::FadingOut)
+            else if (fadeState == FadeState::FadingOut)
             {
                 fadeGain = juce::jmax(0.0f, fadeGain - fadeRate);
                 if (fadeGain <= 0.0f)
@@ -187,7 +205,7 @@ namespace sw
 
             rubberBandStretcher->reset();
             rubberBandStretcher->setTimeRatio(1.0);
-            rubberBandLastPitchScale = pitchRatio.load(std::memory_order_relaxed);
+            rubberBandLastPitchScale = pitchRatio;
             rubberBandStretcher->setPitchScale(rubberBandLastPitchScale);
 
             rubberBandInputFill = 0;

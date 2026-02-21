@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "VoiceManager.h"
 #include <atomic>
+#include <mutex>
 
 namespace sw
 {
@@ -86,6 +87,7 @@ namespace sw
         juce::AudioDeviceManager deviceManager;
         juce::AudioSourcePlayer sourcePlayer;
         VoiceManager voiceManager;
+        std::mutex deviceConfigMutex;
 
         std::atomic<double> basePitchSemitones{0.0};
 

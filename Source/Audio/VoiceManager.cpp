@@ -31,7 +31,12 @@ namespace sw
     void VoiceManager::getNextAudioBlock(const juce::AudioSourceChannelInfo &info)
     {
         // RT-SAFE — no allocations, locks, I/O, or logging.
-        const auto loadedBuffer = sampleBuffer.load(std::memory_order_acquire);
+
+        // 1. Drain command FIFO — all voice mutations happen here on audio thread.
+        drainCommandFifo();
+
+        // 2. Load sample buffer. Keep a local copy for this callback.
+        auto loadedBuffer = sampleBuffer.load(std::memory_order_acquire);
         auto *buf = loadedBuffer.get();
 
         if (buf == nullptr || buf->getNumSamples() == 0)
@@ -44,7 +49,7 @@ namespace sw
         bool anyActive = false;
         for (const auto &v : voices)
         {
-            if (v.active.load(std::memory_order_relaxed))
+            if (v.active)
             {
                 anyActive = true;
                 break;
@@ -54,6 +59,7 @@ namespace sw
         if (!anyActive)
         {
             info.clearActiveBufferRegion();
+            anyVoiceActive.store(false, std::memory_order_relaxed);
             return;
         }
 
@@ -63,21 +69,180 @@ namespace sw
         bool anyStillActive = false;
         for (auto &v : voices)
         {
-            if (!v.active.load(std::memory_order_relaxed))
+            if (!v.active)
                 continue;
 
             renderVoice(v, *buf, *info.buffer, info.startSample, info.numSamples);
 
-            if (v.active.load(std::memory_order_relaxed))
+            if (v.active)
                 anyStillActive = true;
         }
 
-        // If no voices remain active after rendering and no MIDI notes are held,
-        // signal playback finished (for autoplay).
+        anyVoiceActive.store(anyStillActive, std::memory_order_relaxed);
+
+        // If no voices remain active after rendering, signal playback finished.
         if (!anyStillActive)
         {
             playbackFinished.store(true, std::memory_order_relaxed);
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Command FIFO (lock-free MPSC)
+    // ---------------------------------------------------------------------------
+
+    void VoiceManager::enqueueCommand(const VoiceCommand &cmd)
+    {
+        // Spinlock for multiple producers (MIDI thread + message thread).
+        // Contention is extremely rare and brief.
+        while (fifoProducerLock.test_and_set(std::memory_order_acquire))
+        {
+            // spin
+        }
+
+        const int wp = fifoWritePos.load(std::memory_order_relaxed);
+        const int nextWp = (wp + 1) % kCommandFifoSize;
+
+        if (nextWp != fifoReadPos.load(std::memory_order_acquire))
+        {
+            commandFifo[static_cast<size_t>(wp)] = cmd;
+            fifoWritePos.store(nextWp, std::memory_order_release);
+        }
+        // else: FIFO full — drop command (should never happen with 256 slots)
+
+        fifoProducerLock.clear(std::memory_order_release);
+    }
+
+    void VoiceManager::drainCommandFifo()
+    {
+        // Called exclusively on the audio thread.
+        const int wp = fifoWritePos.load(std::memory_order_acquire);
+        int rp = fifoReadPos.load(std::memory_order_relaxed);
+
+        while (rp != wp)
+        {
+            const auto &cmd = commandFifo[static_cast<size_t>(rp)];
+
+            switch (cmd.type)
+            {
+            case VoiceCommand::Type::NoteOn:
+            {
+                if (sampleBuffer.load(std::memory_order_relaxed) == nullptr)
+                    break;
+
+                playbackFinished.store(false, std::memory_order_relaxed);
+
+                auto &v = allocateVoice();
+                v.noteOn(cmd.midiNote, cmd.playbackRate, cmd.pitchRatio, ++voiceAgeCounter);
+
+                const int idx = static_cast<int>(&v - &voices[0]);
+                primaryVoiceIndex.store(idx, std::memory_order_relaxed);
+                anyVoiceActive.store(true, std::memory_order_relaxed);
+                break;
+            }
+
+            case VoiceCommand::Type::NoteOff:
+            {
+                for (auto &v : voices)
+                {
+                    if (v.active && v.midiNote == cmd.midiNote)
+                        v.noteOff();
+                }
+                break;
+            }
+
+            case VoiceCommand::Type::AllNotesOff:
+            {
+                for (auto &v : voices)
+                {
+                    if (v.active)
+                        v.noteOff();
+                }
+                break;
+            }
+
+            case VoiceCommand::Type::UpdatePitch:
+            {
+                const int rootNote = previewRootMidiNote.load(std::memory_order_relaxed);
+                const double base = cmd.playbackRate; // reused field for baseSemitones
+
+                for (auto &v : voices)
+                {
+                    if (!v.active)
+                        continue;
+
+                    double totalSemitones = base;
+                    if (v.midiNote >= 0)
+                        totalSemitones += static_cast<double>(v.midiNote - rootNote);
+
+                    const double ratio = std::pow(2.0, totalSemitones / 12.0);
+                    v.updatePitch(ratio, ratio);
+                }
+                break;
+            }
+
+            case VoiceCommand::Type::Play:
+            {
+                if (sampleBuffer.load(std::memory_order_relaxed) == nullptr)
+                    break;
+
+                playbackFinished.store(false, std::memory_order_relaxed);
+
+                auto &v = voices[0];
+                v.noteOn(/*note=*/-1, /*rate=*/1.0, /*pitch=*/1.0, ++voiceAgeCounter);
+                primaryVoiceIndex.store(0, std::memory_order_relaxed);
+                anyVoiceActive.store(true, std::memory_order_relaxed);
+                break;
+            }
+
+            case VoiceCommand::Type::Stop:
+            {
+                for (auto &v : voices)
+                {
+                    if (v.active)
+                        v.noteOff();
+                }
+                break;
+            }
+
+            case VoiceCommand::Type::SetPlaybackProgress:
+            {
+                const int length = loadedSampleLength.load(std::memory_order_relaxed);
+                if (length <= 0)
+                    break;
+
+                const double clamped = juce::jlimit(0.0, 1.0, cmd.normalizedProgress);
+                const int idx = primaryVoiceIndex.load(std::memory_order_relaxed);
+                const int clampedIdx = juce::jlimit(0, kMaxVoices - 1, idx);
+                voices[static_cast<size_t>(clampedIdx)].playbackPos = clamped * static_cast<double>(length);
+                voices[static_cast<size_t>(clampedIdx)].granularResetRequested = true;
+                break;
+            }
+            }
+
+            rp = (rp + 1) % kCommandFifoSize;
+        }
+
+        fifoReadPos.store(rp, std::memory_order_release);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Retire ring for RT-safe shared_ptr handoff
+    // ---------------------------------------------------------------------------
+
+    void VoiceManager::reclaimRetiredBuffers()
+    {
+        // Called from message thread to deallocate old buffers.
+        int rp = retireReadPos.load(std::memory_order_relaxed);
+        const int wp = retireWritePos.load(std::memory_order_acquire);
+
+        while (rp != wp)
+        {
+            retireRing[static_cast<size_t>(rp)].reset(); // deallocate on message thread
+            rp = (rp + 1) % kRetireRingSize;
+        }
+
+        retireReadPos.store(rp, std::memory_order_release);
     }
 
     // ---------------------------------------------------------------------------
@@ -105,9 +270,10 @@ namespace sw
         const double loopLength = static_cast<double>(loopEnd - loopStart) + 1.0;
 
         double pos = voice.playbackPos;
-        const double rate = voice.playbackRate.load(std::memory_order_relaxed) * (bufferSampleRate / currentSampleRate);
+        const double bsr = bufferSampleRate.load(std::memory_order_relaxed);
+        const double rate = voice.playbackRate * (bsr / currentSampleRate);
 #if SW_HAVE_RUBBERBAND
-        const double currentPitchRatio = voice.pitchRatio.load(std::memory_order_relaxed);
+        const double currentPitchRatio = voice.pitchRatio;
 #endif
         const bool preserveLength = preserveLengthEnabled.load(std::memory_order_relaxed) && std::abs(rate - 1.0) > 0.0001;
 #if SW_HAVE_RUBBERBAND
@@ -158,8 +324,9 @@ namespace sw
             return s0 + frac * (s1 - s0);
         };
 
-        if (voice.granularResetRequested.exchange(false, std::memory_order_acq_rel))
+        if (voice.granularResetRequested)
         {
+            voice.granularResetRequested = false;
             voice.grainSamplesRemaining = 0;
 #if SW_HAVE_RUBBERBAND
             voice.resetRubberBand();
@@ -169,7 +336,7 @@ namespace sw
         for (int i = 0; i < numSamples; ++i)
         {
             // Check if voice finished fading out
-            if (!voice.active.load(std::memory_order_relaxed))
+            if (!voice.active)
                 break;
 
             // Loop wrapping
@@ -225,7 +392,7 @@ namespace sw
                         if (provideStartPadSample)
                             --voice.rubberBandPreferredStartPadRemaining;
                         else
-                            pos += (bufferSampleRate / currentSampleRate);
+                            pos += (bsr / currentSampleRate);
 
                         ++voice.rubberBandInputFill;
                         voice.processRubberBandIfReady();
@@ -318,7 +485,7 @@ namespace sw
     }
 
     // ---------------------------------------------------------------------------
-    // Voice allocation
+    // Voice allocation (audio thread only)
     // ---------------------------------------------------------------------------
 
     Voice &VoiceManager::allocateVoice()
@@ -326,7 +493,7 @@ namespace sw
         // 1. Find an idle voice
         for (auto &v : voices)
         {
-            if (!v.active.load(std::memory_order_relaxed))
+            if (!v.active)
                 return v;
         }
 
@@ -344,7 +511,7 @@ namespace sw
     }
 
     // ---------------------------------------------------------------------------
-    // Control (message thread)
+    // Control (message/MIDI thread — enqueue commands)
     // ---------------------------------------------------------------------------
 
     void VoiceManager::loadBuffer(std::unique_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate)
@@ -358,95 +525,65 @@ namespace sw
 
     void VoiceManager::loadBuffer(std::shared_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate)
     {
-        // Stop all voices before swapping the buffer
-        for (auto &v : voices)
-            v.forceOff();
+        // Reclaim any previously retired buffers (deallocate on message thread).
+        reclaimRetiredBuffers();
+
+        // Stop all voices via command FIFO
+        enqueueCommand({VoiceCommand::Type::Stop});
 
         playbackFinished.store(false, std::memory_order_relaxed);
         loadedSampleLength.store(buffer != nullptr ? buffer->getNumSamples() : 0, std::memory_order_relaxed);
 
-        bufferSampleRate = fileSampleRate;
+        bufferSampleRate.store(fileSampleRate, std::memory_order_relaxed);
         sampleBuffer.store(std::move(buffer), std::memory_order_release);
     }
 
     void VoiceManager::play()
     {
-        if (sampleBuffer.load(std::memory_order_acquire) == nullptr)
-            return;
-
-        playbackFinished.store(false, std::memory_order_relaxed);
-
-        // Use voice 0 as the "primary" non-MIDI voice
-        auto &v = voices[0];
-        v.noteOn(/*note=*/-1, /*rate=*/1.0, /*pitch=*/1.0, ++voiceAgeCounter);
-        primaryVoiceIndex.store(0, std::memory_order_relaxed);
+        enqueueCommand({VoiceCommand::Type::Play});
     }
 
     void VoiceManager::stop()
     {
-        allNotesOff();
+        enqueueCommand({VoiceCommand::Type::Stop});
     }
 
     void VoiceManager::noteOn(int midiNote, double rate, double pitch)
     {
-        if (sampleBuffer.load(std::memory_order_acquire) == nullptr)
-            return;
-
-        playbackFinished.store(false, std::memory_order_relaxed);
-
-        auto &v = allocateVoice();
-        v.noteOn(midiNote, rate, pitch, ++voiceAgeCounter);
-
-        // Track the most recently triggered voice as primary for progress display
-        const int idx = static_cast<int>(&v - &voices[0]);
-        primaryVoiceIndex.store(idx, std::memory_order_relaxed);
+        VoiceCommand cmd;
+        cmd.type = VoiceCommand::Type::NoteOn;
+        cmd.midiNote = midiNote;
+        cmd.playbackRate = rate;
+        cmd.pitchRatio = pitch;
+        enqueueCommand(cmd);
     }
 
     void VoiceManager::noteOff(int midiNote)
     {
-        for (auto &v : voices)
-        {
-            if (v.active.load(std::memory_order_relaxed) &&
-                v.midiNote.load(std::memory_order_relaxed) == midiNote)
-            {
-                v.noteOff();
-            }
-        }
+        VoiceCommand cmd;
+        cmd.type = VoiceCommand::Type::NoteOff;
+        cmd.midiNote = midiNote;
+        enqueueCommand(cmd);
     }
 
     void VoiceManager::allNotesOff()
     {
-        for (auto &v : voices)
-        {
-            if (v.active.load(std::memory_order_relaxed))
-                v.noteOff();
-        }
+        enqueueCommand({VoiceCommand::Type::AllNotesOff});
     }
 
     void VoiceManager::updateAllVoicePitch(double baseSemitones)
     {
-        const int rootNote = previewRootMidiNote.load(std::memory_order_relaxed);
+        lastBasePitchSemitones.store(baseSemitones, std::memory_order_relaxed);
 
-        for (auto &v : voices)
-        {
-            if (!v.active.load(std::memory_order_relaxed))
-                continue;
-
-            const int note = v.midiNote.load(std::memory_order_relaxed);
-            double totalSemitones = baseSemitones;
-            if (note >= 0)
-                totalSemitones += static_cast<double>(note - rootNote);
-
-            const double ratio = std::pow(2.0, totalSemitones / 12.0);
-            v.updatePitch(ratio, ratio);
-        }
+        VoiceCommand cmd;
+        cmd.type = VoiceCommand::Type::UpdatePitch;
+        cmd.playbackRate = baseSemitones; // reuse field for baseSemitones
+        enqueueCommand(cmd);
     }
 
     void VoiceManager::setPreserveLengthEnabled(bool enabled)
     {
         preserveLengthEnabled.store(enabled, std::memory_order_relaxed);
-        for (auto &v : voices)
-            v.granularResetRequested.store(true, std::memory_order_release);
     }
 
     bool VoiceManager::isPreserveLengthEnabled() const noexcept
@@ -458,8 +595,6 @@ namespace sw
     {
 #if SW_HAVE_RUBBERBAND
         stretchHighQualityEnabled.store(enabled, std::memory_order_relaxed);
-        for (auto &v : voices)
-            v.granularResetRequested.store(true, std::memory_order_release);
 #else
         (void)enabled;
 #endif
@@ -507,12 +642,7 @@ namespace sw
 
     bool VoiceManager::isPlaying() const noexcept
     {
-        for (const auto &v : voices)
-        {
-            if (v.active.load(std::memory_order_relaxed))
-                return true;
-        }
-        return false;
+        return anyVoiceActive.load(std::memory_order_relaxed);
     }
 
     bool VoiceManager::consumePlaybackFinishedFlag() noexcept
@@ -528,21 +658,18 @@ namespace sw
 
         const int idx = primaryVoiceIndex.load(std::memory_order_relaxed);
         const int clampedIdx = juce::jlimit(0, kMaxVoices - 1, idx);
+        // Reading playbackPos from a non-audio thread: this is a benign race
+        // (used only for UI progress display, exact accuracy not required).
         const double position = voices[static_cast<size_t>(clampedIdx)].playbackPos;
         return juce::jlimit(0.0, 1.0, position / static_cast<double>(length));
     }
 
     void VoiceManager::setPlaybackProgressNormalized(double normalizedProgress)
     {
-        const int length = loadedSampleLength.load(std::memory_order_relaxed);
-        if (length <= 0)
-            return;
-
-        const double clamped = juce::jlimit(0.0, 1.0, normalizedProgress);
-        const int idx = primaryVoiceIndex.load(std::memory_order_relaxed);
-        const int clampedIdx = juce::jlimit(0, kMaxVoices - 1, idx);
-        voices[static_cast<size_t>(clampedIdx)].playbackPos = clamped * static_cast<double>(length);
-        voices[static_cast<size_t>(clampedIdx)].granularResetRequested.store(true, std::memory_order_release);
+        VoiceCommand cmd;
+        cmd.type = VoiceCommand::Type::SetPlaybackProgress;
+        cmd.normalizedProgress = normalizedProgress;
+        enqueueCommand(cmd);
     }
 
 } // namespace sw

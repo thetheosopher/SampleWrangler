@@ -39,6 +39,8 @@ namespace sw
 
     void AudioEngine::initialiseDeviceManager()
     {
+        const std::lock_guard<std::mutex> lock(deviceConfigMutex);
+
         // Attempt to open a default device; prefer ASIO if available, fall back otherwise.
         auto setup = deviceManager.getAudioDeviceSetup();
         (void)setup;
@@ -172,7 +174,30 @@ namespace sw
 
     bool AudioEngine::setCurrentOutputDeviceType(const juce::String &typeName, juce::String *errorMessage)
     {
+        const std::lock_guard<std::mutex> lock(deviceConfigMutex);
+
+        if (typeName.isEmpty())
+        {
+            if (errorMessage != nullptr)
+                *errorMessage = "Device type cannot be empty.";
+            return false;
+        }
+
+        if (deviceManager.getCurrentAudioDeviceType() == typeName)
+        {
+            if (errorMessage != nullptr)
+                *errorMessage = {};
+            return true;
+        }
+
+        stop();
+        sourcePlayer.setSource(nullptr);
+        deviceManager.removeAudioCallback(&sourcePlayer);
+
         deviceManager.setCurrentAudioDeviceType(typeName, true);
+
+        sourcePlayer.setSource(this);
+        deviceManager.addAudioCallback(&sourcePlayer);
 
         const bool success = (deviceManager.getCurrentAudioDeviceType() == typeName);
         if (errorMessage != nullptr)
@@ -199,10 +224,35 @@ namespace sw
 
     bool AudioEngine::setCurrentOutputDevice(const juce::String &deviceName, juce::String *errorMessage)
     {
+        const std::lock_guard<std::mutex> lock(deviceConfigMutex);
+
+        if (deviceName.isEmpty())
+        {
+            if (errorMessage != nullptr)
+                *errorMessage = "Device name cannot be empty.";
+            return false;
+        }
+
+        if (deviceManager.getCurrentAudioDevice() != nullptr &&
+            deviceManager.getCurrentAudioDevice()->getName() == deviceName)
+        {
+            if (errorMessage != nullptr)
+                *errorMessage = {};
+            return true;
+        }
+
+        stop();
+        sourcePlayer.setSource(nullptr);
+        deviceManager.removeAudioCallback(&sourcePlayer);
+
         auto setup = deviceManager.getAudioDeviceSetup();
         setup.outputDeviceName = deviceName;
 
         const auto error = deviceManager.setAudioDeviceSetup(setup, true);
+
+        sourcePlayer.setSource(this);
+        deviceManager.addAudioCallback(&sourcePlayer);
+
         if (errorMessage != nullptr)
             *errorMessage = error;
 

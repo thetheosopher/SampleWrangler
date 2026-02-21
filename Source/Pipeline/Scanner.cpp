@@ -477,7 +477,7 @@ namespace sw
                     return;
                 }
 
-                constexpr size_t kChunkSize = 128;
+                constexpr size_t kChunkSize = 32;
                 for (size_t begin = 0; begin < candidates.size(); begin += kChunkSize)
                 {
                     if (isCancelled())

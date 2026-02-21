@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <mutex>
 
 struct sqlite3; // forward declare
 
@@ -29,7 +30,7 @@ namespace sw
         /// Close the database handle.
         void close();
 
-        bool isOpen() const noexcept { return db != nullptr; }
+        bool isOpen() const noexcept;
 
         // ----- Sources -----
         bool addRoot(const std::string &path, const std::string &label);
@@ -54,11 +55,17 @@ namespace sw
         bool insertCacheEntry(const WaveCacheEntry &entry);
         std::optional<WaveCacheEntry> cacheEntryByKey(const std::string &key);
 
+        // ----- Transactions -----
+        bool beginTransaction();
+        bool commitTransaction();
+        bool rollbackTransaction();
+
         // ----- Maintenance -----
         bool vacuum();
 
     private:
         sqlite3 *db = nullptr;
+        mutable std::recursive_mutex apiMutex;
     };
 
 } // namespace sw

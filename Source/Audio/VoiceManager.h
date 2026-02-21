@@ -30,6 +30,7 @@ namespace sw
 
         /// Load a decoded sample buffer. Thread-safe swap via atomic pointer.
         void loadBuffer(std::unique_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate);
+        void loadBuffer(std::shared_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate);
 
         /// Start playback of the primary voice (non-MIDI, UI play button).
         void play();

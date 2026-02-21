@@ -43,6 +43,7 @@ namespace sw
         /// The actual loading / decoding should be done on a worker thread;
         /// this method receives the ready-to-play buffer.
         void loadPreviewBuffer(std::unique_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate);
+        void loadPreviewBuffer(std::shared_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate);
 
         /// Start / stop preview playback.
         void play();

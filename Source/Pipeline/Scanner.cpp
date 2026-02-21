@@ -11,6 +11,8 @@
 #include <optional>
 #include <vector>
 #include <unordered_map>
+#include <memory>
+#include <atomic>
 
 namespace fs = std::filesystem;
 
@@ -377,22 +379,57 @@ namespace sw
                            ProgressCallback onProgress,
                            CompletionCallback onCompleted)
     {
-        jobQueue.enqueue(Job{
-            [this, rootId, rootPath, onProgress, onCompleted](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
-            {
-                const auto notifyCompleted = [&onCompleted]()
-                {
-                    if (onCompleted)
-                        onCompleted();
-                };
+        struct ScanCandidate
+        {
+            fs::path absolutePath;
+            std::string relativePath;
+            std::string extension;
+            bool playable = false;
+            bool indexOnly = false;
+        };
 
+        struct ScanState
+        {
+            std::atomic<int> pendingJobs{0};
+            std::atomic<bool> completionSignalled{false};
+        };
+
+        auto state = std::make_shared<ScanState>();
+
+        const auto notifyCompletedOnce = [state, onCompleted]()
+        {
+            if (state->completionSignalled.exchange(true, std::memory_order_acq_rel))
+                return;
+
+            if (onCompleted)
+                onCompleted();
+        };
+
+        const auto markJobFinished = [state, notifyCompletedOnce]()
+        {
+            const int previous = state->pendingJobs.fetch_sub(1, std::memory_order_acq_rel);
+            if (previous == 1)
+                notifyCompletedOnce();
+        };
+
+        state->pendingJobs.store(1, std::memory_order_release);
+
+        jobQueue.enqueue(Job{
+            [this, rootId, rootPath, onProgress, state, notifyCompletedOnce, markJobFinished](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
+            {
                 const auto isCancelled = [&cancelGeneration, jobGeneration]()
                 {
                     return cancelGeneration.load(std::memory_order_relaxed) != jobGeneration;
                 };
 
-                juce::AudioFormatManager formatManager;
-                formatManager.registerBasicFormats();
+                if (isCancelled())
+                {
+                    markJobFinished();
+                    return;
+                }
+
+                std::vector<ScanCandidate> candidates;
+                candidates.reserve(1024);
 
                 std::error_code ec;
                 for (auto it = fs::recursive_directory_iterator(rootPath,
@@ -401,7 +438,7 @@ namespace sw
                 {
                     if (isCancelled())
                     {
-                        notifyCompleted();
+                        markJobFinished();
                         return;
                     }
 
@@ -426,54 +463,144 @@ namespace sw
                     if (ec)
                         continue;
 
-                    FileRecord rec;
-                    rec.rootId = rootId;
-                    rec.relativePath = relPath;
-                    rec.filename = path.filename().string();
-                    rec.extension = ext;
-                    rec.indexOnly = indexOnly;
-
-                    // File metadata
-                    rec.sizeBytes = static_cast<int64_t>(fs::file_size(path, ec));
-                    auto ftime = fs::last_write_time(path, ec);
-                    rec.modifiedTime = static_cast<int64_t>(
-                        std::chrono::duration_cast<std::chrono::seconds>(
-                            ftime.time_since_epoch())
-                            .count());
-
-                    if (playable)
-                    {
-                        if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(juce::File(path.string()))))
-                        {
-                            rec.totalSamples = static_cast<int64_t>(reader->lengthInSamples);
-                            rec.sampleRate = static_cast<int>(reader->sampleRate);
-                            rec.channels = static_cast<int>(reader->numChannels);
-                            rec.bitDepth = reader->bitsPerSample;
-                            rec.codec = reader->getFormatName().toStdString();
-
-                            if (reader->sampleRate > 0.0)
-                                rec.durationSec = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
-
-                            if (rec.durationSec.has_value() && *rec.durationSec > 0.0 && rec.sizeBytes > 0)
-                            {
-                                const auto kbps = static_cast<int>((static_cast<double>(rec.sizeBytes) * 8.0) / (*rec.durationSec * 1000.0));
-                                rec.bitrateKbps = kbps;
-                            }
-
-                            if (ext == "wav")
-                                parseWavAcidAndLoopMetadata(path, rec);
-                            else if (ext == "aif" || ext == "aiff")
-                                parseAiffAppleLoopMetadata(path, rec);
-                        }
-                    }
-
-                    catalogDb.upsertFile(rec);
-
-                    if (onProgress)
-                        onProgress(relPath);
+                    candidates.push_back(ScanCandidate{
+                        path,
+                        std::move(relPath),
+                        std::move(ext),
+                        playable,
+                        indexOnly});
                 }
 
-                notifyCompleted();
+                if (candidates.empty())
+                {
+                    markJobFinished();
+                    return;
+                }
+
+                constexpr size_t kChunkSize = 128;
+                for (size_t begin = 0; begin < candidates.size(); begin += kChunkSize)
+                {
+                    if (isCancelled())
+                    {
+                        break;
+                    }
+
+                    const size_t end = std::min(begin + kChunkSize, candidates.size());
+                    auto chunk = std::make_shared<std::vector<ScanCandidate>>();
+                    chunk->reserve(end - begin);
+                    for (size_t i = begin; i < end; ++i)
+                        chunk->push_back(std::move(candidates[i]));
+
+                    state->pendingJobs.fetch_add(1, std::memory_order_acq_rel);
+                    jobQueue.enqueue(Job{
+                        [this, chunk, rootId, onProgress, markJobFinished, jobGeneration](const std::atomic<uint64_t> &cancelGeneration, uint64_t)
+                        {
+                            const auto isChunkCancelled = [&cancelGeneration, jobGeneration]()
+                            {
+                                return cancelGeneration.load(std::memory_order_relaxed) != jobGeneration;
+                            };
+
+                            if (isChunkCancelled())
+                            {
+                                markJobFinished();
+                                return;
+                            }
+
+                            thread_local juce::AudioFormatManager formatManager;
+                            thread_local bool formatsRegistered = false;
+                            if (!formatsRegistered)
+                            {
+                                formatManager.registerBasicFormats();
+                                formatsRegistered = true;
+                            }
+
+                            if (!catalogDb.beginTransaction())
+                            {
+                                markJobFinished();
+                                return;
+                            }
+
+                            bool transactionOpen = true;
+
+                            for (const auto &candidate : *chunk)
+                            {
+                                if (isChunkCancelled())
+                                {
+                                    if (transactionOpen)
+                                        catalogDb.rollbackTransaction();
+                                    markJobFinished();
+                                    return;
+                                }
+
+                                FileRecord rec;
+                                rec.rootId = rootId;
+                                rec.relativePath = candidate.relativePath;
+                                rec.filename = candidate.absolutePath.filename().string();
+                                rec.extension = candidate.extension;
+                                rec.indexOnly = candidate.indexOnly;
+
+                                // File metadata
+                                std::error_code fileEc;
+                                rec.sizeBytes = static_cast<int64_t>(fs::file_size(candidate.absolutePath, fileEc));
+                                auto ftime = fs::last_write_time(candidate.absolutePath, fileEc);
+                                rec.modifiedTime = static_cast<int64_t>(
+                                    std::chrono::duration_cast<std::chrono::seconds>(
+                                        ftime.time_since_epoch())
+                                        .count());
+
+                                if (candidate.playable)
+                                {
+                                    if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(juce::File(candidate.absolutePath.string()))))
+                                    {
+                                        rec.totalSamples = static_cast<int64_t>(reader->lengthInSamples);
+                                        rec.sampleRate = static_cast<int>(reader->sampleRate);
+                                        rec.channels = static_cast<int>(reader->numChannels);
+                                        rec.bitDepth = reader->bitsPerSample;
+                                        rec.codec = reader->getFormatName().toStdString();
+
+                                        if (reader->sampleRate > 0.0)
+                                            rec.durationSec = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
+
+                                        if (rec.durationSec.has_value() && *rec.durationSec > 0.0 && rec.sizeBytes > 0)
+                                        {
+                                            const auto kbps = static_cast<int>((static_cast<double>(rec.sizeBytes) * 8.0) / (*rec.durationSec * 1000.0));
+                                            rec.bitrateKbps = kbps;
+                                        }
+
+                                        if (candidate.extension == "wav")
+                                            parseWavAcidAndLoopMetadata(candidate.absolutePath, rec);
+                                        else if (candidate.extension == "aif" || candidate.extension == "aiff")
+                                            parseAiffAppleLoopMetadata(candidate.absolutePath, rec);
+                                    }
+                                }
+
+                                if (!catalogDb.upsertFile(rec))
+                                {
+                                    if (transactionOpen)
+                                        catalogDb.rollbackTransaction();
+                                    markJobFinished();
+                                    return;
+                                }
+
+                                if (onProgress)
+                                    onProgress(candidate.relativePath);
+                            }
+
+                            if (transactionOpen)
+                            {
+                                if (!catalogDb.commitTransaction())
+                                {
+                                    markJobFinished();
+                                    return;
+                                }
+                            }
+
+                            markJobFinished();
+                        },
+                        JobPriority::Low});
+                }
+
+                markJobFinished();
             },
             JobPriority::Low});
     }

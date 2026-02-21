@@ -349,6 +349,15 @@ namespace sw
 
     void VoiceManager::loadBuffer(std::unique_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate)
     {
+        std::shared_ptr<juce::AudioBuffer<float>> sharedBuffer;
+        if (buffer != nullptr)
+            sharedBuffer = std::shared_ptr<juce::AudioBuffer<float>>(std::move(buffer));
+
+        loadBuffer(std::move(sharedBuffer), fileSampleRate);
+    }
+
+    void VoiceManager::loadBuffer(std::shared_ptr<juce::AudioBuffer<float>> buffer, double fileSampleRate)
+    {
         // Stop all voices before swapping the buffer
         for (auto &v : voices)
             v.forceOff();
@@ -356,12 +365,8 @@ namespace sw
         playbackFinished.store(false, std::memory_order_relaxed);
         loadedSampleLength.store(buffer != nullptr ? buffer->getNumSamples() : 0, std::memory_order_relaxed);
 
-        std::shared_ptr<juce::AudioBuffer<float>> sharedBuffer;
-        if (buffer != nullptr)
-            sharedBuffer = std::shared_ptr<juce::AudioBuffer<float>>(std::move(buffer));
-
         bufferSampleRate = fileSampleRate;
-        sampleBuffer.store(std::move(sharedBuffer), std::memory_order_release);
+        sampleBuffer.store(std::move(buffer), std::memory_order_release);
     }
 
     void VoiceManager::play()

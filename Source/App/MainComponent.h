@@ -157,7 +157,13 @@ namespace sw
 
         // Core subsystems (non-UI)
         CatalogDb catalogDb;
-        JobQueue jobQueue{2};
+        JobQueue jobQueue{[]()
+                          {
+                              const unsigned int hw = std::thread::hardware_concurrency();
+                              const int detected = (hw == 0u) ? 4 : static_cast<int>(hw);
+                              const int workers = (detected > 2) ? (detected - 2) : 2;
+                              return juce::jlimit(2, 8, workers);
+                          }()};
         Scanner scanner{catalogDb, jobQueue};
         AudioEngine audioEngine;
         MidiInputRouter midiRouter;

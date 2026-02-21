@@ -64,6 +64,16 @@ namespace sw
     void AudioEngine::loadPreviewBuffer(std::unique_ptr<juce::AudioBuffer<float>> buffer,
                                         double fileSampleRate)
     {
+        std::shared_ptr<juce::AudioBuffer<float>> sharedBuffer;
+        if (buffer != nullptr)
+            sharedBuffer = std::shared_ptr<juce::AudioBuffer<float>>(std::move(buffer));
+
+        loadPreviewBuffer(std::move(sharedBuffer), fileSampleRate);
+    }
+
+    void AudioEngine::loadPreviewBuffer(std::shared_ptr<juce::AudioBuffer<float>> buffer,
+                                        double fileSampleRate)
+    {
         voiceManager.loadBuffer(std::move(buffer), fileSampleRate);
     }
 

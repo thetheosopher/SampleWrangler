@@ -6,6 +6,8 @@
 namespace sw
 {
 
+#define SW_DB_GUARD std::lock_guard<std::recursive_mutex> dbLock(apiMutex)
+
     CatalogDb::CatalogDb() = default;
 
     CatalogDb::~CatalogDb()
@@ -15,6 +17,8 @@ namespace sw
 
     bool CatalogDb::open(const std::string &dbPath)
     {
+        SW_DB_GUARD;
+
         if (db)
             close();
 
@@ -40,11 +44,19 @@ namespace sw
 
     void CatalogDb::close()
     {
+        SW_DB_GUARD;
+
         if (db)
         {
             sqlite3_close(db);
             db = nullptr;
         }
+    }
+
+    bool CatalogDb::isOpen() const noexcept
+    {
+        SW_DB_GUARD;
+        return db != nullptr;
     }
 
     // ---------------------------------------------------------------------------
@@ -53,6 +65,8 @@ namespace sw
 
     bool CatalogDb::addRoot(const std::string &path, const std::string &label)
     {
+        SW_DB_GUARD;
+
         const char *sql = "INSERT OR IGNORE INTO roots (path, label) VALUES (?, ?)";
         sqlite3_stmt *stmt = nullptr;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -68,6 +82,8 @@ namespace sw
 
     bool CatalogDb::removeRoot(int64_t rootId)
     {
+        SW_DB_GUARD;
+
         const char *sql = "DELETE FROM roots WHERE id = ?";
         sqlite3_stmt *stmt = nullptr;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -81,6 +97,8 @@ namespace sw
 
     std::vector<RootRecord> CatalogDb::allRoots()
     {
+        SW_DB_GUARD;
+
         std::vector<RootRecord> results;
         const char *sql = "SELECT id, path, label, enabled FROM roots ORDER BY label";
         sqlite3_stmt *stmt = nullptr;
@@ -106,6 +124,8 @@ namespace sw
 
     bool CatalogDb::upsertFile(const FileRecord &rec)
     {
+        SW_DB_GUARD;
+
         const char *sql = R"SQL(
         INSERT INTO files (root_id, relative_path, filename, extension,
                            size_bytes, modified_time, duration_sec, total_samples,
@@ -225,6 +245,8 @@ namespace sw
 
     bool CatalogDb::removeFilesByRoot(int64_t rootId)
     {
+        SW_DB_GUARD;
+
         const char *sql = "DELETE FROM files WHERE root_id = ?";
         sqlite3_stmt *stmt = nullptr;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -238,6 +260,8 @@ namespace sw
 
     std::vector<FileRecord> CatalogDb::searchFiles(const std::string &query, int limit)
     {
+        SW_DB_GUARD;
+
         std::vector<FileRecord> results;
 
         // Use FTS5 match for searching
@@ -309,6 +333,8 @@ namespace sw
 
     std::vector<FileRecord> CatalogDb::listRecentFiles(int limit)
     {
+        SW_DB_GUARD;
+
         std::vector<FileRecord> results;
 
         const char *sql = R"SQL(
@@ -377,6 +403,8 @@ namespace sw
 
     std::vector<FileRecord> CatalogDb::searchFilesByRoot(int64_t rootId, const std::string &query, int limit)
     {
+        SW_DB_GUARD;
+
         std::vector<FileRecord> results;
 
         const char *sql = R"SQL(
@@ -449,6 +477,8 @@ namespace sw
 
     std::vector<FileRecord> CatalogDb::listRecentFilesByRoot(int64_t rootId, int limit)
     {
+        SW_DB_GUARD;
+
         std::vector<FileRecord> results;
 
         const char *sql = R"SQL(
@@ -520,6 +550,8 @@ namespace sw
 
     std::optional<FileRecord> CatalogDb::fileById(int64_t fileId)
     {
+        SW_DB_GUARD;
+
         const char *sql = R"SQL(
         SELECT id, root_id, relative_path, filename, extension,
              size_bytes, modified_time, duration_sec, total_samples,
@@ -586,6 +618,8 @@ namespace sw
 
     std::optional<FileRecord> CatalogDb::fileByRootAndRelativePath(int64_t rootId, const std::string &relativePath)
     {
+        SW_DB_GUARD;
+
         const char *sql = R"SQL(
         SELECT id, root_id, relative_path, filename, extension,
              size_bytes, modified_time, duration_sec, total_samples,
@@ -655,6 +689,8 @@ namespace sw
 
     bool CatalogDb::setAppSetting(const std::string &key, const std::string &value)
     {
+        SW_DB_GUARD;
+
         if (db == nullptr)
             return false;
 
@@ -673,6 +709,8 @@ namespace sw
 
     std::optional<std::string> CatalogDb::getAppSetting(const std::string &key)
     {
+        SW_DB_GUARD;
+
         if (db == nullptr)
             return std::nullopt;
 
@@ -704,6 +742,8 @@ namespace sw
 
     bool CatalogDb::insertCacheEntry(const WaveCacheEntry &entry)
     {
+        SW_DB_GUARD;
+
         const char *sql = "INSERT OR REPLACE INTO wave_cache (file_id, cache_key, cache_path) VALUES (?, ?, ?)";
         sqlite3_stmt *stmt = nullptr;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -720,6 +760,8 @@ namespace sw
 
     std::optional<WaveCacheEntry> CatalogDb::cacheEntryByKey(const std::string &key)
     {
+        SW_DB_GUARD;
+
         const char *sql = "SELECT id, file_id, cache_key, cache_path FROM wave_cache WHERE cache_key = ?";
         sqlite3_stmt *stmt = nullptr;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -745,10 +787,44 @@ namespace sw
 
     bool CatalogDb::vacuum()
     {
+        SW_DB_GUARD;
+
         if (db == nullptr)
             return false;
 
         return sqlite3_exec(db, "VACUUM;", nullptr, nullptr, nullptr) == SQLITE_OK;
     }
+
+    bool CatalogDb::beginTransaction()
+    {
+        SW_DB_GUARD;
+
+        if (db == nullptr)
+            return false;
+
+        return sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION;", nullptr, nullptr, nullptr) == SQLITE_OK;
+    }
+
+    bool CatalogDb::commitTransaction()
+    {
+        SW_DB_GUARD;
+
+        if (db == nullptr)
+            return false;
+
+        return sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr) == SQLITE_OK;
+    }
+
+    bool CatalogDb::rollbackTransaction()
+    {
+        SW_DB_GUARD;
+
+        if (db == nullptr)
+            return false;
+
+        return sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr) == SQLITE_OK;
+    }
+
+#undef SW_DB_GUARD
 
 } // namespace sw

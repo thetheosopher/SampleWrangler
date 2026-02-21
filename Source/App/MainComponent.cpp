@@ -39,6 +39,7 @@ namespace sw
         constexpr float kDefaultWaveformPanelRatio = 0.435f;
         constexpr float kDefaultBottomPanelRatio = 0.13f;
         constexpr float kDefaultPreviewPanelRatio = 0.45f;
+        constexpr double kFastPreviewMaxSeconds = 120.0;
 
         juce::String formatClockHmsMs(double seconds)
         {
@@ -1783,8 +1784,13 @@ namespace sw
                     return;
                 }
 
-                juce::AudioFormatManager formatManager;
-                formatManager.registerBasicFormats();
+                thread_local juce::AudioFormatManager formatManager;
+                thread_local bool formatsRegistered = false;
+                if (!formatsRegistered)
+                {
+                    formatManager.registerBasicFormats();
+                    formatsRegistered = true;
+                }
 
                 juce::File sourceFile(absolutePath);
                 auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(sourceFile));
@@ -1795,7 +1801,13 @@ namespace sw
                 }
 
                 const int numChannels = std::max(1, static_cast<int>(std::min<uint32_t>(2, reader->numChannels)));
-                const int numSamples = static_cast<int>(std::min<int64_t>(reader->lengthInSamples, static_cast<int64_t>(std::numeric_limits<int>::max())));
+                const int64_t totalSamples = std::min<int64_t>(reader->lengthInSamples, static_cast<int64_t>(std::numeric_limits<int>::max()));
+                const int64_t maxFastPreviewSamples = (reader->sampleRate > 0.0)
+                                                          ? static_cast<int64_t>(reader->sampleRate * kFastPreviewMaxSeconds)
+                                                          : totalSamples;
+                const int64_t selectedSamples = std::min(totalSamples, std::max<int64_t>(1, maxFastPreviewSamples));
+                const int numSamples = static_cast<int>(selectedSamples);
+                const bool previewTruncated = selectedSamples < totalSamples;
 
                 if (numSamples <= 0)
                 {
@@ -1803,8 +1815,8 @@ namespace sw
                     return;
                 }
 
-                juce::AudioBuffer<float> tempBuffer(numChannels, numSamples);
-                if (!reader->read(&tempBuffer, 0, numSamples, 0, true, true))
+                auto previewBuffer = std::make_shared<juce::AudioBuffer<float>>(numChannels, numSamples);
+                if (!reader->read(previewBuffer.get(), 0, numSamples, 0, true, true))
                 {
                     finishLoadingOnMessageThread();
                     return;
@@ -1827,7 +1839,7 @@ namespace sw
                     for (int ch = 0; ch < numChannels; ++ch)
                     {
                         float maxAbs = 0.0f;
-                        const auto *channelData = tempBuffer.getReadPointer(ch);
+                        const auto *channelData = previewBuffer->getReadPointer(ch);
                         for (int s = start; s < end; ++s)
                             maxAbs = std::max(maxAbs, std::abs(channelData[s]));
 
@@ -1835,18 +1847,9 @@ namespace sw
                     }
                 }
 
-                auto interleaved = std::make_shared<std::vector<float>>();
-                interleaved->resize(static_cast<size_t>(numChannels * numSamples));
-                for (int ch = 0; ch < numChannels; ++ch)
-                {
-                    const auto *src = tempBuffer.getReadPointer(ch);
-                    for (int s = 0; s < numSamples; ++s)
-                        (*interleaved)[static_cast<size_t>(ch * numSamples + s)] = src[s];
-                }
-
                 const double sampleRate = reader->sampleRate;
 
-                juce::MessageManager::callAsync([safeThis, interleaved, peaks, numChannels, numSamples, sampleRate, playWhenReady, absolutePath, requestId]
+                juce::MessageManager::callAsync([safeThis, previewBuffer, peaks, sampleRate, playWhenReady, absolutePath, requestId, previewTruncated]
                                                 {
                     if (safeThis == nullptr)
                         return;
@@ -1857,19 +1860,18 @@ namespace sw
                         return;
                     }
 
-                    auto previewBuffer = std::make_unique<juce::AudioBuffer<float>>(numChannels, numSamples);
-                    for (int ch = 0; ch < numChannels; ++ch)
-                    {
-                        auto *dst = previewBuffer->getWritePointer(ch);
-                        for (int s = 0; s < numSamples; ++s)
-                            dst[s] = (*interleaved)[static_cast<size_t>(ch * numSamples + s)];
-                    }
-
-                    safeThis->audioEngine.loadPreviewBuffer(std::move(previewBuffer), sampleRate);
+                    safeThis->audioEngine.loadPreviewBuffer(previewBuffer, sampleRate);
                     safeThis->updateWindowTitleForLoadedFile(absolutePath);
                     safeThis->waveformPanel.setPeaks(*peaks);
                     safeThis->waveformPanel.setPlayheadNormalized(0.0f);
                     safeThis->updateWaveformLoopOverlay();
+
+                    if (previewTruncated)
+                    {
+                        safeThis->toolbarFeedbackText = "Preview limited to first " + juce::String(static_cast<int>(kFastPreviewMaxSeconds)) + "s for faster loading";
+                        safeThis->toolbarFeedbackTicksRemaining = 120;
+                    }
+
                     safeThis->setPreviewLoadingState(false, requestId);
                     if (playWhenReady)
                         safeThis->audioEngine.play(); });

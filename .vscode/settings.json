@@ -5,6 +5,8 @@
     "cmake.useCMakePresets": "always",
     "C_Cpp.default.cppStandard": "c++20",
     "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+    "git.enabled": true,
+    "git.path": "C:\\Program Files\\Git\\cmd\\git.exe",
     "files.associations": {
         "*.h": "cpp",
         "*.hpp": "cpp"

@@ -45,15 +45,25 @@ namespace sw
         void paintCompositeOscilloscope(juce::Graphics &g, juce::Rectangle<float> bounds) const;
         void paintSpectrumAnalyzer(juce::Graphics &g, juce::Rectangle<float> bounds) const;
         void updateSpectrumAnalyzer();
+        void updateSpectrogram();
+        void ensureSpectrogramHistorySize(int widthPixels);
         float normalizedPositionFromX(int x) const;
 
-        static constexpr int kSpectrumBandCount = 32;
+        static constexpr int kSpectrumBandCount = 64;
         static constexpr int kSpectrumFftOrder = 12;
         static constexpr int kSpectrumFftSize = 1 << kSpectrumFftOrder;
+        static constexpr int kSpectrogramBinCount = 128;
+        static constexpr float kSpectrogramColumnsPerUpdate = 1.35f;
 
         std::vector<std::vector<float>> currentPeaksByChannel;
         std::vector<float> currentOscilloscopeSamples;
         std::array<float, kSpectrumBandCount> spectrumBands{};
+        std::array<float, kSpectrumBandCount> spectrumPeakIndicators{};
+        std::array<float, kSpectrumBandCount> spectrumPeakFallVelocity{};
+        std::vector<std::array<float, kSpectrogramBinCount>> spectrogramColumns;
+        int spectrogramWriteIndex = 0;
+        int spectrogramFilledColumns = 0;
+        float spectrogramScrollAccumulator = 0.0f;
         std::array<float, kSpectrumFftSize * 2> spectrumFftBuffer{};
         juce::dsp::FFT spectrumFft{kSpectrumFftOrder};
         juce::dsp::WindowingFunction<float> spectrumWindow{kSpectrumFftSize, juce::dsp::WindowingFunction<float>::hann, true};

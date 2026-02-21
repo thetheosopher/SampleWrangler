@@ -81,7 +81,7 @@ namespace sw
             g.drawLine(loopEndX, bounds.getY(), loopEndX, bounds.getBottom(), 2.0f);
         }
 
-        if (playheadNormalized >= 0.0f)
+        if (displayMode == DisplayMode::waveform && playheadNormalized >= 0.0f)
         {
             const float playheadX = bounds.getX() + bounds.getWidth() * juce::jlimit(0.0f, 1.0f, playheadNormalized);
             g.setColour(darkModeEnabled ? juce::Colours::orange : juce::Colour(0xffc86b00));
@@ -100,6 +100,7 @@ namespace sw
 
     void WaveformPanel::resized()
     {
+        ensureSpectrogramHistorySize(juce::jmax(1, getLocalBounds().reduced(2).getWidth()));
     }
 
     void WaveformPanel::mouseDown(const juce::MouseEvent &event)
@@ -113,7 +114,8 @@ namespace sw
             menu.addItem(4, "Spectrum Analyzer", true, displayMode == DisplayMode::spectrumAnalyzer);
 
             auto safeThis = juce::Component::SafePointer<WaveformPanel>(this);
-            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
+            const auto clickArea = juce::Rectangle<int>(event.getScreenX(), event.getScreenY(), 1, 1);
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(clickArea),
                                [safeThis](int selected)
                                {
                                    if (safeThis == nullptr)
@@ -189,8 +191,11 @@ namespace sw
 
         currentOscilloscopeSamples = samples;
         updateSpectrumAnalyzer();
+        updateSpectrogram();
 
-        if (displayMode == DisplayMode::compositeOscilloscope || displayMode == DisplayMode::spectrumAnalyzer)
+        if (displayMode == DisplayMode::compositeOscilloscope ||
+            displayMode == DisplayMode::spectrumAnalyzer ||
+            displayMode == DisplayMode::spectrogram)
             repaint();
     }
 
@@ -214,6 +219,16 @@ namespace sw
             return;
 
         loading = isLoading;
+
+        if (loading)
+        {
+            spectrogramWriteIndex = 0;
+            spectrogramFilledColumns = 0;
+            spectrogramScrollAccumulator = 0.0f;
+            for (auto &column : spectrogramColumns)
+                column.fill(0.0f);
+        }
+
         repaint();
     }
 
@@ -281,37 +296,27 @@ namespace sw
 
     void WaveformPanel::paintSpectrogram(juce::Graphics &g, juce::Rectangle<float> bounds) const
     {
-        const int numChannels = static_cast<int>(currentPeaksByChannel.size());
-        const int numPeaks = static_cast<int>(currentPeaksByChannel.front().size());
-        if (numChannels <= 0 || numPeaks <= 0)
-            return;
-
-        constexpr int kFrequencyBins = 48;
-        const float columnWidth = juce::jmax(1.0f, bounds.getWidth() / static_cast<float>(numPeaks));
-        const float binHeight = juce::jmax(1.0f, bounds.getHeight() / static_cast<float>(kFrequencyBins));
-
         g.setColour(darkModeEnabled ? juce::Colour(0xff101828) : juce::Colour(0xffdce8fb));
         g.fillRect(bounds);
 
-        for (int i = 0; i < numPeaks; ++i)
+        const int historySize = static_cast<int>(spectrogramColumns.size());
+        if (historySize <= 0 || spectrogramFilledColumns <= 0)
+            return;
+
+        const float columnWidth = bounds.getWidth() / static_cast<float>(historySize);
+        const float binHeight = bounds.getHeight() / static_cast<float>(kSpectrogramBinCount);
+        const int oldestIndex = (spectrogramWriteIndex - spectrogramFilledColumns + historySize) % historySize;
+        const float startX = bounds.getRight() - static_cast<float>(spectrogramFilledColumns) * columnWidth;
+
+        for (int column = 0; column < spectrogramFilledColumns; ++column)
         {
-            float peakEnergy = 0.0f;
-            for (int ch = 0; ch < numChannels; ++ch)
-            {
-                const auto &channelPeaks = currentPeaksByChannel[static_cast<size_t>(ch)];
-                if (i < static_cast<int>(channelPeaks.size()))
-                    peakEnergy = juce::jmax(peakEnergy, channelPeaks[static_cast<size_t>(i)]);
-            }
+            const int sourceIndex = (oldestIndex + column) % historySize;
+            const auto &columnBins = spectrogramColumns[static_cast<size_t>(sourceIndex)];
+            const float x = startX + static_cast<float>(column) * columnWidth;
 
-            peakEnergy = juce::jlimit(0.0f, 1.0f, peakEnergy);
-            const float energyBase = std::pow(peakEnergy, 1.15f);
-            const float x = bounds.getX() + static_cast<float>(i) * columnWidth;
-
-            for (int bin = 0; bin < kFrequencyBins; ++bin)
+            for (int bin = 0; bin < kSpectrogramBinCount; ++bin)
             {
-                const float freqNorm = static_cast<float>(bin) / static_cast<float>(kFrequencyBins - 1);
-                const float bandWeight = std::pow(1.0f - freqNorm, 0.55f);
-                const float intensity = juce::jlimit(0.0f, 1.0f, energyBase * bandWeight);
+                const float intensity = juce::jlimit(0.0f, 1.0f, columnBins[static_cast<size_t>(bin)]);
 
                 if (intensity < 0.04f)
                     continue;
@@ -328,7 +333,7 @@ namespace sw
 
                 const float y = bounds.getBottom() - static_cast<float>(bin + 1) * binHeight;
                 g.setColour(colour);
-                g.fillRect(juce::Rectangle<float>(x, y, columnWidth + 0.5f, binHeight + 0.25f));
+                g.fillRect(juce::Rectangle<float>(x, y, columnWidth + 0.75f, binHeight + 0.35f));
             }
         }
     }
@@ -392,16 +397,6 @@ namespace sw
         const float totalGap = barGap * static_cast<float>(kSpectrumBandCount - 1);
         const float barWidth = juce::jmax(1.0f, (bounds.getWidth() - totalGap) / static_cast<float>(kSpectrumBandCount));
 
-        bool anyEnergy = false;
-        for (float band : spectrumBands)
-        {
-            if (band > 0.01f)
-            {
-                anyEnergy = true;
-                break;
-            }
-        }
-
         for (int bandIndex = 0; bandIndex < kSpectrumBandCount; ++bandIndex)
         {
             const float normalized = juce::jlimit(0.0f, 1.0f, spectrumBands[static_cast<size_t>(bandIndex)]);
@@ -422,23 +417,48 @@ namespace sw
 
             g.setColour(colour);
             g.fillRoundedRectangle(x, y, barWidth, juce::jmax(1.0f, barHeight), 1.6f);
-        }
 
-        if (!anyEnergy)
-        {
-            g.setColour(darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff6a6a6a));
-            g.setFont(12.0f);
-            g.drawText("No audio output", bounds.toNearestInt(), juce::Justification::centred);
+            const float peakNormalized = juce::jlimit(0.0f, 1.0f, spectrumPeakIndicators[static_cast<size_t>(bandIndex)]);
+            const float peakShaped = std::pow(peakNormalized, 0.78f);
+            const float peakY = bounds.getBottom() - peakShaped * bounds.getHeight();
+
+            g.setColour(darkModeEnabled ? juce::Colour(0xffe8f6ff) : juce::Colour(0xff1f4f7a));
+            g.drawLine(x,
+                       peakY,
+                       x + juce::jmax(1.0f, barWidth - 0.25f),
+                       peakY,
+                       1.5f);
         }
     }
 
     void WaveformPanel::updateSpectrumAnalyzer()
     {
         constexpr float kDecay = 0.88f;
+        constexpr float kPeakGravityPerFrame = 0.00009f;
+        constexpr float kPeakMaxFallVelocity = 0.03f;
         constexpr float kNoiseFloorDb = -80.0f;
 
-        for (auto &band : spectrumBands)
+        for (int bandIndex = 0; bandIndex < kSpectrumBandCount; ++bandIndex)
+        {
+            auto &band = spectrumBands[static_cast<size_t>(bandIndex)];
+            auto &peak = spectrumPeakIndicators[static_cast<size_t>(bandIndex)];
+            auto &peakVelocity = spectrumPeakFallVelocity[static_cast<size_t>(bandIndex)];
             band *= kDecay;
+
+            if (peak <= band)
+            {
+                peak = band;
+                peakVelocity = 0.0f;
+            }
+            else
+            {
+                peakVelocity = juce::jmin(kPeakMaxFallVelocity, peakVelocity + kPeakGravityPerFrame);
+                peak = juce::jmax(band, peak - peakVelocity);
+
+                if (peak <= band)
+                    peakVelocity = 0.0f;
+            }
+        }
 
         if (currentOscilloscopeSamples.size() < 2)
             return;
@@ -479,6 +499,89 @@ namespace sw
             const float db = juce::Decibels::gainToDecibels(normalizedMag, kNoiseFloorDb);
             const float mapped = juce::jlimit(0.0f, 1.0f, (db - kNoiseFloorDb) / -kNoiseFloorDb);
             spectrumBands[static_cast<size_t>(bandIndex)] = juce::jmax(spectrumBands[static_cast<size_t>(bandIndex)], mapped);
+            if (spectrumBands[static_cast<size_t>(bandIndex)] >= spectrumPeakIndicators[static_cast<size_t>(bandIndex)])
+            {
+                spectrumPeakIndicators[static_cast<size_t>(bandIndex)] = spectrumBands[static_cast<size_t>(bandIndex)];
+                spectrumPeakFallVelocity[static_cast<size_t>(bandIndex)] = 0.0f;
+            }
+        }
+    }
+
+    void WaveformPanel::ensureSpectrogramHistorySize(int widthPixels)
+    {
+        const int clampedWidth = juce::jmax(1, widthPixels);
+        if (static_cast<int>(spectrogramColumns.size()) == clampedWidth)
+            return;
+
+        spectrogramColumns.clear();
+        spectrogramColumns.resize(static_cast<size_t>(clampedWidth));
+        spectrogramWriteIndex = 0;
+        spectrogramFilledColumns = 0;
+        spectrogramScrollAccumulator = 0.0f;
+    }
+
+    void WaveformPanel::updateSpectrogram()
+    {
+        ensureSpectrogramHistorySize(juce::jmax(1, getLocalBounds().reduced(2).getWidth()));
+        if (spectrogramColumns.empty())
+            return;
+
+        std::array<float, kSpectrogramBinCount> column{};
+
+        if (currentOscilloscopeSamples.size() >= 2)
+        {
+            std::fill(spectrumFftBuffer.begin(), spectrumFftBuffer.end(), 0.0f);
+
+            const int available = juce::jmin(static_cast<int>(currentOscilloscopeSamples.size()), kSpectrumFftSize);
+            const int start = static_cast<int>(currentOscilloscopeSamples.size()) - available;
+            for (int i = 0; i < available; ++i)
+                spectrumFftBuffer[static_cast<size_t>(i)] = currentOscilloscopeSamples[static_cast<size_t>(start + i)];
+
+            spectrumWindow.multiplyWithWindowingTable(spectrumFftBuffer.data(), kSpectrumFftSize);
+            spectrumFft.performFrequencyOnlyForwardTransform(spectrumFftBuffer.data());
+
+            constexpr float kNoiseFloorDb = -80.0f;
+            constexpr int maxBin = (kSpectrumFftSize / 2) - 1;
+            constexpr float minBinF = 1.0f;
+            const float maxBinF = static_cast<float>(maxBin);
+            const float binRatio = maxBinF / minBinF;
+
+            for (int binIndex = 0; binIndex < kSpectrogramBinCount; ++binIndex)
+            {
+                const float startNorm = static_cast<float>(binIndex) / static_cast<float>(kSpectrogramBinCount);
+                const float endNorm = static_cast<float>(binIndex + 1) / static_cast<float>(kSpectrogramBinCount);
+
+                const int binStart = juce::jlimit(1,
+                                                  maxBin,
+                                                  static_cast<int>(std::floor(minBinF * std::pow(binRatio, startNorm))));
+                const int binEnd = juce::jlimit(binStart + 1,
+                                                maxBin,
+                                                static_cast<int>(std::ceil(minBinF * std::pow(binRatio, endNorm))));
+
+                float maxMagnitude = 0.0f;
+                for (int bin = binStart; bin <= binEnd; ++bin)
+                    maxMagnitude = juce::jmax(maxMagnitude, spectrumFftBuffer[static_cast<size_t>(bin)]);
+
+                const float normalizedMag = maxMagnitude / static_cast<float>(kSpectrumFftSize);
+                const float db = juce::Decibels::gainToDecibels(normalizedMag, kNoiseFloorDb);
+                const float mapped = juce::jlimit(0.0f, 1.0f, (db - kNoiseFloorDb) / -kNoiseFloorDb);
+                column[static_cast<size_t>(binIndex)] = std::pow(mapped, 0.85f);
+            }
+        }
+
+        spectrogramScrollAccumulator += kSpectrogramColumnsPerUpdate;
+        int columnsToAdvance = static_cast<int>(spectrogramScrollAccumulator);
+        spectrogramScrollAccumulator -= static_cast<float>(columnsToAdvance);
+
+        if (columnsToAdvance <= 0)
+            columnsToAdvance = 1;
+
+        const int historySize = static_cast<int>(spectrogramColumns.size());
+        for (int i = 0; i < columnsToAdvance; ++i)
+        {
+            spectrogramColumns[static_cast<size_t>(spectrogramWriteIndex)] = column;
+            spectrogramWriteIndex = (spectrogramWriteIndex + 1) % historySize;
+            spectrogramFilledColumns = juce::jmin(spectrogramFilledColumns + 1, historySize);
         }
     }
 

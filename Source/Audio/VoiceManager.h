@@ -81,6 +81,18 @@ namespace sw
         std::atomic<bool> stretchHighQualityEnabled{false};
         std::atomic<int> loadedSampleLength{0};
 
+        // Fade envelope to prevent clicks/pops on note transitions
+        enum class FadeState
+        {
+            Idle,
+            FadingIn,
+            Active,
+            FadingOut
+        };
+        std::atomic<FadeState> fadeState{FadeState::Idle};
+        float fadeGain = 0.0f; // audio thread only
+        static constexpr float kFadeTimeMs = 5.0f;
+
         // Granular pitch-shift state (audio thread only)
         double grainReadPosA = 0.0;
         double grainReadPosB = 0.0;

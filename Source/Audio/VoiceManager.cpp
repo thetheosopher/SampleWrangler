@@ -38,6 +38,21 @@ namespace sw
 
         if (!playing.load(std::memory_order_relaxed) || buf == nullptr || buf->getNumSamples() == 0)
         {
+            // Handle fade-out even when stopped
+            FadeState currentFadeState = fadeState.load(std::memory_order_relaxed);
+            if (currentFadeState == FadeState::FadingOut && fadeGain > 0.0f)
+            {
+                const float fadeRate = 1.0f / (kFadeTimeMs * 0.001f * static_cast<float>(currentSampleRate));
+                for (int i = 0; i < info.numSamples; ++i)
+                {
+                    fadeGain = juce::jmax(0.0f, fadeGain - fadeRate);
+                    if (fadeGain <= 0.0f)
+                    {
+                        fadeState.store(FadeState::Idle, std::memory_order_relaxed);
+                        break;
+                    }
+                }
+            }
             info.clearActiveBufferRegion();
             return;
         }
@@ -102,6 +117,10 @@ namespace sw
             const float s1 = buf->getSample(channel, idx1);
             return s0 + frac * (s1 - s0);
         };
+
+        // Update fade envelope state
+        FadeState currentFadeState = fadeState.load(std::memory_order_relaxed);
+        const float fadeRate = 1.0f / (kFadeTimeMs * 0.001f * static_cast<float>(currentSampleRate));
 
         if (granularResetRequested.exchange(false, std::memory_order_acq_rel))
         {
@@ -268,10 +287,31 @@ namespace sw
                             outSampleRight = rubberBandInput[1][static_cast<size_t>(fallbackIndex)];
                         }
 
+                        // Apply fade envelope
+                        if (currentFadeState == FadeState::FadingIn)
+                        {
+                            fadeGain = juce::jmin(1.0f, fadeGain + fadeRate);
+                            if (fadeGain >= 1.0f)
+                            {
+                                fadeState.store(FadeState::Active, std::memory_order_relaxed);
+                                currentFadeState = FadeState::Active;
+                            }
+                        }
+                        else if (currentFadeState == FadeState::FadingOut)
+                        {
+                            fadeGain = juce::jmax(0.0f, fadeGain - fadeRate);
+                            if (fadeGain <= 0.0f)
+                            {
+                                playing.store(false, std::memory_order_relaxed);
+                                fadeState.store(FadeState::Idle, std::memory_order_relaxed);
+                                currentFadeState = FadeState::Idle;
+                            }
+                        }
+
                         for (int ch = 0; ch < numOutChannels; ++ch)
                         {
                             const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
-                            info.buffer->setSample(ch, info.startSample + i, sample);
+                            info.buffer->setSample(ch, info.startSample + i, sample * fadeGain);
                         }
 
                         continue;
@@ -288,12 +328,33 @@ namespace sw
 
                 const float blend = 1.0f - (static_cast<float>(grainSamplesRemaining) / static_cast<float>(grainLengthSamples));
 
+                // Apply fade envelope
+                if (currentFadeState == FadeState::FadingIn)
+                {
+                    fadeGain = juce::jmin(1.0f, fadeGain + fadeRate);
+                    if (fadeGain >= 1.0f)
+                    {
+                        fadeState.store(FadeState::Active, std::memory_order_relaxed);
+                        currentFadeState = FadeState::Active;
+                    }
+                }
+                else if (currentFadeState == FadeState::FadingOut)
+                {
+                    fadeGain = juce::jmax(0.0f, fadeGain - fadeRate);
+                    if (fadeGain <= 0.0f)
+                    {
+                        playing.store(false, std::memory_order_relaxed);
+                        fadeState.store(FadeState::Idle, std::memory_order_relaxed);
+                        currentFadeState = FadeState::Idle;
+                    }
+                }
+
                 for (int ch = 0; ch < numOutChannels; ++ch)
                 {
                     const int srcCh = (ch < numSrcChannels) ? ch : 0;
                     const float sampleA = readInterpolatedSample(srcCh, grainReadPosA);
                     const float sampleB = readInterpolatedSample(srcCh, grainReadPosB);
-                    info.buffer->setSample(ch, info.startSample + i, sampleA + (sampleB - sampleA) * blend);
+                    info.buffer->setSample(ch, info.startSample + i, (sampleA + (sampleB - sampleA) * blend) * fadeGain);
                 }
 
                 grainReadPosA += rate;
@@ -315,12 +376,33 @@ namespace sw
                 int idx1 = std::min(idx0 + 1, srcLength - 1);
                 float frac = static_cast<float>(pos - static_cast<double>(idx0));
 
+                // Apply fade envelope
+                if (currentFadeState == FadeState::FadingIn)
+                {
+                    fadeGain = juce::jmin(1.0f, fadeGain + fadeRate);
+                    if (fadeGain >= 1.0f)
+                    {
+                        fadeState.store(FadeState::Active, std::memory_order_relaxed);
+                        currentFadeState = FadeState::Active;
+                    }
+                }
+                else if (currentFadeState == FadeState::FadingOut)
+                {
+                    fadeGain = juce::jmax(0.0f, fadeGain - fadeRate);
+                    if (fadeGain <= 0.0f)
+                    {
+                        playing.store(false, std::memory_order_relaxed);
+                        fadeState.store(FadeState::Idle, std::memory_order_relaxed);
+                        currentFadeState = FadeState::Idle;
+                    }
+                }
+
                 for (int ch = 0; ch < numOutChannels; ++ch)
                 {
                     int srcCh = (ch < numSrcChannels) ? ch : 0; // mono → stereo fallback
                     float s0 = buf->getSample(srcCh, idx0);
                     float s1 = buf->getSample(srcCh, idx1);
-                    info.buffer->setSample(ch, info.startSample + i, s0 + frac * (s1 - s0));
+                    info.buffer->setSample(ch, info.startSample + i, (s0 + frac * (s1 - s0)) * fadeGain);
                 }
 
                 pos += rate;
@@ -356,11 +438,24 @@ namespace sw
         playbackFinished.store(false, std::memory_order_relaxed);
         granularResetRequested.store(true, std::memory_order_release);
         playing.store(true, std::memory_order_relaxed);
+        // Trigger fade-in to prevent clicks
+        fadeGain = 0.0f;
+        fadeState.store(FadeState::FadingIn, std::memory_order_relaxed);
     }
 
     void VoiceManager::stop()
     {
-        playing.store(false, std::memory_order_relaxed);
+        // Trigger fade-out to prevent clicks
+        FadeState currentState = fadeState.load(std::memory_order_relaxed);
+        if (currentState == FadeState::FadingIn || currentState == FadeState::Active)
+        {
+            fadeState.store(FadeState::FadingOut, std::memory_order_relaxed);
+        }
+        else
+        {
+            playing.store(false, std::memory_order_relaxed);
+            fadeState.store(FadeState::Idle, std::memory_order_relaxed);
+        }
     }
 
     void VoiceManager::setPitchSemitones(double semitones)

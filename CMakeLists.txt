@@ -182,6 +182,8 @@ target_compile_definitions(SampleWrangler PRIVATE
     # Enable MP3 reading support — note JUCE legal disclaimer applies.
     # See: https://docs.juce.com/develop/classjuce_1_1MP3AudioFormat.html
     JUCE_USE_MP3AUDIOFORMAT=1
+    # Enable ASIO audio device support on Windows
+    JUCE_ASIO=1
     SW_HAVE_RUBBERBAND=${SW_HAVE_RUBBERBAND}
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SampleWrangler,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SampleWrangler,JUCE_VERSION>"

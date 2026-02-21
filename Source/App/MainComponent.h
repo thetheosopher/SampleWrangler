@@ -129,7 +129,7 @@ namespace sw
         juce::DrawableButton addRootToolbarButton{"Add Source", juce::DrawableButton::ImageFitted};
         juce::DrawableButton openSourceInExplorerToolbarButton{"Open Source In Explorer", juce::DrawableButton::ImageFitted};
         juce::DrawableButton deleteRootToolbarButton{"Delete Source", juce::DrawableButton::ImageFitted};
-        juce::DrawableButton rescanToolbarButton{"Rescan Selected Source", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton rescanToolbarButton{"Scan Sources", juce::DrawableButton::ImageFitted};
         juce::DrawableButton cancelScanToolbarButton{"Cancel Scan", juce::DrawableButton::ImageFitted};
         juce::DrawableButton resetLayoutToolbarButton{"Reset Layout", juce::DrawableButton::ImageFitted};
         juce::DrawableButton vacuumDbToolbarButton{"Compress Database", juce::DrawableButton::ImageFitted};

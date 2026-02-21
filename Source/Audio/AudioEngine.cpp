@@ -77,6 +77,7 @@ namespace sw
                                         double fileSampleRate)
     {
         voiceManager.loadBuffer(std::move(buffer), fileSampleRate);
+        voiceManager.setPlaybackProgressNormalized(0.0);
     }
 
     void AudioEngine::play()

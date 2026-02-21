@@ -189,7 +189,9 @@ namespace sw
                 playbackFinished.store(false, std::memory_order_relaxed);
 
                 auto &v = voices[0];
+                const double preservedPos = v.playbackPos;
                 v.noteOn(/*note=*/-1, /*rate=*/1.0, /*pitch=*/1.0, ++voiceAgeCounter);
+                v.playbackPos = preservedPos;
                 primaryVoiceIndex.store(0, std::memory_order_relaxed);
                 anyVoiceActive.store(true, std::memory_order_relaxed);
                 break;

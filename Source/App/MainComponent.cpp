@@ -2099,15 +2099,49 @@ namespace sw
         if (scanInProgress)
             return;
 
-        if (!selectedRootFilterId.has_value())
+        const auto roots = catalogDb.allRoots();
+        if (roots.empty())
         {
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                   "Rescan Selected Source",
-                                                   "Select a source in the Browser panel to rescan.");
+                                                   "Rescan Sources",
+                                                   "Add a source in the Browser panel before scanning.");
+            updateToolbarScanState(scanInProgress);
             return;
         }
 
-        const auto roots = catalogDb.allRoots();
+        if (!selectedRootFilterId.has_value())
+        {
+            auto remainingRoots = std::make_shared<std::vector<RootRecord>>(roots);
+            auto nextIndex = std::make_shared<size_t>(0);
+            auto runNext = std::make_shared<std::function<void()>>();
+
+            *runNext = [this, remainingRoots, nextIndex, runNext]()
+            {
+                if (*nextIndex >= remainingRoots->size())
+                {
+                    toolbarFeedbackText = "Scanned all sources";
+                    toolbarFeedbackTicksRemaining = 60;
+                    repaint(0, 0, getWidth(), kToolbarHeight);
+                    updateToolbarScanState(scanInProgress);
+                    return;
+                }
+
+                const auto &root = (*remainingRoots)[*nextIndex];
+                ++(*nextIndex);
+
+                startRootScan(root.id,
+                              root.path,
+                              juce::String(root.label),
+                              [runNext]()
+                              {
+                                  (*runNext)();
+                              });
+            };
+
+            (*runNext)();
+            return;
+        }
+
         const auto it = std::find_if(roots.begin(), roots.end(), [this](const RootRecord &root)
                                      { return root.id == *selectedRootFilterId; });
         if (it == roots.end())
@@ -2235,12 +2269,33 @@ namespace sw
 
     void MainComponent::updateToolbarScanState(bool inProgress)
     {
+        const auto roots = catalogDb.allRoots();
+        const bool hasRegisteredSources = !roots.empty();
+        const bool hasSelectedSource = selectedRootFilterId.has_value();
+        const bool canScan = !inProgress && (hasSelectedSource || hasRegisteredSources);
+
         addRootToolbarButton.setEnabled(!inProgress);
-        openSourceInExplorerToolbarButton.setEnabled(selectedRootFilterId.has_value());
-        deleteRootToolbarButton.setEnabled(!inProgress && selectedRootFilterId.has_value());
-        rescanToolbarButton.setEnabled(!inProgress && selectedRootFilterId.has_value());
+        openSourceInExplorerToolbarButton.setEnabled(hasSelectedSource);
+        deleteRootToolbarButton.setEnabled(!inProgress && hasSelectedSource);
+        rescanToolbarButton.setEnabled(canScan);
         cancelScanToolbarButton.setEnabled(inProgress);
         vacuumDbToolbarButton.setEnabled(!inProgress && catalogDb.isOpen());
+
+        if (hasSelectedSource)
+        {
+            rescanToolbarButton.setName("Rescan Selected Source");
+            rescanToolbarButton.setTooltip("Rescan selected source");
+        }
+        else if (hasRegisteredSources)
+        {
+            rescanToolbarButton.setName("Scan All Sources");
+            rescanToolbarButton.setTooltip("Scan all registered sources");
+        }
+        else
+        {
+            rescanToolbarButton.setName("Scan Sources");
+            rescanToolbarButton.setTooltip("Add a source folder to enable scanning");
+        }
     }
 
     void MainComponent::resetLayout()

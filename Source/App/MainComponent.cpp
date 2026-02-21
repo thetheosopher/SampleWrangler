@@ -1939,6 +1939,8 @@ namespace sw
         }
 
         const float progress = static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized());
+        audioEngine.getOscilloscopeFrame(oscilloscopeFrameScratch);
+        waveformPanel.setOscilloscopeSamples(oscilloscopeFrameScratch);
         waveformPanel.setPlayheadNormalized(progress);
         previewPanel.setPlaybackActive(audioEngine.isPreviewPlaying());
 

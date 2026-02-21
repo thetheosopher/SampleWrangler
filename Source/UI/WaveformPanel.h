@@ -13,7 +13,8 @@ namespace sw
         enum class DisplayMode
         {
             waveform,
-            spectrogram
+            spectrogram,
+            compositeOscilloscope
         };
 
         WaveformPanel();
@@ -26,6 +27,7 @@ namespace sw
 
         /// Load waveform peaks for display. Called from a background thread result.
         void setPeaks(const std::vector<std::vector<float>> &peaksByChannel);
+        void setOscilloscopeSamples(const std::vector<float> &samples);
         void setPlayheadNormalized(float playheadPosition);
         void setLoopRegionNormalized(float loopStart, float loopEnd);
         void setLoading(bool loading);
@@ -38,9 +40,11 @@ namespace sw
     private:
         void paintWaveform(juce::Graphics &g, juce::Rectangle<float> bounds) const;
         void paintSpectrogram(juce::Graphics &g, juce::Rectangle<float> bounds) const;
+        void paintCompositeOscilloscope(juce::Graphics &g, juce::Rectangle<float> bounds) const;
         float normalizedPositionFromX(int x) const;
 
         std::vector<std::vector<float>> currentPeaksByChannel;
+        std::vector<float> currentOscilloscopeSamples;
         float playheadNormalized = -1.0f;
         float loopStartNormalized = -1.0f;
         float loopEndNormalized = -1.0f;

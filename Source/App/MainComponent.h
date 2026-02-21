@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace sw
 {
@@ -188,6 +189,7 @@ namespace sw
                                         .withStyle("Regular")};
         bool darkModeEnabled = true;
         std::chrono::steady_clock::time_point scanStartTime{};
+        std::vector<float> oscilloscopeFrameScratch;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
     };

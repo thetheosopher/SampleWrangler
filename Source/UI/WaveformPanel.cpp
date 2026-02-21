@@ -10,6 +10,25 @@ namespace sw
     {
         g.fillAll(darkModeEnabled ? juce::Colour(0xff1a1a2e) : juce::Colour(0xffedf2fb));
 
+        const bool isOscilloscope = (displayMode == DisplayMode::compositeOscilloscope);
+
+        if (isOscilloscope)
+        {
+            const auto bounds = getLocalBounds().toFloat().reduced(2.0f);
+            paintCompositeOscilloscope(g, bounds);
+
+            if (loading)
+            {
+                g.setColour((darkModeEnabled ? juce::Colours::black : juce::Colours::white).withAlpha(0.35f));
+                g.fillRect(getLocalBounds());
+                g.setColour(darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020));
+                g.setFont(14.0f);
+                g.drawText("Loading...", getLocalBounds(), juce::Justification::centred);
+            }
+
+            return;
+        }
+
         if (currentPeaksByChannel.empty() || currentPeaksByChannel.front().empty())
         {
             if (loading)
@@ -30,6 +49,8 @@ namespace sw
         const auto bounds = getLocalBounds().toFloat().reduced(2.0f);
         if (displayMode == DisplayMode::spectrogram)
             paintSpectrogram(g, bounds);
+        else if (displayMode == DisplayMode::compositeOscilloscope)
+            paintCompositeOscilloscope(g, bounds);
         else
             paintWaveform(g, bounds);
 
@@ -70,6 +91,7 @@ namespace sw
             juce::PopupMenu menu;
             menu.addItem(1, "Waveform", true, displayMode == DisplayMode::waveform);
             menu.addItem(2, "Spectrogram", true, displayMode == DisplayMode::spectrogram);
+            menu.addItem(3, "Oscilloscope", true, displayMode == DisplayMode::compositeOscilloscope);
 
             auto safeThis = juce::Component::SafePointer<WaveformPanel>(this);
             menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
@@ -82,6 +104,8 @@ namespace sw
                                        safeThis->setDisplayMode(DisplayMode::waveform);
                                    else if (selected == 2)
                                        safeThis->setDisplayMode(DisplayMode::spectrogram);
+                                   else if (selected == 3)
+                                       safeThis->setDisplayMode(DisplayMode::compositeOscilloscope);
                                });
             return;
         }
@@ -125,6 +149,27 @@ namespace sw
 
         currentPeaksByChannel = peaksByChannel;
         repaint();
+    }
+
+    void WaveformPanel::setOscilloscopeSamples(const std::vector<float> &samples)
+    {
+        if (!juce::MessageManager::getInstance()->isThisTheMessageThread())
+        {
+            auto safeThis = juce::Component::SafePointer<WaveformPanel>(this);
+            auto samplesCopy = std::make_shared<std::vector<float>>(samples);
+            juce::MessageManager::callAsync([safeThis, samplesCopy]
+                                            {
+                                                if (safeThis == nullptr)
+                                                    return;
+
+                                                safeThis->setOscilloscopeSamples(*samplesCopy);
+                                            });
+            return;
+        }
+
+        currentOscilloscopeSamples = samples;
+        if (displayMode == DisplayMode::compositeOscilloscope)
+            repaint();
     }
 
     void WaveformPanel::setPlayheadNormalized(float playheadPosition)
@@ -264,6 +309,56 @@ namespace sw
                 g.fillRect(juce::Rectangle<float>(x, y, columnWidth + 0.5f, binHeight + 0.25f));
             }
         }
+    }
+
+    void WaveformPanel::paintCompositeOscilloscope(juce::Graphics &g, juce::Rectangle<float> bounds) const
+    {
+        g.setColour(darkModeEnabled ? juce::Colour(0xff0f1625) : juce::Colour(0xffdfe9f9));
+        g.fillRect(bounds);
+
+        if (currentOscilloscopeSamples.size() < 2)
+        {
+            g.setColour((darkModeEnabled ? juce::Colours::white : juce::Colour(0xff4a4a4a)).withAlpha(0.25f));
+            g.drawHorizontalLine(static_cast<int>(std::round(bounds.getCentreY())), bounds.getX(), bounds.getRight());
+            g.setColour(darkModeEnabled ? juce::Colours::grey : juce::Colour(0xff6a6a6a));
+            g.setFont(12.0f);
+            g.drawText("No audio output", bounds.toNearestInt(), juce::Justification::centred);
+            return;
+        }
+
+        const float midY = bounds.getCentreY();
+        const float halfHeight = juce::jmax(1.0f, bounds.getHeight() * 0.5f - 4.0f);
+        const int sampleCount = static_cast<int>(currentOscilloscopeSamples.size());
+        const float traceWidth = juce::jmax(1.0f, bounds.getWidth());
+
+        juce::Path scopePath;
+        bool started = false;
+
+        for (int x = 0; x < static_cast<int>(traceWidth); ++x)
+        {
+            const int sampleIndex = juce::jlimit(0,
+                                                 sampleCount - 1,
+                                                 static_cast<int>((static_cast<float>(x) / juce::jmax(1.0f, traceWidth - 1.0f)) * static_cast<float>(sampleCount - 1)));
+            const float sample = juce::jlimit(-1.0f, 1.0f, currentOscilloscopeSamples[static_cast<size_t>(sampleIndex)]);
+            const float y = midY - sample * halfHeight;
+            const float drawX = bounds.getX() + static_cast<float>(x);
+
+            if (!started)
+            {
+                scopePath.startNewSubPath(drawX, y);
+                started = true;
+            }
+            else
+            {
+                scopePath.lineTo(drawX, y);
+            }
+        }
+
+        g.setColour((darkModeEnabled ? juce::Colours::white : juce::Colour(0xff4a4a4a)).withAlpha(0.16f));
+        g.drawHorizontalLine(static_cast<int>(std::round(midY)), bounds.getX(), bounds.getRight());
+
+        g.setColour(darkModeEnabled ? juce::Colour(0xff66e0ff) : juce::Colour(0xff1769aa));
+        g.strokePath(scopePath, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
     float WaveformPanel::normalizedPositionFromX(int x) const

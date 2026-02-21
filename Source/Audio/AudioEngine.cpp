@@ -31,6 +31,28 @@ namespace sw
     {
         // RT-safe: delegate to voice manager which reads from pre-decoded buffers
         voiceManager.getNextAudioBlock(bufferToFill);
+
+        // RT-safe oscilloscope tap: capture composite output waveform.
+        if (bufferToFill.buffer == nullptr || bufferToFill.numSamples <= 0)
+            return;
+
+        const int numChannels = bufferToFill.buffer->getNumChannels();
+        if (numChannels <= 0)
+            return;
+
+        uint32_t write = oscilloscopeWriteIndex.load(std::memory_order_relaxed);
+        for (int i = 0; i < bufferToFill.numSamples; ++i)
+        {
+            float composite = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+                composite += bufferToFill.buffer->getSample(ch, bufferToFill.startSample + i);
+
+            composite /= static_cast<float>(numChannels);
+            oscilloscopeRing[write % kOscilloscopeRingSize] = composite;
+            ++write;
+        }
+
+        oscilloscopeWriteIndex.store(write, std::memory_order_release);
     }
 
     // ---------------------------------------------------------------------------
@@ -294,6 +316,40 @@ namespace sw
     void AudioEngine::setPreviewLoopRegionSamples(int64_t startSample, int64_t endSample)
     {
         voiceManager.setLoopRegionSamples(startSample, endSample);
+    }
+
+    void AudioEngine::getOscilloscopeFrame(std::vector<float> &destination) const
+    {
+        constexpr int kTriggerSearchSamples = 256;
+        constexpr float kTriggerMinSlope = 1.0e-5f;
+
+        destination.resize(static_cast<size_t>(kOscilloscopeFrameSize));
+
+        const uint32_t write = oscilloscopeWriteIndex.load(std::memory_order_acquire);
+        const uint32_t totalWindow = static_cast<uint32_t>(kOscilloscopeFrameSize + kTriggerSearchSamples);
+        const uint32_t windowStart = (write >= totalWindow) ? (write - totalWindow) : 0u;
+
+        int triggerOffset = 0;
+        for (int i = 1; i < kTriggerSearchSamples; ++i)
+        {
+            const uint32_t prevIdx = (windowStart + static_cast<uint32_t>(i - 1)) % static_cast<uint32_t>(kOscilloscopeRingSize);
+            const uint32_t currIdx = (windowStart + static_cast<uint32_t>(i)) % static_cast<uint32_t>(kOscilloscopeRingSize);
+            const float prev = oscilloscopeRing[prevIdx];
+            const float curr = oscilloscopeRing[currIdx];
+
+            if (prev <= 0.0f && curr > 0.0f && (curr - prev) > kTriggerMinSlope)
+            {
+                triggerOffset = i;
+                break;
+            }
+        }
+
+        const uint32_t frameStart = windowStart + static_cast<uint32_t>(triggerOffset);
+        for (int i = 0; i < kOscilloscopeFrameSize; ++i)
+        {
+            const uint32_t idx = (frameStart + static_cast<uint32_t>(i)) % static_cast<uint32_t>(kOscilloscopeRingSize);
+            destination[static_cast<size_t>(i)] = oscilloscopeRing[idx];
+        }
     }
 
     void AudioEngine::applyCurrentPitch()

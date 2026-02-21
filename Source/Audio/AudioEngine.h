@@ -3,7 +3,9 @@
 #include <JuceHeader.h>
 #include "VoiceManager.h"
 #include <atomic>
+#include <array>
 #include <mutex>
+#include <vector>
 
 namespace sw
 {
@@ -81,6 +83,10 @@ namespace sw
         void clearPreviewLoopRegion();
         void setPreviewLoopRegionSamples(int64_t startSample, int64_t endSample);
 
+        /// Returns the latest realtime oscilloscope frame from live audio output.
+        /// Call from the message thread (e.g. 60Hz UI timer).
+        void getOscilloscopeFrame(std::vector<float> &destination) const;
+
     private:
         void applyCurrentPitch();
 
@@ -90,6 +96,11 @@ namespace sw
         std::mutex deviceConfigMutex;
 
         std::atomic<double> basePitchSemitones{0.0};
+
+        static constexpr int kOscilloscopeRingSize = 8192;
+        static constexpr int kOscilloscopeFrameSize = 1024;
+        std::array<float, kOscilloscopeRingSize> oscilloscopeRing{};
+        std::atomic<uint32_t> oscilloscopeWriteIndex{0};
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioEngine)
     };

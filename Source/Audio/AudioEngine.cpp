@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "Util/Logging.h"
+#include <cmath>
 
 namespace sw
 {
@@ -79,7 +80,7 @@ namespace sw
     void AudioEngine::setPitchSemitones(double semitones)
     {
         basePitchSemitones.store(semitones, std::memory_order_relaxed);
-        applyCurrentPitch();
+        voiceManager.updateAllVoicePitch(semitones);
     }
 
     void AudioEngine::setPreserveLengthEnabled(bool enabled)
@@ -121,30 +122,25 @@ namespace sw
     {
         if (message.isNoteOn())
         {
-            activeMidiNote.store(message.getNoteNumber(), std::memory_order_relaxed);
-            applyCurrentPitch();
-            setPreviewPlaybackProgressNormalized(0.0);
-            play();
+            const int note = message.getNoteNumber();
+            const int rootNote = voiceManager.getPreviewRootMidiNote();
+            const double base = basePitchSemitones.load(std::memory_order_relaxed);
+            const double totalSemitones = base + static_cast<double>(note - rootNote);
+            const double ratio = std::pow(2.0, totalSemitones / 12.0);
+
+            voiceManager.noteOn(note, ratio, ratio);
             return;
         }
 
         if (message.isAllNotesOff() || message.isAllSoundOff())
         {
-            activeMidiNote.store(-1, std::memory_order_relaxed);
-            stop();
-            applyCurrentPitch();
+            voiceManager.allNotesOff();
             return;
         }
 
         if (message.isNoteOff())
         {
-            const int noteNumber = message.getNoteNumber();
-            if (activeMidiNote.load(std::memory_order_relaxed) == noteNumber)
-            {
-                activeMidiNote.store(-1, std::memory_order_relaxed);
-                stop();
-                applyCurrentPitch();
-            }
+            voiceManager.noteOff(message.getNoteNumber());
         }
     }
 
@@ -226,7 +222,7 @@ namespace sw
     void AudioEngine::setPreviewRootMidiNote(int midiNote)
     {
         voiceManager.setPreviewRootMidiNote(midiNote);
-        applyCurrentPitch();
+        voiceManager.updateAllVoicePitch(basePitchSemitones.load(std::memory_order_relaxed));
     }
 
     void AudioEngine::clearPreviewLoopRegion()
@@ -242,17 +238,7 @@ namespace sw
     void AudioEngine::applyCurrentPitch()
     {
         const double base = basePitchSemitones.load(std::memory_order_relaxed);
-        const int note = activeMidiNote.load(std::memory_order_relaxed);
-
-        if (note < 0)
-        {
-            voiceManager.setPitchSemitones(base);
-            return;
-        }
-
-        const int rootNote = voiceManager.getPreviewRootMidiNote();
-        const double midiOffset = static_cast<double>(note - rootNote);
-        voiceManager.setPitchSemitones(base + midiOffset);
+        voiceManager.updateAllVoicePitch(base);
     }
 
 } // namespace sw

@@ -78,6 +78,7 @@ set(PIPELINE_SOURCES
 set(AUDIO_SOURCES
     Source/Audio/AudioEngine.cpp
     Source/Audio/AudioEngine.h
+    Source/Audio/Voice.h
     Source/Audio/VoiceManager.cpp
     Source/Audio/VoiceManager.h
     Source/Audio/MidiInputRouter.cpp

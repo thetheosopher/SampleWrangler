@@ -87,7 +87,6 @@ namespace sw
         VoiceManager voiceManager;
 
         std::atomic<double> basePitchSemitones{0.0};
-        std::atomic<int> activeMidiNote{-1};
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioEngine)
     };

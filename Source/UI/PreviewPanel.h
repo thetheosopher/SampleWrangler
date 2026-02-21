@@ -23,6 +23,7 @@ namespace sw
         void setDarkMode(bool enabled);
         void setAvailableOutputDeviceTypes(const juce::StringArray &typeNames, const juce::String &currentTypeName);
         void setAvailableOutputDevices(const juce::StringArray &deviceNames, const juce::String &currentDeviceName);
+        void setOutputDeviceControlsEnabled(bool enabled);
         void setPlaybackActive(bool playing);
 
         std::function<void()> onPlayRequested;

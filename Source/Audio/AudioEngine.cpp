@@ -190,6 +190,27 @@ namespace sw
         return types;
     }
 
+    juce::StringArray AudioEngine::getAvailableOutputDevicesForType(const juce::String &typeName)
+    {
+        juce::StringArray devices;
+        if (typeName.isEmpty())
+            return devices;
+
+        for (auto *type : deviceManager.getAvailableDeviceTypes())
+        {
+            if (type == nullptr)
+                continue;
+
+            if (type->getTypeName() == typeName)
+            {
+                devices = type->getDeviceNames(false);
+                break;
+            }
+        }
+
+        return devices;
+    }
+
     juce::String AudioEngine::getCurrentOutputDeviceType() const
     {
         return deviceManager.getCurrentAudioDeviceType();

@@ -68,6 +68,7 @@ namespace sw
         void handleMidiMessage(const juce::MidiMessage &message);
 
         juce::StringArray getAvailableOutputDeviceTypes();
+        juce::StringArray getAvailableOutputDevicesForType(const juce::String &typeName);
         juce::String getCurrentOutputDeviceType() const;
         bool setCurrentOutputDeviceType(const juce::String &typeName, juce::String *errorMessage = nullptr);
 

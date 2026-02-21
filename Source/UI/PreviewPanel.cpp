@@ -191,7 +191,7 @@ namespace sw
 
     void PreviewPanel::setAvailableOutputDeviceTypes(const juce::StringArray &typeNames, const juce::String &currentTypeName)
     {
-        outputDeviceTypeCombo.clear();
+        outputDeviceTypeCombo.clear(juce::dontSendNotification);
 
         int id = 1;
         for (const auto &name : typeNames)
@@ -209,6 +209,12 @@ namespace sw
     {
         pitchSlider.setValue(semitones, juce::dontSendNotification);
         updatePitchValueFieldText();
+    }
+
+    void PreviewPanel::setOutputDeviceControlsEnabled(bool enabled)
+    {
+        outputDeviceTypeCombo.setEnabled(enabled);
+        outputDeviceCombo.setEnabled(enabled);
     }
 
     void PreviewPanel::setDarkMode(bool enabled)
@@ -345,7 +351,7 @@ namespace sw
 
     void PreviewPanel::setAvailableOutputDevices(const juce::StringArray &deviceNames, const juce::String &currentDeviceName)
     {
-        outputDeviceCombo.clear();
+        outputDeviceCombo.clear(juce::dontSendNotification);
 
         int id = 1;
         for (const auto &name : deviceNames)

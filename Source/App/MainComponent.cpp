@@ -851,12 +851,14 @@ namespace sw
 
         previewPanel.onPlayRequested = [this]
         {
+            suppressAutoAdvanceAfterManualStop = false;
             audioEngine.play();
             waveformPanel.setPlayheadNormalized(static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized()));
         };
 
         previewPanel.onStopRequested = [this]
         {
+            suppressAutoAdvanceAfterManualStop = true;
             audioEngine.stop();
             waveformPanel.setPlayheadNormalized(static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized()));
         };
@@ -900,6 +902,36 @@ namespace sw
 
         previewPanel.onOutputDeviceTypeChanged = [this](const juce::String &typeName)
         {
+            previewPanel.setOutputDeviceControlsEnabled(false);
+
+            const auto devicesForType = audioEngine.getAvailableOutputDevicesForType(typeName);
+            if (devicesForType.isEmpty())
+            {
+                juce::String fallbackError;
+                const auto currentType = audioEngine.getCurrentOutputDeviceType();
+                if (currentType != "Windows Audio")
+                {
+                    const bool fallbackOk = audioEngine.setCurrentOutputDeviceType("Windows Audio", &fallbackError);
+                    if (fallbackOk)
+                        persistAudioDeviceType("Windows Audio");
+                }
+
+                juce::String message = "No output drivers/devices are available for '" + typeName + "'.";
+                if (audioEngine.getCurrentOutputDeviceType() == "Windows Audio")
+                    message += "\nReverted to Windows Audio.";
+                else if (fallbackError.isNotEmpty())
+                    message += "\nFailed to revert to Windows Audio:\n" + fallbackError;
+
+                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
+                                                       "No Drivers/Devices Available",
+                                                       message);
+
+                refreshOutputDeviceTypeList();
+                refreshOutputDeviceList();
+                previewPanel.setOutputDeviceControlsEnabled(true);
+                return;
+            }
+
             juce::String error;
             if (!audioEngine.setCurrentOutputDeviceType(typeName, &error))
             {
@@ -914,10 +946,13 @@ namespace sw
 
             refreshOutputDeviceTypeList();
             refreshOutputDeviceList();
+            previewPanel.setOutputDeviceControlsEnabled(true);
         };
 
         previewPanel.onOutputDeviceChanged = [this](const juce::String &deviceName)
         {
+            previewPanel.setOutputDeviceControlsEnabled(false);
+
             juce::String error;
             if (!audioEngine.setCurrentOutputDevice(deviceName, &error))
             {
@@ -930,6 +965,7 @@ namespace sw
                 persistAudioDeviceName(deviceName);
             }
             refreshOutputDeviceList();
+            previewPanel.setOutputDeviceControlsEnabled(true);
         };
 
         audioEngine.initialiseDeviceManager();
@@ -991,9 +1027,15 @@ namespace sw
         if (key == juce::KeyPress::spaceKey)
         {
             if (audioEngine.isPreviewPlaying())
+            {
+                suppressAutoAdvanceAfterManualStop = true;
                 audioEngine.stop();
+            }
             else
+            {
+                suppressAutoAdvanceAfterManualStop = false;
                 audioEngine.play();
+            }
 
             waveformPanel.setPlayheadNormalized(static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized()));
             previewPanel.setPlaybackActive(audioEngine.isPreviewPlaying());
@@ -1250,7 +1292,17 @@ namespace sw
 
     void MainComponent::refreshOutputDeviceTypeList()
     {
-        previewPanel.setAvailableOutputDeviceTypes(audioEngine.getAvailableOutputDeviceTypes(),
+        auto typeNames = audioEngine.getAvailableOutputDeviceTypes();
+        if (audioEngine.getAvailableOutputDevicesForType("ASIO").isEmpty())
+        {
+            for (int i = typeNames.size(); --i >= 0;)
+            {
+                if (typeNames[i].equalsIgnoreCase("ASIO"))
+                    typeNames.remove(i);
+            }
+        }
+
+        previewPanel.setAvailableOutputDeviceTypes(typeNames,
                                                    audioEngine.getCurrentOutputDeviceType());
     }
 
@@ -1354,8 +1406,19 @@ namespace sw
     {
         if (const auto savedType = catalogDb.getAppSetting("audio.outputDeviceType"))
         {
-            juce::String ignored;
-            audioEngine.setCurrentOutputDeviceType(*savedType, &ignored);
+            const juce::String savedTypeName(*savedType);
+            const auto devicesForType = audioEngine.getAvailableOutputDevicesForType(savedTypeName);
+            if (!devicesForType.isEmpty())
+            {
+                juce::String ignored;
+                audioEngine.setCurrentOutputDeviceType(savedTypeName, &ignored);
+            }
+            else if (savedTypeName != "Windows Audio")
+            {
+                juce::String ignored;
+                if (audioEngine.setCurrentOutputDeviceType("Windows Audio", &ignored))
+                    persistAudioDeviceType("Windows Audio");
+            }
         }
 
         if (const auto savedDevice = catalogDb.getAppSetting("audio.outputDeviceName"))
@@ -1874,7 +1937,10 @@ namespace sw
 
                     safeThis->setPreviewLoadingState(false, requestId);
                     if (playWhenReady)
-                        safeThis->audioEngine.play(); });
+                    {
+                        safeThis->suppressAutoAdvanceAfterManualStop = false;
+                        safeThis->audioEngine.play();
+                    } });
             },
             JobPriority::High});
     }
@@ -1965,7 +2031,16 @@ namespace sw
         }
 
         if (previewPanel.isAutoPlayEnabled() && audioEngine.consumePreviewFinishedFlag())
-            advanceAutoplaySelectionAndPlay();
+        {
+            if (suppressAutoAdvanceAfterManualStop)
+            {
+                suppressAutoAdvanceAfterManualStop = false;
+            }
+            else
+            {
+                advanceAutoplaySelectionAndPlay();
+            }
+        }
     }
 
     void MainComponent::applyEffectiveLoopPlaybackMode()

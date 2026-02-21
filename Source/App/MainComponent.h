@@ -188,6 +188,7 @@ namespace sw
                                         .withName(juce::Font::getDefaultMonospacedFontName())
                                         .withStyle("Regular")};
         bool darkModeEnabled = true;
+        bool suppressAutoAdvanceAfterManualStop = false;
         std::chrono::steady_clock::time_point scanStartTime{};
         std::vector<float> oscilloscopeFrameScratch;
 

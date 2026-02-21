@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(SampleWrangler VERSION 0.9.0 LANGUAGES CXX)
+project(SampleWrangler VERSION 0.9.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -98,7 +98,7 @@ set(UTIL_SOURCES
 # ---------------------------------------------------------------------------
 juce_add_gui_app(SampleWrangler
     PRODUCT_NAME "SampleWrangler"
-    VERSION "0.9.0"
+    VERSION "0.9.1"
     COMPANY_NAME "SampleWrangler"
 )
 
@@ -221,18 +221,22 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS SampleWrangler
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RUNTIME DESTINATION .
+    COMPONENT Runtime
 )
 
 # ---------------------------------------------------------------------------
 # Packaging (CPack)
 # ---------------------------------------------------------------------------
-set(CPACK_PACKAGE_NAME "SampleWrangler")
-set(CPACK_PACKAGE_VENDOR "SampleWrangler")
+set(CPACK_PACKAGE_NAME "Sample Wrangler")
+set(CPACK_PACKAGE_VENDOR "Sample Wrangler")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "SampleWrangler")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Sample Wrangler")
 set(CPACK_PACKAGE_FILE_NAME "SampleWrangler-${PROJECT_VERSION}-win64")
-set(CPACK_MONOLITHIC_INSTALL ON)
+set(CPACK_MONOLITHIC_INSTALL OFF)
+set(CPACK_COMPONENTS_ALL Runtime)
+set(CPACK_INSTALL_CMAKE_PROJECTS
+    "${CMAKE_BINARY_DIR};${CMAKE_PROJECT_NAME};Runtime;/")
 
 if(WIN32)
     set(CPACK_GENERATOR "WIX;ZIP")

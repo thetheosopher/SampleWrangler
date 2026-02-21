@@ -3,32 +3,27 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
     <Fragment>
         <DirectoryRef Id="ProgramMenuFolder">
-            <Directory Id="SW_PROGRAM_MENU_DIR" Name="SampleWrangler"/>
+            <Directory Id="SW_PROGRAM_MENU_DIR" Name="Sample Wrangler"/>
         </DirectoryRef>
     </Fragment>
 
     <Fragment>
         <Component Id="SW_StartMenuShortcut_Component" Directory="SW_PROGRAM_MENU_DIR" Guid="*">
-            <Shortcut Id="SW_StartMenuShortcut" Name="SampleWrangler" Target="[INSTALL_ROOT]bin\SampleWrangler.exe" WorkingDirectory="INSTALL_ROOT"/>
+            <Shortcut Id="SW_StartMenuShortcut" Name="Sample Wrangler" Target="[INSTALL_ROOT]SampleWrangler.exe" WorkingDirectory="INSTALL_ROOT"/>
             <RemoveFolder Id="SW_RemoveProgramMenuFolder" Directory="SW_PROGRAM_MENU_DIR" On="uninstall"/>
             <RegistryValue Root="HKCU" Key="Software\SampleWrangler" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes"/>
         </Component>
 
         <Component Id="SW_DesktopShortcut_Component" Directory="DesktopFolder" Guid="*">
-            <Shortcut Id="SW_DesktopShortcut" Name="SampleWrangler" Target="[INSTALL_ROOT]bin\SampleWrangler.exe" WorkingDirectory="INSTALL_ROOT"/>
+            <Shortcut Id="SW_DesktopShortcut" Name="Sample Wrangler" Target="[INSTALL_ROOT]SampleWrangler.exe" WorkingDirectory="INSTALL_ROOT"/>
             <RegistryValue Root="HKCU" Key="Software\SampleWrangler" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes"/>
         </Component>
     </Fragment>
 
     <Fragment>
         <FeatureRef Id="ProductFeature">
-            <Feature Id="SW_StartMenuShortcut_Feature" Title="Start Menu Shortcut" Description="Create a Start Menu shortcut for SampleWrangler" Level="1" AllowAdvertise="no" Absent="allow">
-                <ComponentRef Id="SW_StartMenuShortcut_Component"/>
-            </Feature>
-
-            <Feature Id="SW_DesktopShortcut_Feature" Title="Desktop Shortcut" Description="Create a Desktop shortcut for SampleWrangler" Level="1" AllowAdvertise="no" Absent="allow">
-                <ComponentRef Id="SW_DesktopShortcut_Component"/>
-            </Feature>
+            <ComponentRef Id="SW_StartMenuShortcut_Component"/>
+            <ComponentRef Id="SW_DesktopShortcut_Component"/>
         </FeatureRef>
     </Fragment>
 </Wix>

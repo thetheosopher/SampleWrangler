@@ -258,6 +258,26 @@ namespace sw
         return ok;
     }
 
+    std::vector<int64_t> CatalogDb::listFileIdsByRoot(int64_t rootId)
+    {
+        SW_DB_GUARD;
+
+        std::vector<int64_t> ids;
+
+        const char *sql = "SELECT id FROM files WHERE root_id = ?";
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return ids;
+
+        sqlite3_bind_int64(stmt, 1, rootId);
+
+        while (sqlite3_step(stmt) == SQLITE_ROW)
+            ids.push_back(sqlite3_column_int64(stmt, 0));
+
+        sqlite3_finalize(stmt);
+        return ids;
+    }
+
     std::vector<FileRecord> CatalogDb::searchFiles(const std::string &query, int limit)
     {
         SW_DB_GUARD;

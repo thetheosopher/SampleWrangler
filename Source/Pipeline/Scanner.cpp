@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <memory>
 #include <atomic>
+#include <cstdio>
 
 namespace fs = std::filesystem;
 
@@ -21,6 +22,73 @@ namespace sw
 
     namespace
     {
+        std::string buildWaveCacheKey(int64_t rootId,
+                                      const std::string &relativePath,
+                                      int64_t sizeBytes,
+                                      int64_t modifiedTime)
+        {
+            const std::string input = std::to_string(rootId) + "|" +
+                                      relativePath + "|" +
+                                      std::to_string(sizeBytes) + "|" +
+                                      std::to_string(modifiedTime);
+
+            constexpr uint64_t fnvOffset = 14695981039346656037ULL;
+            constexpr uint64_t fnvPrime = 1099511628211ULL;
+
+            uint64_t hash = fnvOffset;
+            for (char c : input)
+            {
+                hash ^= static_cast<uint64_t>(static_cast<unsigned char>(c));
+                hash *= fnvPrime;
+            }
+
+            char out[17]{};
+            std::snprintf(out, sizeof(out), "%016llx", static_cast<unsigned long long>(hash));
+            return std::string(out);
+        }
+
+        std::vector<float> buildOverviewPeaks(juce::AudioFormatReader &reader, int targetPeakCount)
+        {
+            const int64_t totalSamples = reader.lengthInSamples;
+            if (totalSamples <= 0)
+                return {};
+
+            const int numChannels = std::max(1, static_cast<int>(reader.numChannels));
+            const int peakCount = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(targetPeakCount, totalSamples)));
+            const int64_t samplesPerPeak = std::max<int64_t>(1, totalSamples / peakCount);
+
+            std::vector<float> peaks(static_cast<size_t>(peakCount), 0.0f);
+            juce::AudioBuffer<float> tempBuffer(numChannels, static_cast<int>(samplesPerPeak));
+
+            for (int i = 0; i < peakCount; ++i)
+            {
+                const int64_t startSample = static_cast<int64_t>(i) * samplesPerPeak;
+                const int64_t remaining = totalSamples - startSample;
+                if (remaining <= 0)
+                    break;
+
+                const int blockSamples = static_cast<int>(std::min<int64_t>(samplesPerPeak, remaining));
+                if (blockSamples <= 0)
+                    break;
+
+                tempBuffer.clear();
+                if (!reader.read(&tempBuffer, 0, blockSamples, startSample, true, true))
+                    break;
+
+                float maxAbs = 0.0f;
+                for (int ch = 0; ch < numChannels; ++ch)
+                {
+                    const float *channelData = tempBuffer.getReadPointer(ch);
+                    for (int s = 0; s < blockSamples; ++s)
+                        maxAbs = std::max(maxAbs, std::abs(channelData[s]));
+                }
+
+                peaks[static_cast<size_t>(i)] = maxAbs;
+            }
+
+            return peaks;
+        }
+
         std::optional<uint32_t> readU32LE(const uint8_t *data, size_t size, size_t offset)
         {
             if (offset + 4 > size)
@@ -364,6 +432,11 @@ namespace sw
     {
     }
 
+    void Scanner::setWaveCacheBlobDb(WaveCacheBlobDb *blobDb) noexcept
+    {
+        waveCacheBlobDb = blobDb;
+    }
+
     bool Scanner::isPlayableExtension(const std::string &ext)
     {
         return ext == "wav" || ext == "aif" || ext == "aiff" || ext == "flac" || ext == "mp3";
@@ -548,6 +621,8 @@ namespace sw
                                         ftime.time_since_epoch())
                                         .count());
 
+                                std::vector<float> overviewPeaks;
+
                                 if (candidate.playable)
                                 {
                                     if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(juce::File(candidate.absolutePath.string()))))
@@ -571,6 +646,9 @@ namespace sw
                                             parseWavAcidAndLoopMetadata(candidate.absolutePath, rec);
                                         else if (candidate.extension == "aif" || candidate.extension == "aiff")
                                             parseAiffAppleLoopMetadata(candidate.absolutePath, rec);
+
+                                        if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen())
+                                            overviewPeaks = buildOverviewPeaks(*reader, 256);
                                     }
                                 }
 
@@ -580,6 +658,17 @@ namespace sw
                                         catalogDb.rollbackTransaction();
                                     markJobFinished();
                                     return;
+                                }
+
+                                if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen() && !overviewPeaks.empty())
+                                {
+                                    const auto cacheKey = buildWaveCacheKey(rec.rootId,
+                                                                            rec.relativePath,
+                                                                            rec.sizeBytes,
+                                                                            rec.modifiedTime);
+
+                                    if (const auto persisted = catalogDb.fileByRootAndRelativePath(rec.rootId, rec.relativePath); persisted.has_value())
+                                        waveCacheBlobDb->upsertPeaksByKey(cacheKey, persisted->id, overviewPeaks);
                                 }
 
                                 if (onProgress)

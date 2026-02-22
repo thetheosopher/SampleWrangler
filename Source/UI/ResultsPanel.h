@@ -5,6 +5,9 @@
 
 #include <functional>
 #include <optional>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace sw
@@ -35,6 +38,8 @@ namespace sw
         std::function<void(const FileRecord &file)> onFileSelected;
         std::function<void(const FileRecord &file)> onFileActivated;
         std::function<std::optional<juce::String>(const FileRecord &file)> onResolveAbsolutePathForFile;
+        std::function<std::optional<std::string>(const FileRecord &file)> onResolveWaveformCachePathForFile;
+        std::function<std::optional<std::vector<float>>(const FileRecord &file)> onResolveWaveformCachePeaksForFile;
 
     private:
         enum class SortMode
@@ -44,6 +49,8 @@ namespace sw
         };
 
         void applySort();
+        const std::vector<float> *loadWaveformPeaksForFile(const FileRecord &file);
+        void paintWaveformPreview(juce::Graphics &g, juce::Rectangle<int> bounds, const FileRecord &item);
 
         // --- ListBoxModel overrides ---
         int getNumRows() override;
@@ -61,6 +68,9 @@ namespace sw
         juce::ComboBox sortSelector;
         juce::ListBox resultsList;
         std::vector<FileRecord> results;
+        std::unordered_map<int64_t, std::vector<float>> waveformPeaksByFileId;
+        std::unordered_set<int64_t> waveformCacheMisses;
+        std::string waveformCacheDirectory;
         SortMode sortMode = SortMode::Name;
         bool darkModeEnabled = false;
 

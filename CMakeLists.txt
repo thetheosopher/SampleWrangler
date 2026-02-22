@@ -62,6 +62,8 @@ set(CATALOG_SOURCES
     Source/Catalog/CatalogSchema.cpp
     Source/Catalog/CatalogSchema.h
     Source/Catalog/CatalogModels.h
+    Source/Catalog/WaveCacheBlobDb.cpp
+    Source/Catalog/WaveCacheBlobDb.h
 )
 
 set(PIPELINE_SOURCES
@@ -275,6 +277,7 @@ add_executable(SampleWranglerScannerAppleLoopTests
     Source/Pipeline/Scanner.cpp
     Source/Pipeline/JobQueue.cpp
     Source/Catalog/CatalogDb.cpp
+    Source/Catalog/WaveCacheBlobDb.cpp
     Source/Catalog/CatalogSchema.cpp
 )
 

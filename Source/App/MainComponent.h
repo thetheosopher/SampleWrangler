@@ -6,6 +6,7 @@
 #include "UI/WaveformPanel.h"
 #include "UI/PreviewPanel.h"
 #include "Catalog/CatalogDb.h"
+#include "Catalog/WaveCacheBlobDb.h"
 #include "Pipeline/JobQueue.h"
 #include "Pipeline/Scanner.h"
 #include "Audio/AudioEngine.h"
@@ -158,6 +159,7 @@ namespace sw
 
         // Core subsystems (non-UI)
         CatalogDb catalogDb;
+        WaveCacheBlobDb waveCacheBlobDb;
         JobQueue jobQueue{[]()
                           {
                               const unsigned int hw = std::thread::hardware_concurrency();

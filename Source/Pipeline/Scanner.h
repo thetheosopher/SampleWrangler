@@ -2,6 +2,7 @@
 
 #include "JobQueue.h"
 #include "Catalog/CatalogDb.h"
+#include "Catalog/WaveCacheBlobDb.h"
 #include <string>
 #include <functional>
 
@@ -32,9 +33,12 @@ namespace sw
         /// Set of extensions that are index-only (REX, NKI, SFZ).
         static bool isIndexOnlyExtension(const std::string &ext);
 
+        void setWaveCacheBlobDb(WaveCacheBlobDb *blobDb) noexcept;
+
     private:
         CatalogDb &catalogDb;
         JobQueue &jobQueue;
+        WaveCacheBlobDb *waveCacheBlobDb = nullptr;
     };
 
 } // namespace sw

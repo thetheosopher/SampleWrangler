@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Pipeline/WaveformCache.h"
 #include "Util/Paths.h"
 
 #include <JuceHeader.h>
@@ -819,6 +820,10 @@ namespace sw
         }
         else
         {
+            const auto waveCacheDbPath = (std::filesystem::path(dbPath).parent_path() / "wave_cache.db").string();
+            waveCacheBlobDb.open(waveCacheDbPath);
+            scanner.setWaveCacheBlobDb(&waveCacheBlobDb);
+
             restoreLayoutSettings();
             restoreThemeSettings();
         }
@@ -847,6 +852,24 @@ namespace sw
                 return std::nullopt;
 
             return juce::String(resolveAbsolutePath(rootPath, file.relativePath));
+        };
+
+        resultsPanel.onResolveWaveformCachePathForFile = [this](const FileRecord &file) -> std::optional<std::string>
+        {
+            const auto cacheKey = WaveformCache::buildCacheKey(file.rootId, file.relativePath, file.sizeBytes, file.modifiedTime);
+            if (const auto cacheEntry = catalogDb.cacheEntryByKey(cacheKey); cacheEntry.has_value())
+                return cacheEntry->cachePath;
+
+            return std::nullopt;
+        };
+
+        resultsPanel.onResolveWaveformCachePeaksForFile = [this](const FileRecord &file) -> std::optional<std::vector<float>>
+        {
+            if (!waveCacheBlobDb.isOpen())
+                return std::nullopt;
+
+            const auto cacheKey = WaveformCache::buildCacheKey(file.rootId, file.relativePath, file.sizeBytes, file.modifiedTime);
+            return waveCacheBlobDb.peaksByKey(cacheKey);
         };
 
         previewPanel.onPlayRequested = [this]
@@ -2286,6 +2309,8 @@ namespace sw
                 if (safeThis == nullptr || result != 1)
                     return;
 
+                const auto fileIdsToDelete = safeThis->catalogDb.listFileIdsByRoot(rootIdToDelete);
+
                 if (!safeThis->catalogDb.removeRoot(rootIdToDelete))
                 {
                     juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
@@ -2293,6 +2318,9 @@ namespace sw
                                                            "Unable to delete selected source.");
                     return;
                 }
+
+                if (!fileIdsToDelete.empty())
+                    safeThis->waveCacheBlobDb.removeByFileIds(fileIdsToDelete);
 
                 if (safeThis->selectedRootFilterId.has_value() && *safeThis->selectedRootFilterId == rootIdToDelete)
                     safeThis->selectedRootFilterId.reset();
@@ -2339,7 +2367,15 @@ namespace sw
             return;
         }
 
-        toolbarFeedbackText = "Database compressed";
+        if (waveCacheBlobDb.isOpen() && !waveCacheBlobDb.vacuum())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                   "Database Compression Failed",
+                                                   "Main database compressed, but waveform cache database compression failed.");
+            return;
+        }
+
+        toolbarFeedbackText = "Databases compressed";
         toolbarFeedbackTicksRemaining = 60;
         repaint(0, 0, getWidth(), kToolbarHeight);
     }

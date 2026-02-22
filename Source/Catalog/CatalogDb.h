@@ -40,6 +40,7 @@ namespace sw
         // ----- Files -----
         bool upsertFile(const FileRecord &rec);
         bool removeFilesByRoot(int64_t rootId);
+        std::vector<int64_t> listFileIdsByRoot(int64_t rootId);
         std::vector<FileRecord> searchFiles(const std::string &query, int limit = 200);
         std::vector<FileRecord> listRecentFiles(int limit = 200);
         std::vector<FileRecord> searchFilesByRoot(int64_t rootId, const std::string &query, int limit = 200);

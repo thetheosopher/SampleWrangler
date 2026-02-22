@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(SampleWrangler VERSION 0.9.2 LANGUAGES CXX)
+project(SampleWrangler VERSION 0.9.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -100,7 +100,7 @@ set(UTIL_SOURCES
 # ---------------------------------------------------------------------------
 juce_add_gui_app(SampleWrangler
     PRODUCT_NAME "SampleWrangler"
-    VERSION "0.9.2"
+    VERSION "0.9.3"
     COMPANY_NAME "SampleWrangler"
 )
 
@@ -235,6 +235,7 @@ set(CPACK_PACKAGE_VENDOR "Sample Wrangler")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Sample Wrangler")
 set(CPACK_PACKAGE_FILE_NAME "SampleWrangler-${PROJECT_VERSION}-win64")
+set(CPACK_PACKAGE_EXECUTABLES "SampleWrangler;Sample Wrangler")
 set(CPACK_MONOLITHIC_INSTALL OFF)
 set(CPACK_COMPONENTS_ALL Runtime)
 set(CPACK_INSTALL_CMAKE_PROJECTS
@@ -245,6 +246,7 @@ if(WIN32)
     set(CPACK_WIX_UPGRADE_GUID "E795F1BB-4E44-4F6C-BAE6-4371EA683986")
     set(CPACK_WIX_UI_REF "WixUI_FeatureTree")
     set(CPACK_WIX_PROPERTY_ARPSYSTEMCOMPONENT "0")
+    set(CPACK_WIX_PROPERTY_ARPNAME "Sample Wrangler")
     set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/images/SampleWrangler.ico")
     set(CPACK_WIX_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SampleWranglerShortcuts.wxs")
 endif()

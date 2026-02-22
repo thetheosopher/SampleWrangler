@@ -630,9 +630,12 @@ namespace sw
                                       juce::String &nameOut)
                 : nameResult(nameOut)
             {
+                auto editableName = currentName;
+                editableName = editableName.replaceCharacter('.', ' ');
+
                 nameEditor.setMultiLine(false);
                 nameEditor.setScrollbarsShown(false);
-                nameEditor.setText(currentName, false);
+                nameEditor.setText(editableName, false);
                 nameEditor.onReturnKey = [this]
                 {
                     submitAndClose();

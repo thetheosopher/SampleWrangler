@@ -72,6 +72,7 @@ namespace sw
 
         if (db != nullptr)
         {
+            sqlite3_wal_checkpoint_v2(db, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
             sqlite3_close(db);
             db = nullptr;
         }

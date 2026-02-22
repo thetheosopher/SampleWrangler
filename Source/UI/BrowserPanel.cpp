@@ -121,6 +121,32 @@ namespace sw
             return;
 
         const auto clickedRootId = roots[static_cast<size_t>(*rowIndex)].id;
+
+        if (event.mods.isPopupMenu())
+        {
+            selectedRootId = clickedRootId;
+            repaint();
+
+            if (onRootSelected)
+                onRootSelected(selectedRootId);
+
+            juce::PopupMenu menu;
+            menu.addItem(1, "Rename");
+
+            auto safeThis = juce::Component::SafePointer<BrowserPanel>(this);
+            const auto clickArea = juce::Rectangle<int>(event.getScreenX(), event.getScreenY(), 1, 1);
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(clickArea),
+                               [safeThis](int selected)
+                               {
+                                   if (safeThis == nullptr)
+                                       return;
+
+                                   if (selected == 1 && safeThis->onRenameSelectedRootRequested)
+                                       safeThis->onRenameSelectedRootRequested();
+                               });
+            return;
+        }
+
         if (selectedRootId.has_value() && *selectedRootId == clickedRootId)
             selectedRootId.reset();
         else

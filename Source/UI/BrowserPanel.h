@@ -30,6 +30,7 @@ namespace sw
         void setDarkMode(bool enabled);
 
         std::function<void(std::optional<int64_t> rootId)> onRootSelected;
+        std::function<void()> onRenameSelectedRootRequested;
         std::function<void()> onDeleteSelectedRootRequested;
 
     private:

@@ -48,6 +48,7 @@ namespace sw
 
         if (db)
         {
+            sqlite3_wal_checkpoint_v2(db, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
             sqlite3_close(db);
             db = nullptr;
         }
@@ -90,6 +91,23 @@ namespace sw
             return false;
 
         sqlite3_bind_text(stmt, 1, newPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 2, rootId);
+
+        const bool ok = sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0;
+        sqlite3_finalize(stmt);
+        return ok;
+    }
+
+    bool CatalogDb::updateRootLabel(int64_t rootId, const std::string &newLabel)
+    {
+        SW_DB_GUARD;
+
+        const char *sql = "UPDATE roots SET label = ? WHERE id = ?";
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return false;
+
+        sqlite3_bind_text(stmt, 1, newLabel.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(stmt, 2, rootId);
 
         const bool ok = sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0;

@@ -623,6 +623,83 @@ namespace sw
             juce::String &newPathResult;
         };
 
+        class RenameSourceDialogContent final : public juce::Component
+        {
+        public:
+            RenameSourceDialogContent(const juce::String &currentName,
+                                      juce::String &nameOut)
+                : nameResult(nameOut)
+            {
+                nameEditor.setMultiLine(false);
+                nameEditor.setScrollbarsShown(false);
+                nameEditor.setText(currentName, false);
+                nameEditor.onReturnKey = [this]
+                {
+                    submitAndClose();
+                };
+                addAndMakeVisible(nameEditor);
+
+                renameButton.setButtonText("Rename");
+                renameButton.onClick = [this]
+                {
+                    submitAndClose();
+                };
+                addAndMakeVisible(renameButton);
+
+                cancelButton.setButtonText("Cancel");
+                cancelButton.onClick = [this]
+                {
+                    if (auto *window = findParentComponentOfClass<juce::DialogWindow>())
+                        window->exitModalState(0);
+                };
+                addAndMakeVisible(cancelButton);
+
+                nameEditor.grabKeyboardFocus();
+                nameEditor.selectAll();
+            }
+
+            void paint(juce::Graphics &g) override
+            {
+                g.fillAll(juce::Colour(0xff22272e));
+
+                g.setColour(juce::Colours::white);
+                g.setFont(14.0f);
+                g.drawText("Source name", 12, 16, getWidth() - 24, 22, juce::Justification::centredLeft, false);
+            }
+
+            void resized() override
+            {
+                nameEditor.setBounds(12, 44, getWidth() - 24, 28);
+
+                constexpr int actionWidth = 102;
+                cancelButton.setBounds(getWidth() - 12 - actionWidth, 94, actionWidth, 30);
+                renameButton.setBounds(cancelButton.getX() - 8 - actionWidth, 94, actionWidth, 30);
+            }
+
+        private:
+            void submitAndClose()
+            {
+                const auto trimmed = nameEditor.getText().trim();
+                if (trimmed.isEmpty())
+                {
+                    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                           "Rename Source",
+                                                           "Source name cannot be blank.");
+                    nameEditor.grabKeyboardFocus();
+                    return;
+                }
+
+                nameResult = trimmed;
+                if (auto *window = findParentComponentOfClass<juce::DialogWindow>())
+                    window->exitModalState(1);
+            }
+
+            juce::TextEditor nameEditor;
+            juce::TextButton renameButton;
+            juce::TextButton cancelButton;
+            juce::String &nameResult;
+        };
+
         std::unique_ptr<juce::Drawable> createThemeIcon(const juce::Colour colour, bool showSun)
         {
             constexpr int iconSizePx = 96;
@@ -884,6 +961,11 @@ namespace sw
         browserPanel.onDeleteSelectedRootRequested = [this]()
         {
             handleDeleteRootClicked();
+        };
+
+        browserPanel.onRenameSelectedRootRequested = [this]()
+        {
+            handleRenameSourceClicked();
         };
 
         addRootToolbarButton.setImages(createFolderIcon(juce::Colours::white).release(),
@@ -2346,22 +2428,24 @@ namespace sw
         rootChooser->launchAsync(chooserFlags, [this](const juce::FileChooser &chooser)
                                  {
             const auto selected = chooser.getResult();
+            rootChooser.reset();
             if (!selected.isDirectory())
                 return;
 
-            const auto path = selected.getFullPathName().toStdString();
-            const auto label = selected.getFileName().toStdString();
+            const juce::String selectedPath = selected.getFullPathName();
+            const juce::String finalLabel = selected.getFileName();
+            const auto path = selectedPath.toStdString();
+            const auto label = finalLabel.toStdString();
 
             if (!catalogDb.addRoot(path, label))
             {
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
                                                        "Add Source Failed",
-                                                       "Could not add source:\n" + selected.getFullPathName());
+                                                       "Could not add source:\n" + selectedPath);
                 return;
             }
 
             catalogDb.setAppSetting("roots.lastAddedPath", path);
-
             refreshRoots();
             refreshResults();
 
@@ -2374,7 +2458,63 @@ namespace sw
             if (it == roots.end())
                 return;
 
-            startRootScan(it->id, path, juce::String(label)); });
+            startRootScan(it->id, path, finalLabel); });
+    }
+
+    void MainComponent::handleRenameSourceClicked()
+    {
+        if (!selectedRootFilterId.has_value())
+            return;
+
+        const auto roots = catalogDb.allRoots();
+        const auto it = std::find_if(roots.begin(), roots.end(), [this](const RootRecord &root)
+                                     { return root.id == *selectedRootFilterId; });
+        if (it == roots.end())
+            return;
+
+        const int64_t rootId = it->id;
+        const auto currentName = juce::String(it->label);
+        auto newName = std::make_shared<juce::String>(currentName);
+
+        auto dialogContent = std::make_unique<RenameSourceDialogContent>(currentName, *newName);
+        dialogContent->setSize(560, 140);
+
+        juce::DialogWindow::LaunchOptions options;
+        options.content.setOwned(dialogContent.release());
+        options.dialogTitle = "Rename Source";
+        options.dialogBackgroundColour = darkModeEnabled ? juce::Colour(0xff22272e) : juce::Colour(0xfff7f9fc);
+        options.componentToCentreAround = this;
+        options.escapeKeyTriggersCloseButton = true;
+        options.useNativeTitleBar = true;
+        options.resizable = false;
+
+        auto *window = options.create();
+        if (window == nullptr)
+            return;
+
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        window->enterModalState(true,
+                                juce::ModalCallbackFunction::create([safeThis, rootId, currentName, newName](int result)
+                                                                    {
+                                                                        if (safeThis == nullptr || result != 1)
+                                                                            return;
+
+                                                                        const auto updatedName = newName->trim();
+                                                                        if (updatedName == currentName)
+                                                                            return;
+
+                                                                        if (!safeThis->catalogDb.updateRootLabel(rootId, updatedName.toStdString()))
+                                                                        {
+                                                                            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                                                                                   "Rename Source Failed",
+                                                                                                                   "Unable to rename the selected source.");
+                                                                            return;
+                                                                        }
+
+                                                                        safeThis->refreshRoots();
+                                                                        safeThis->refreshResults(safeThis->currentSearchQuery);
+                                                                        safeThis->showToolbarToast("Source renamed to: " + updatedName, 120); }),
+                                true);
     }
 
     void MainComponent::startRootScan(int64_t rootId,

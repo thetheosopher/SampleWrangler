@@ -70,6 +70,7 @@ namespace sw
         void handleRescanSelectedClicked();
         void cancelScan();
         void handleOpenSourceInExplorerClicked();
+        void handleRenameSourceClicked();
         void handleRemapSourceClicked();
         void handleDeleteRootClicked();
         void handleVacuumDatabaseClicked();

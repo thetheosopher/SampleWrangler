@@ -34,6 +34,7 @@ namespace sw
 
         // ----- Sources -----
         bool addRoot(const std::string &path, const std::string &label);
+        bool updateRootLabel(int64_t rootId, const std::string &newLabel);
         bool updateRootPath(int64_t rootId, const std::string &newPath);
         bool removeRoot(int64_t rootId);
         std::vector<RootRecord> allRoots();

@@ -80,6 +80,23 @@ namespace sw
         return ok;
     }
 
+    bool CatalogDb::updateRootPath(int64_t rootId, const std::string &newPath)
+    {
+        SW_DB_GUARD;
+
+        const char *sql = "UPDATE roots SET path = ? WHERE id = ?";
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return false;
+
+        sqlite3_bind_text(stmt, 1, newPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 2, rootId);
+
+        const bool ok = sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0;
+        sqlite3_finalize(stmt);
+        return ok;
+    }
+
     bool CatalogDb::removeRoot(int64_t rootId)
     {
         SW_DB_GUARD;

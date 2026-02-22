@@ -494,6 +494,135 @@ namespace sw
             return drawable;
         }
 
+        std::unique_ptr<juce::Drawable> createRemapIcon(const juce::Colour colour)
+        {
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            juce::Path folder;
+            folder.addRoundedRectangle(3.0f, 8.0f, 11.5f, 10.2f, 1.6f);
+            juce::Path folderTab;
+            folderTab.addRoundedRectangle(4.2f, 5.6f, 5.2f, 2.6f, 0.8f);
+
+            g.setColour(juce::Colour(0xffd6a149));
+            g.fillPath(folder);
+            g.setColour(juce::Colour(0xfff2cc73));
+            g.fillPath(folderTab);
+            g.setColour(juce::Colour(0xc06b4a1f));
+            g.strokePath(folder, juce::PathStrokeType(0.75f));
+
+            juce::Path arrow;
+            arrow.startNewSubPath(12.5f, 12.0f);
+            arrow.lineTo(20.0f, 12.0f);
+            arrow.startNewSubPath(17.2f, 9.2f);
+            arrow.lineTo(20.0f, 12.0f);
+            arrow.lineTo(17.2f, 14.8f);
+
+            g.setColour(juce::Colour(0xff4ea3ff));
+            g.strokePath(arrow, juce::PathStrokeType(1.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.22f)
+                                         : colour.withAlpha(0.14f);
+            g.setColour(tintOverlay);
+            g.strokePath(arrow, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
+            return drawable;
+        }
+
+        class RemapSourceDialogContent final : public juce::Component
+        {
+        public:
+            RemapSourceDialogContent(const juce::String &currentPath,
+                                     juce::String &newPathOut)
+                : newPathResult(newPathOut)
+            {
+                currentPathEditor.setReadOnly(true);
+                currentPathEditor.setMultiLine(false);
+                currentPathEditor.setScrollbarsShown(true);
+                currentPathEditor.setText(currentPath, false);
+                addAndMakeVisible(currentPathEditor);
+
+                newPathEditor.setMultiLine(false);
+                newPathEditor.setScrollbarsShown(true);
+                newPathEditor.setText(currentPath, false);
+                addAndMakeVisible(newPathEditor);
+
+                browseButton.setButtonText("...");
+                browseButton.onClick = [this]
+                {
+                    const auto seed = juce::File(newPathEditor.getText());
+                    chooser = std::make_unique<juce::FileChooser>("Select new source folder", seed);
+                    constexpr auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories;
+                    juce::Component::SafePointer<RemapSourceDialogContent> safeThis(this);
+                    chooser->launchAsync(flags, [safeThis](const juce::FileChooser &fileChooser)
+                                         {
+                                             if (safeThis == nullptr)
+                                                 return;
+
+                                             const auto selected = fileChooser.getResult();
+                                             if (selected.isDirectory())
+                                                 safeThis->newPathEditor.setText(selected.getFullPathName(), true); });
+                };
+                addAndMakeVisible(browseButton);
+
+                okButton.setButtonText("Remap");
+                okButton.onClick = [this]
+                {
+                    newPathResult = newPathEditor.getText().trim();
+                    if (auto *window = findParentComponentOfClass<juce::DialogWindow>())
+                        window->exitModalState(1);
+                };
+                addAndMakeVisible(okButton);
+
+                cancelButton.setButtonText("Cancel");
+                cancelButton.onClick = [this]
+                {
+                    if (auto *window = findParentComponentOfClass<juce::DialogWindow>())
+                        window->exitModalState(0);
+                };
+                addAndMakeVisible(cancelButton);
+            }
+
+            void paint(juce::Graphics &g) override
+            {
+                g.fillAll(juce::Colour(0xff22272e));
+
+                g.setColour(juce::Colours::white);
+                g.setFont(14.0f);
+                g.drawText("Current path", 12, 10, getWidth() - 24, 22, juce::Justification::centredLeft, false);
+                g.drawText("New path", 12, 72, getWidth() - 24, 22, juce::Justification::centredLeft, false);
+            }
+
+            void resized() override
+            {
+                currentPathEditor.setBounds(12, 32, getWidth() - 24, 28);
+
+                constexpr int browseWidth = 48;
+                newPathEditor.setBounds(12, 94, getWidth() - 24 - browseWidth - 6, 28);
+                browseButton.setBounds(newPathEditor.getRight() + 6, 94, browseWidth, 28);
+
+                constexpr int actionWidth = 98;
+                cancelButton.setBounds(getWidth() - 12 - actionWidth, 138, actionWidth, 30);
+                okButton.setBounds(cancelButton.getX() - 8 - actionWidth, 138, actionWidth, 30);
+            }
+
+        private:
+            juce::TextEditor currentPathEditor;
+            juce::TextEditor newPathEditor;
+            juce::TextButton browseButton;
+            juce::TextButton okButton;
+            juce::TextButton cancelButton;
+            std::unique_ptr<juce::FileChooser> chooser;
+            juce::String &newPathResult;
+        };
+
         std::unique_ptr<juce::Drawable> createThemeIcon(const juce::Colour colour, bool showSun)
         {
             constexpr int iconSizePx = 96;
@@ -572,6 +701,7 @@ namespace sw
         addAndMakeVisible(toolbar);
         addAndMakeVisible(addRootToolbarButton);
         addAndMakeVisible(openSourceInExplorerToolbarButton);
+        addAndMakeVisible(remapSourceToolbarButton);
         addAndMakeVisible(deleteRootToolbarButton);
         addAndMakeVisible(rescanToolbarButton);
         addAndMakeVisible(cancelScanToolbarButton);
@@ -581,6 +711,7 @@ namespace sw
 
         addRootToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
         openSourceInExplorerToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        remapSourceToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
         deleteRootToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
         rescanToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
         cancelScanToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
@@ -771,6 +902,15 @@ namespace sw
         openSourceInExplorerToolbarButton.onClick = [this]
         {
             handleOpenSourceInExplorerClicked();
+        };
+
+        remapSourceToolbarButton.setImages(createRemapIcon(juce::Colours::white).release(),
+                                           createRemapIcon(juce::Colours::lightgrey).release(),
+                                           createRemapIcon(juce::Colour(0xff9ec4e6)).release());
+        remapSourceToolbarButton.setTooltip("Remap selected source to a new folder path");
+        remapSourceToolbarButton.onClick = [this]
+        {
+            handleRemapSourceClicked();
         };
 
         deleteRootToolbarButton.setImages(createDeleteIcon(juce::Colours::white).release(),
@@ -1061,6 +1201,7 @@ namespace sw
     {
         addRootToolbarButton.setLookAndFeel(nullptr);
         openSourceInExplorerToolbarButton.setLookAndFeel(nullptr);
+        remapSourceToolbarButton.setLookAndFeel(nullptr);
         deleteRootToolbarButton.setLookAndFeel(nullptr);
         rescanToolbarButton.setLookAndFeel(nullptr);
         cancelScanToolbarButton.setLookAndFeel(nullptr);
@@ -1651,6 +1792,9 @@ namespace sw
         openSourceInExplorerToolbarButton.setImages(createExplorerIcon(normalIconColour).release(),
                                                     createExplorerIcon(hoverIconColour).release(),
                                                     createExplorerIcon(pressedIconColour).release());
+        remapSourceToolbarButton.setImages(createRemapIcon(normalIconColour).release(),
+                                           createRemapIcon(hoverIconColour).release(),
+                                           createRemapIcon(pressedIconColour).release());
         deleteRootToolbarButton.setImages(createDeleteIcon(normalIconColour).release(),
                                           createDeleteIcon(hoverIconColour).release(),
                                           createDeleteIcon(pressedIconColour).release());
@@ -2437,6 +2581,98 @@ namespace sw
         rootFolder.revealToUser();
     }
 
+    void MainComponent::handleRemapSourceClicked()
+    {
+        if (!selectedRootFilterId.has_value() || scanInProgress)
+            return;
+
+        const auto roots = catalogDb.allRoots();
+        const auto it = std::find_if(roots.begin(), roots.end(), [this](const RootRecord &root)
+                                     { return root.id == *selectedRootFilterId; });
+        if (it == roots.end())
+            return;
+
+        const int64_t rootId = it->id;
+        const juce::String rootLabel(it->label);
+        const juce::String currentPath(it->path);
+        auto newPath = std::make_shared<juce::String>();
+
+        auto dialogContent = std::make_unique<RemapSourceDialogContent>(currentPath, *newPath);
+        dialogContent->setSize(960, 180);
+
+        juce::DialogWindow::LaunchOptions options;
+        options.content.setOwned(dialogContent.release());
+        options.dialogTitle = "Remap Source";
+        options.dialogBackgroundColour = darkModeEnabled ? juce::Colour(0xff22272e) : juce::Colour(0xfff7f9fc);
+        options.componentToCentreAround = this;
+        options.escapeKeyTriggersCloseButton = true;
+        options.useNativeTitleBar = true;
+        options.resizable = false;
+
+        auto *window = options.create();
+        if (window == nullptr)
+            return;
+
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        window->enterModalState(true,
+                                juce::ModalCallbackFunction::create([safeThis, rootId, rootLabel, currentPath, newPath](int result)
+                                                                    {
+                                                                        if (safeThis == nullptr || result != 1)
+                                                                            return;
+
+                                                                        auto updatedPath = newPath->trim();
+                                                                        if (updatedPath.isEmpty())
+                                                                        {
+                                                                            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                                                                                   "Remap Source",
+                                                                                                                   "Please enter a new folder path.");
+                                                                            return;
+                                                                        }
+
+                                                                        if (updatedPath == currentPath)
+                                                                            return;
+
+                                                                        juce::File newFolder(updatedPath);
+                                                                        if (!newFolder.exists() || !newFolder.isDirectory())
+                                                                        {
+                                                                            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                                                                                   "Remap Source",
+                                                                                                                   "The new folder path is not available:\n" + updatedPath);
+                                                                            return;
+                                                                        }
+
+                                                                        if (!safeThis->catalogDb.updateRootPath(rootId, updatedPath.toStdString()))
+                                                                        {
+                                                                            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                                                                                   "Remap Source Failed",
+                                                                                                                   "Unable to remap source path. The new path may already be in use.");
+                                                                            return;
+                                                                        }
+
+                                                                        safeThis->catalogDb.setAppSetting("roots.lastAddedPath", updatedPath.toStdString());
+                                                                        safeThis->refreshRoots();
+                                                                        safeThis->refreshResults(safeThis->currentSearchQuery);
+                                                                        safeThis->showToolbarToast("Source remapped to: " + updatedPath, 120);
+
+                                                                        juce::AlertWindow::showOkCancelBox(
+                                                                            juce::AlertWindow::QuestionIcon,
+                                                                            "Rescan Remapped Source",
+                                                                            "Source path updated successfully. Do you want to rescan this source now?",
+                                                                            "Rescan",
+                                                                            "Later",
+                                                                            nullptr,
+                                                                            juce::ModalCallbackFunction::create([safeThis, rootId, rootLabel, updatedPath](int rescanResult)
+                                                                                                                {
+                                                                                                                    if (safeThis == nullptr || rescanResult != 1 || safeThis->scanInProgress)
+                                                                                                                        return;
+
+                                                                                                                    safeThis->startRootScan(rootId,
+                                                                                                                                            updatedPath.toStdString(),
+                                                                                                                                            rootLabel);
+                                                                                                                })); }),
+                                true);
+    }
+
     void MainComponent::handleVacuumDatabaseClicked()
     {
         if (scanInProgress)
@@ -2472,6 +2708,7 @@ namespace sw
 
         addRootToolbarButton.setEnabled(!inProgress);
         openSourceInExplorerToolbarButton.setEnabled(hasSelectedSource);
+        remapSourceToolbarButton.setEnabled(!inProgress && hasSelectedSource);
         deleteRootToolbarButton.setEnabled(!inProgress && hasSelectedSource);
         rescanToolbarButton.setEnabled(canScan);
         cancelScanToolbarButton.setEnabled(inProgress);
@@ -2523,6 +2760,8 @@ namespace sw
         addRootToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         openSourceInExplorerToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        remapSourceToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         rescanToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);

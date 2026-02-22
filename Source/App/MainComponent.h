@@ -70,6 +70,7 @@ namespace sw
         void handleRescanSelectedClicked();
         void cancelScan();
         void handleOpenSourceInExplorerClicked();
+        void handleRemapSourceClicked();
         void handleDeleteRootClicked();
         void handleVacuumDatabaseClicked();
         void resetLayout();
@@ -144,6 +145,7 @@ namespace sw
         juce::Component toolbar;
         juce::DrawableButton addRootToolbarButton{"Add Source", juce::DrawableButton::ImageFitted};
         juce::DrawableButton openSourceInExplorerToolbarButton{"Open Source In Explorer", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton remapSourceToolbarButton{"Remap Source", juce::DrawableButton::ImageFitted};
         juce::DrawableButton deleteRootToolbarButton{"Delete Source", juce::DrawableButton::ImageFitted};
         juce::DrawableButton rescanToolbarButton{"Scan Sources", juce::DrawableButton::ImageFitted};
         juce::DrawableButton cancelScanToolbarButton{"Cancel Scan", juce::DrawableButton::ImageFitted};

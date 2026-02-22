@@ -127,6 +127,19 @@ namespace sw
             bool darkModeEnabled = true;
         };
 
+        class ToolbarButtonLookAndFeel final : public juce::LookAndFeel_V4
+        {
+        public:
+            void setDarkMode(bool enabled) { darkModeEnabled = enabled; }
+            void drawDrawableButton(juce::Graphics &g,
+                                    juce::DrawableButton &button,
+                                    bool shouldDrawButtonAsHighlighted,
+                                    bool shouldDrawButtonAsDown) override;
+
+        private:
+            bool darkModeEnabled = true;
+        };
+
         // Owned sub-panels
         juce::Component toolbar;
         juce::DrawableButton addRootToolbarButton{"Add Source", juce::DrawableButton::ImageFitted};
@@ -138,6 +151,7 @@ namespace sw
         juce::DrawableButton vacuumDbToolbarButton{"Compress Database", juce::DrawableButton::ImageFitted};
         juce::DrawableButton themeToolbarButton{"Theme", juce::DrawableButton::ImageFitted};
         TooltipLookAndFeel tooltipLookAndFeel;
+        ToolbarButtonLookAndFeel toolbarButtonLookAndFeel;
         juce::TooltipWindow tooltipWindow{this};
 
         BrowserPanel browserPanel;

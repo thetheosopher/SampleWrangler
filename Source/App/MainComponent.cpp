@@ -578,6 +578,16 @@ namespace sw
         addAndMakeVisible(resetLayoutToolbarButton);
         addAndMakeVisible(vacuumDbToolbarButton);
         addAndMakeVisible(themeToolbarButton);
+
+        addRootToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        openSourceInExplorerToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        deleteRootToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        rescanToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        cancelScanToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        resetLayoutToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        vacuumDbToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        themeToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+
         addAndMakeVisible(browserPanel);
         addAndMakeVisible(leftRightSplitter);
         addAndMakeVisible(resultsPanel);
@@ -746,7 +756,8 @@ namespace sw
         };
 
         addRootToolbarButton.setImages(createFolderIcon(juce::Colours::white).release(),
-                                       createFolderIcon(juce::Colours::lightgrey).release());
+                                       createFolderIcon(juce::Colours::lightgrey).release(),
+                                       createFolderIcon(juce::Colour(0xff9ec4e6)).release());
         addRootToolbarButton.setTooltip("Add a source folder to the library");
         addRootToolbarButton.onClick = [this]
         {
@@ -754,7 +765,8 @@ namespace sw
         };
 
         openSourceInExplorerToolbarButton.setImages(createExplorerIcon(juce::Colours::white).release(),
-                                                    createExplorerIcon(juce::Colours::lightgrey).release());
+                                                    createExplorerIcon(juce::Colours::lightgrey).release(),
+                                                    createExplorerIcon(juce::Colour(0xff9ec4e6)).release());
         openSourceInExplorerToolbarButton.setTooltip("Open selected source in Windows File Explorer");
         openSourceInExplorerToolbarButton.onClick = [this]
         {
@@ -762,7 +774,8 @@ namespace sw
         };
 
         deleteRootToolbarButton.setImages(createDeleteIcon(juce::Colours::white).release(),
-                                          createDeleteIcon(juce::Colours::lightgrey).release());
+                                          createDeleteIcon(juce::Colours::lightgrey).release(),
+                                          createDeleteIcon(juce::Colour(0xff9ec4e6)).release());
         deleteRootToolbarButton.setTooltip("Delete selected source and its indexed files");
         deleteRootToolbarButton.onClick = [this]
         {
@@ -770,7 +783,8 @@ namespace sw
         };
 
         rescanToolbarButton.setImages(createRescanIcon(juce::Colours::white).release(),
-                                      createRescanIcon(juce::Colours::lightgrey).release());
+                                      createRescanIcon(juce::Colours::lightgrey).release(),
+                                      createRescanIcon(juce::Colour(0xff9ec4e6)).release());
         rescanToolbarButton.setTooltip("Rescan selected source");
         rescanToolbarButton.onClick = [this]
         {
@@ -778,7 +792,8 @@ namespace sw
         };
 
         cancelScanToolbarButton.setImages(createCancelIcon(juce::Colours::white).release(),
-                                          createCancelIcon(juce::Colours::lightgrey).release());
+                                          createCancelIcon(juce::Colours::lightgrey).release(),
+                                          createCancelIcon(juce::Colour(0xff9ec4e6)).release());
         cancelScanToolbarButton.setTooltip("Cancel the active scan");
         cancelScanToolbarButton.onClick = [this]
         {
@@ -786,7 +801,8 @@ namespace sw
         };
 
         resetLayoutToolbarButton.setImages(createResetLayoutIcon(juce::Colours::white).release(),
-                                           createResetLayoutIcon(juce::Colours::lightgrey).release());
+                                           createResetLayoutIcon(juce::Colours::lightgrey).release(),
+                                           createResetLayoutIcon(juce::Colour(0xff9ec4e6)).release());
         resetLayoutToolbarButton.setTooltip("Reset splitter layout to defaults");
         resetLayoutToolbarButton.onClick = [this]
         {
@@ -794,7 +810,8 @@ namespace sw
         };
 
         vacuumDbToolbarButton.setImages(createVacuumIcon(juce::Colours::white).release(),
-                                        createVacuumIcon(juce::Colours::lightgrey).release());
+                                        createVacuumIcon(juce::Colours::lightgrey).release(),
+                                        createVacuumIcon(juce::Colour(0xff9ec4e6)).release());
         vacuumDbToolbarButton.setTooltip("Compress database (VACUUM)");
         vacuumDbToolbarButton.onClick = [this]
         {
@@ -1042,6 +1059,14 @@ namespace sw
 
     MainComponent::~MainComponent()
     {
+        addRootToolbarButton.setLookAndFeel(nullptr);
+        openSourceInExplorerToolbarButton.setLookAndFeel(nullptr);
+        deleteRootToolbarButton.setLookAndFeel(nullptr);
+        rescanToolbarButton.setLookAndFeel(nullptr);
+        cancelScanToolbarButton.setLookAndFeel(nullptr);
+        resetLayoutToolbarButton.setLookAndFeel(nullptr);
+        vacuumDbToolbarButton.setLookAndFeel(nullptr);
+        themeToolbarButton.setLookAndFeel(nullptr);
         tooltipWindow.setLookAndFeel(nullptr);
     }
 
@@ -1267,6 +1292,27 @@ namespace sw
                        false);
             y += lineHeight + lineGap;
         }
+    }
+
+    void MainComponent::ToolbarButtonLookAndFeel::drawDrawableButton(juce::Graphics &g,
+                                                                     juce::DrawableButton &button,
+                                                                     bool shouldDrawButtonAsHighlighted,
+                                                                     bool shouldDrawButtonAsDown)
+    {
+        const auto bounds = button.getLocalBounds().toFloat().reduced(2.0f);
+
+        if (shouldDrawButtonAsDown)
+        {
+            g.setColour(darkModeEnabled ? juce::Colour(0x663b5f84) : juce::Colour(0x66397ab8));
+            g.fillRoundedRectangle(bounds, 5.0f);
+        }
+        else if (shouldDrawButtonAsHighlighted)
+        {
+            g.setColour(darkModeEnabled ? juce::Colour(0x4c354a62) : juce::Colour(0x4c8fb6dc));
+            g.fillRoundedRectangle(bounds, 5.0f);
+        }
+
+        juce::LookAndFeel_V4::drawDrawableButton(g, button, shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
     }
 
     void MainComponent::refreshRoots()
@@ -1562,6 +1608,7 @@ namespace sw
 
         const auto normalIconColour = darkModeEnabled ? juce::Colours::white : juce::Colour(0xff202020);
         const auto hoverIconColour = darkModeEnabled ? juce::Colours::lightgrey : juce::Colour(0xff4a4a4a);
+        const auto pressedIconColour = darkModeEnabled ? juce::Colour(0xff8fb5d8) : juce::Colour(0xff2f5f8d);
 
         browserPanel.setDarkMode(darkModeEnabled);
         resultsPanel.setDarkMode(darkModeEnabled);
@@ -1599,25 +1646,34 @@ namespace sw
         midiInputCombo.setColour(juce::ComboBox::arrowColourId, arrowColour);
 
         addRootToolbarButton.setImages(createFolderIcon(normalIconColour).release(),
-                                       createFolderIcon(hoverIconColour).release());
+                                       createFolderIcon(hoverIconColour).release(),
+                                       createFolderIcon(pressedIconColour).release());
         openSourceInExplorerToolbarButton.setImages(createExplorerIcon(normalIconColour).release(),
-                                                    createExplorerIcon(hoverIconColour).release());
+                                                    createExplorerIcon(hoverIconColour).release(),
+                                                    createExplorerIcon(pressedIconColour).release());
         deleteRootToolbarButton.setImages(createDeleteIcon(normalIconColour).release(),
-                                          createDeleteIcon(hoverIconColour).release());
+                                          createDeleteIcon(hoverIconColour).release(),
+                                          createDeleteIcon(pressedIconColour).release());
         rescanToolbarButton.setImages(createRescanIcon(normalIconColour).release(),
-                                      createRescanIcon(hoverIconColour).release());
+                                      createRescanIcon(hoverIconColour).release(),
+                                      createRescanIcon(pressedIconColour).release());
         cancelScanToolbarButton.setImages(createCancelIcon(normalIconColour).release(),
-                                          createCancelIcon(hoverIconColour).release());
+                                          createCancelIcon(hoverIconColour).release(),
+                                          createCancelIcon(pressedIconColour).release());
         resetLayoutToolbarButton.setImages(createResetLayoutIcon(normalIconColour).release(),
-                                           createResetLayoutIcon(hoverIconColour).release());
+                                           createResetLayoutIcon(hoverIconColour).release(),
+                                           createResetLayoutIcon(pressedIconColour).release());
         vacuumDbToolbarButton.setImages(createVacuumIcon(normalIconColour).release(),
-                                        createVacuumIcon(hoverIconColour).release());
+                                        createVacuumIcon(hoverIconColour).release(),
+                                        createVacuumIcon(pressedIconColour).release());
 
         themeToolbarButton.setImages(
             createThemeIcon(normalIconColour, darkModeEnabled).release(),
-            createThemeIcon(hoverIconColour, darkModeEnabled).release());
+            createThemeIcon(hoverIconColour, darkModeEnabled).release(),
+            createThemeIcon(pressedIconColour, darkModeEnabled).release());
         themeToolbarButton.setTooltip(darkModeEnabled ? "Switch to Light Mode" : "Switch to Dark Mode");
         tooltipLookAndFeel.setDarkMode(darkModeEnabled);
+        toolbarButtonLookAndFeel.setDarkMode(darkModeEnabled);
         tooltipWindow.repaint();
 
         if (persist)

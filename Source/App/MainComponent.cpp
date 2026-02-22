@@ -1735,6 +1735,13 @@ namespace sw
         repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
     }
 
+    void MainComponent::showToolbarToast(const juce::String &text, int ticks)
+    {
+        toolbarFeedbackText = text;
+        toolbarFeedbackTicksRemaining = juce::jmax(1, ticks);
+        repaint(0, 0, getWidth(), kToolbarHeight);
+    }
+
     void MainComponent::updateWindowTitleForLoadedFile(const juce::String &fullPath)
     {
         if (auto *window = findParentComponentOfClass<juce::DocumentWindow>())
@@ -1778,6 +1785,7 @@ namespace sw
         persistLastSelectedFile(file);
         currentSelectedFile = file;
         const uint64_t requestId = previewLoadRequestCounter.fetch_add(1, std::memory_order_acq_rel) + 1;
+        const juce::String previewType = file.extension.empty() ? juce::String("file") : juce::String(file.extension).toUpperCase() + " file";
 
         const bool hasLoopMetadata = hasEmbeddedLoopMetadata(file);
         const bool hasValidEmbeddedLoopRegion = hasLoopMetadata && file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
@@ -1818,6 +1826,7 @@ namespace sw
             waveformPanel.setPeaks({});
             waveformPanel.setPlayheadNormalized(-1.0f);
             waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
+            showToolbarToast("Preview unavailable for " + previewType + ": index-only format.");
             if (showIndexOnlyAlert)
             {
                 juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
@@ -1831,6 +1840,7 @@ namespace sw
         if (rootPath.empty())
         {
             setPreviewLoadingState(false, requestId);
+            showToolbarToast("Unable to load preview for " + previewType + ": file is unavailable.");
             return;
         }
 
@@ -1840,7 +1850,7 @@ namespace sw
         juce::Component::SafePointer<MainComponent> safeThis(this);
 
         jobQueue.enqueue(Job{
-            [safeThis, absolutePath, playWhenReady, requestId](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
+            [safeThis, absolutePath, previewType, playWhenReady, requestId](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
             {
                 auto finishLoadingOnMessageThread = [safeThis, requestId]
                 {
@@ -1850,6 +1860,17 @@ namespace sw
                                                             return;
 
                                                         safeThis->setPreviewLoadingState(false, requestId); });
+                };
+
+                auto failLoadingWithToastOnMessageThread = [safeThis, requestId](const juce::String &message)
+                {
+                    juce::MessageManager::callAsync([safeThis, requestId, message]
+                                                    {
+                                                        if (safeThis == nullptr)
+                                                            return;
+
+                                                        safeThis->setPreviewLoadingState(false, requestId);
+                                                        safeThis->showToolbarToast(message); });
                 };
 
                 if (cancelGeneration.load(std::memory_order_relaxed) != jobGeneration)
@@ -1879,10 +1900,16 @@ namespace sw
                 }
 
                 juce::File sourceFile(absolutePath);
+                if (!sourceFile.existsAsFile())
+                {
+                    failLoadingWithToastOnMessageThread("Unable to load preview for " + previewType + ": file is unavailable.");
+                    return;
+                }
+
                 auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(sourceFile));
                 if (!reader)
                 {
-                    finishLoadingOnMessageThread();
+                    failLoadingWithToastOnMessageThread("Unable to load preview for " + previewType + ": file is corrupt or unsupported.");
                     return;
                 }
 
@@ -1897,14 +1924,14 @@ namespace sw
 
                 if (numSamples <= 0)
                 {
-                    finishLoadingOnMessageThread();
+                    failLoadingWithToastOnMessageThread("Unable to load preview for " + previewType + ": file appears to be empty or corrupt.");
                     return;
                 }
 
                 auto previewBuffer = std::make_shared<juce::AudioBuffer<float>>(numChannels, numSamples);
                 if (!reader->read(previewBuffer.get(), 0, numSamples, 0, true, true))
                 {
-                    finishLoadingOnMessageThread();
+                    failLoadingWithToastOnMessageThread("Unable to load preview for " + previewType + ": file is unreadable or corrupt.");
                     return;
                 }
 

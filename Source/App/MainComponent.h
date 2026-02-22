@@ -61,6 +61,7 @@ namespace sw
         void persistLastSelectedFile(const FileRecord &file);
         void persistScanSummaryStatus(const juce::String &statusText);
         void setScanStatusText(const juce::String &statusText);
+        void showToolbarToast(const juce::String &text, int ticks = 120);
         void updateWindowTitleForLoadedFile(const juce::String &fullPath);
         void startRootScan(int64_t rootId,
                            const std::string &rootPath,

@@ -44,7 +44,24 @@ namespace
         return juce::String(kNames[note % 12]) + juce::String(octave);
     }
 
-    juce::String formatMetadataLine(const sw::FileRecord &item)
+    struct MetadataToken
+    {
+        juce::String text;
+        bool isValue = false;
+    };
+
+    void appendMetadataPair(std::vector<MetadataToken> &tokens,
+                            const juce::String &label,
+                            const juce::String &value)
+    {
+        if (!tokens.empty())
+            tokens.push_back({"  ", false});
+
+        tokens.push_back({label, false});
+        tokens.push_back({value, true});
+    }
+
+    std::vector<MetadataToken> buildMetadataTokens(const sw::FileRecord &item)
     {
         auto valueOrDash = [](const auto &opt, const juce::String &suffix = juce::String())
         {
@@ -53,6 +70,9 @@ namespace
             return juce::String(*opt) + suffix;
         };
 
+        std::vector<MetadataToken> tokens;
+        tokens.reserve(32);
+
         const juce::String sampleRate = valueOrDash(item.sampleRate, " Hz");
         const juce::String channels = valueOrDash(item.channels);
         const juce::String bitDepth = valueOrDash(item.bitDepth);
@@ -60,13 +80,13 @@ namespace
         const juce::String totalSamples = item.totalSamples.has_value() ? juce::String(*item.totalSamples) : juce::String("--");
         const juce::String codec = item.codec.has_value() ? juce::String(*item.codec) : juce::String("--");
 
-        juce::String metadata = "SR: " + sampleRate +
-                                "  Ch: " + channels +
-                                "  Bit Depth: " + bitDepth +
-                                "  Bitrate: " + bitrate +
-                                "  Duration: " + formatDuration(item.durationSec) +
-                                "  Samples: " + totalSamples +
-                                "  Codec/Enc: " + codec;
+        appendMetadataPair(tokens, "SR: ", sampleRate);
+        appendMetadataPair(tokens, "Ch: ", channels);
+        appendMetadataPair(tokens, "Bit Depth: ", bitDepth);
+        appendMetadataPair(tokens, "Bitrate: ", bitrate);
+        appendMetadataPair(tokens, "Duration: ", formatDuration(item.durationSec));
+        appendMetadataPair(tokens, "Samples: ", totalSamples);
+        appendMetadataPair(tokens, "Codec/Enc: ", codec);
 
         if (isAcidizedLoop(item) || isAppleLoop(item))
         {
@@ -76,16 +96,70 @@ namespace
             const juce::String loopStart = item.loopStartSample.has_value() ? juce::String(*item.loopStartSample) : juce::String("--");
             const juce::String loopEnd = item.loopEndSample.has_value() ? juce::String(*item.loopEndSample) : juce::String("--");
 
-            metadata += isAcidizedLoop(item) ? "  Acid: yes" : "  Apple Loop: yes";
-            metadata += "  Root: " + acidRoot;
+            appendMetadataPair(tokens,
+                               isAcidizedLoop(item) ? "Acid: " : "Apple Loop: ",
+                               "yes");
+            appendMetadataPair(tokens, "Root: ", acidRoot);
             if (isAcidizedLoop(item))
-                metadata += "  Beats: " + acidBeats;
+                appendMetadataPair(tokens, "Beats: ", acidBeats);
             if (item.bpm.has_value())
-                metadata += "  Tempo: " + acidBpm;
-            metadata += "  Loop: " + loopStart + "-" + loopEnd;
+                appendMetadataPair(tokens, "Tempo: ", acidBpm);
+            appendMetadataPair(tokens, "Loop: ", loopStart + "-" + loopEnd);
         }
 
-        return metadata;
+        return tokens;
+    }
+
+    void drawMetadataTokens(juce::Graphics &g,
+                            juce::Rectangle<int> bounds,
+                            const std::vector<MetadataToken> &tokens,
+                            juce::Colour labelColour,
+                            juce::Colour valueColour)
+    {
+        g.saveState();
+        g.reduceClipRegion(bounds);
+
+        float x = static_cast<float>(bounds.getX());
+        const float right = static_cast<float>(bounds.getRight());
+
+        const auto measureTextWidth = [&g](const juce::String &text)
+        {
+            juce::GlyphArrangement glyphs;
+            glyphs.addLineOfText(g.getCurrentFont(), text, 0.0f, 0.0f);
+            return glyphs.getBoundingBox(0, glyphs.getNumGlyphs(), true).getWidth();
+        };
+
+        for (const auto &token : tokens)
+        {
+            const float tokenWidth = measureTextWidth(token.text);
+            if (x >= right)
+                break;
+
+            if (x + tokenWidth > right)
+            {
+                g.setColour(token.isValue ? valueColour : labelColour);
+                g.drawFittedText(token.text,
+                                 static_cast<int>(x),
+                                 bounds.getY(),
+                                 static_cast<int>(right - x),
+                                 bounds.getHeight(),
+                                 juce::Justification::centredLeft,
+                                 1);
+                break;
+            }
+
+            g.setColour(token.isValue ? valueColour : labelColour);
+            g.drawText(token.text,
+                       static_cast<int>(x),
+                       bounds.getY(),
+                       static_cast<int>(tokenWidth + 1.0f),
+                       bounds.getHeight(),
+                       juce::Justification::centredLeft,
+                       false);
+            x += tokenWidth;
+        }
+
+        g.restoreState();
     }
 }
 
@@ -469,9 +543,10 @@ namespace sw
             g.drawText(badgeText, badgeX, badgeY, badgeWidth, badgeHeight, juce::Justification::centred);
         }
 
-        g.setColour(darkModeEnabled ? juce::Colours::silver : juce::Colour(0xff6a6a6a));
         g.setFont(11.0f);
-        g.drawFittedText(formatMetadataLine(item), metadataRow, juce::Justification::centredLeft, 1);
+        const auto labelColour = darkModeEnabled ? juce::Colours::silver : juce::Colour(0xff6a6a6a);
+        const auto valueColour = darkModeEnabled ? juce::Colour(0xffcce9ff) : juce::Colour(0xff1d5c8d);
+        drawMetadataTokens(g, metadataRow, buildMetadataTokens(item), labelColour, valueColour);
     }
 
     void ResultsPanel::selectedRowsChanged(int lastRowSelected)

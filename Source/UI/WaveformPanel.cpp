@@ -88,6 +88,16 @@ namespace sw
             g.drawLine(playheadX, bounds.getY(), playheadX, bounds.getBottom(), 1.5f);
         }
 
+        if (displayMode == DisplayMode::waveform && !midiPlayheadsNormalized.empty())
+        {
+            g.setColour(darkModeEnabled ? juce::Colour(0xff52ff8f) : juce::Colour(0xff0a8f49));
+            for (const float head : midiPlayheadsNormalized)
+            {
+                const float midiX = bounds.getX() + bounds.getWidth() * juce::jlimit(0.0f, 1.0f, head);
+                g.drawLine(midiX, bounds.getY(), midiX, bounds.getBottom(), 1.0f);
+            }
+        }
+
         if (loading)
         {
             g.setColour((darkModeEnabled ? juce::Colours::black : juce::Colours::white).withAlpha(0.35f));
@@ -203,6 +213,12 @@ namespace sw
     {
         const float clamped = juce::jlimit(-1.0f, 1.0f, playheadPosition);
         playheadNormalized = clamped;
+        repaint();
+    }
+
+    void WaveformPanel::setMidiPlayheadsNormalized(const std::vector<float> &playheadPositions)
+    {
+        midiPlayheadsNormalized = playheadPositions;
         repaint();
     }
 

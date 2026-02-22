@@ -305,7 +305,7 @@ namespace sw
 
     bool AudioEngine::isPreviewPlaying() const noexcept
     {
-        return voiceManager.isPlaying();
+        return voiceManager.isPrimaryPlaying();
     }
 
     bool AudioEngine::consumePreviewFinishedFlag() noexcept
@@ -321,6 +321,11 @@ namespace sw
     void AudioEngine::setPreviewPlaybackProgressNormalized(double normalizedProgress)
     {
         voiceManager.setPlaybackProgressNormalized(normalizedProgress);
+    }
+
+    void AudioEngine::getActiveMidiPlaybackHeadsNormalized(std::vector<float> &headsOut) const
+    {
+        voiceManager.getActiveMidiPlaybackHeadsNormalized(headsOut);
     }
 
     void AudioEngine::setPreviewRootMidiNote(int midiNote)

@@ -31,6 +31,7 @@ namespace sw
         void setPeaks(const std::vector<std::vector<float>> &peaksByChannel);
         void setOscilloscopeSamples(const std::vector<float> &samples);
         void setPlayheadNormalized(float playheadPosition);
+        void setMidiPlayheadsNormalized(const std::vector<float> &playheadPositions);
         void setLoopRegionNormalized(float loopStart, float loopEnd);
         void setLoading(bool loading);
         void setDarkMode(bool enabled);
@@ -68,6 +69,7 @@ namespace sw
         juce::dsp::FFT spectrumFft{kSpectrumFftOrder};
         juce::dsp::WindowingFunction<float> spectrumWindow{kSpectrumFftSize, juce::dsp::WindowingFunction<float>::hann, true};
         float playheadNormalized = -1.0f;
+        std::vector<float> midiPlayheadsNormalized;
         float loopStartNormalized = -1.0f;
         float loopEndNormalized = -1.0f;
         bool loading = false;

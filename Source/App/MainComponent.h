@@ -210,6 +210,7 @@ namespace sw
         bool suppressAutoAdvanceAfterManualStop = false;
         std::chrono::steady_clock::time_point scanStartTime{};
         std::vector<float> oscilloscopeFrameScratch;
+        std::vector<float> midiPlaybackHeadsScratch;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
     };

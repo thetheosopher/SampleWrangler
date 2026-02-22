@@ -42,6 +42,8 @@ namespace sw
         if (buf == nullptr || buf->getNumSamples() == 0)
         {
             info.clearActiveBufferRegion();
+            anyVoiceActive.store(false, std::memory_order_relaxed);
+            primaryVoiceActive.store(false, std::memory_order_relaxed);
             return;
         }
 
@@ -60,11 +62,15 @@ namespace sw
         {
             info.clearActiveBufferRegion();
             anyVoiceActive.store(false, std::memory_order_relaxed);
+            primaryVoiceActive.store(false, std::memory_order_relaxed);
             return;
         }
 
         // Clear output buffer — voices will add into it
         info.clearActiveBufferRegion();
+
+        const int primaryIdx = juce::jlimit(0, kMaxVoices - 1, primaryVoiceIndex.load(std::memory_order_relaxed));
+        const bool wasPrimaryActive = voices[static_cast<size_t>(primaryIdx)].active;
 
         bool anyStillActive = false;
         for (auto &v : voices)
@@ -79,9 +85,11 @@ namespace sw
         }
 
         anyVoiceActive.store(anyStillActive, std::memory_order_relaxed);
+        const bool primaryStillActive = voices[static_cast<size_t>(primaryIdx)].active;
+        primaryVoiceActive.store(primaryStillActive, std::memory_order_relaxed);
 
-        // If no voices remain active after rendering, signal playback finished.
-        if (!anyStillActive)
+        // Signal playback finished when the primary transport voice ends.
+        if (wasPrimaryActive && !primaryStillActive)
         {
             playbackFinished.store(true, std::memory_order_relaxed);
         }
@@ -132,11 +140,31 @@ namespace sw
 
                 playbackFinished.store(false, std::memory_order_relaxed);
 
-                auto &v = allocateVoice();
-                v.noteOn(cmd.midiNote, cmd.playbackRate, cmd.pitchRatio, ++voiceAgeCounter);
+                Voice *selectedVoice = nullptr;
+                for (int i = 1; i < kMaxVoices; ++i)
+                {
+                    if (!voices[static_cast<size_t>(i)].active)
+                    {
+                        selectedVoice = &voices[static_cast<size_t>(i)];
+                        break;
+                    }
+                }
 
-                const int idx = static_cast<int>(&v - &voices[0]);
-                primaryVoiceIndex.store(idx, std::memory_order_relaxed);
+                if (selectedVoice == nullptr)
+                {
+                    Voice *oldest = &voices[1];
+                    for (int i = 2; i < kMaxVoices; ++i)
+                    {
+                        auto &candidate = voices[static_cast<size_t>(i)];
+                        if (candidate.triggerAge < oldest->triggerAge)
+                            oldest = &candidate;
+                    }
+                    selectedVoice = oldest;
+                    selectedVoice->forceOff();
+                }
+
+                auto &v = *selectedVoice;
+                v.noteOn(cmd.midiNote, cmd.playbackRate, cmd.pitchRatio, ++voiceAgeCounter);
                 anyVoiceActive.store(true, std::memory_order_relaxed);
                 break;
             }
@@ -201,7 +229,7 @@ namespace sw
             {
                 for (auto &v : voices)
                 {
-                    if (v.active)
+                    if (v.active && v.midiNote < 0)
                         v.noteOff();
                 }
                 break;
@@ -531,9 +559,11 @@ namespace sw
         reclaimRetiredBuffers();
 
         // Stop all voices via command FIFO
+        enqueueCommand({VoiceCommand::Type::AllNotesOff});
         enqueueCommand({VoiceCommand::Type::Stop});
 
         playbackFinished.store(false, std::memory_order_relaxed);
+        primaryVoiceActive.store(false, std::memory_order_relaxed);
         loadedSampleLength.store(buffer != nullptr ? buffer->getNumSamples() : 0, std::memory_order_relaxed);
 
         bufferSampleRate.store(fileSampleRate, std::memory_order_relaxed);
@@ -647,6 +677,11 @@ namespace sw
         return anyVoiceActive.load(std::memory_order_relaxed);
     }
 
+    bool VoiceManager::isPrimaryPlaying() const noexcept
+    {
+        return primaryVoiceActive.load(std::memory_order_relaxed);
+    }
+
     bool VoiceManager::consumePlaybackFinishedFlag() noexcept
     {
         return playbackFinished.exchange(false, std::memory_order_acq_rel);
@@ -672,6 +707,26 @@ namespace sw
         cmd.type = VoiceCommand::Type::SetPlaybackProgress;
         cmd.normalizedProgress = normalizedProgress;
         enqueueCommand(cmd);
+    }
+
+    void VoiceManager::getActiveMidiPlaybackHeadsNormalized(std::vector<float> &headsOut) const
+    {
+        headsOut.clear();
+
+        const int length = loadedSampleLength.load(std::memory_order_relaxed);
+        if (length <= 0)
+            return;
+
+        for (const auto &voice : voices)
+        {
+            if (!voice.active || voice.midiNote < 0)
+                continue;
+
+            const float normalized = juce::jlimit(0.0f,
+                                                  1.0f,
+                                                  static_cast<float>(voice.playbackPos / static_cast<double>(length)));
+            headsOut.push_back(normalized);
+        }
     }
 
 } // namespace sw

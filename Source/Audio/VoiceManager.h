@@ -5,6 +5,7 @@
 #include <atomic>
 #include <array>
 #include <memory>
+#include <vector>
 
 namespace sw
 {
@@ -78,6 +79,7 @@ namespace sw
 
         /// True while any voice is actively playing (approximate, read from any thread).
         bool isPlaying() const noexcept;
+        bool isPrimaryPlaying() const noexcept;
         bool consumePlaybackFinishedFlag() noexcept;
 
         /// Normalized playback position of primary voice in [0..1].
@@ -85,6 +87,7 @@ namespace sw
 
         /// Enqueue a playback-position scrub.
         void setPlaybackProgressNormalized(double normalizedProgress);
+        void getActiveMidiPlaybackHeadsNormalized(std::vector<float> &headsOut) const;
 
     private:
         /// Render one voice for the given block, adding its output into the buffer.
@@ -137,6 +140,7 @@ namespace sw
 
         // Global settings
         std::atomic<bool> anyVoiceActive{false}; // approximate, for UI queries
+        std::atomic<bool> primaryVoiceActive{false};
         std::atomic<bool> playbackFinished{false};
         std::atomic<bool> loopEnabled{false};
         std::atomic<int64_t> loopStartSample{-1};

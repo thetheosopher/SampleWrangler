@@ -79,6 +79,7 @@ namespace sw
         bool isPreviewPlaying() const noexcept;
         bool consumePreviewFinishedFlag() noexcept;
         double getPreviewPlaybackProgressNormalized() const noexcept;
+        void getActiveMidiPlaybackHeadsNormalized(std::vector<float> &headsOut) const;
         void setPreviewPlaybackProgressNormalized(double normalizedProgress);
         void setPreviewRootMidiNote(int midiNote);
         void clearPreviewLoopRegion();

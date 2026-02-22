@@ -2025,6 +2025,7 @@ namespace sw
             setPreviewLoadingState(false, requestId);
             waveformPanel.setPeaks({});
             waveformPanel.setPlayheadNormalized(-1.0f);
+            waveformPanel.setMidiPlayheadsNormalized({});
             waveformPanel.setLoopRegionNormalized(-1.0f, -1.0f);
             showToolbarToast("Preview unavailable for " + previewType + ": index-only format.");
             if (showIndexOnlyAlert)
@@ -2256,8 +2257,10 @@ namespace sw
 
         const float progress = static_cast<float>(audioEngine.getPreviewPlaybackProgressNormalized());
         audioEngine.getOscilloscopeFrame(oscilloscopeFrameScratch);
+        audioEngine.getActiveMidiPlaybackHeadsNormalized(midiPlaybackHeadsScratch);
         waveformPanel.setOscilloscopeSamples(oscilloscopeFrameScratch);
         waveformPanel.setPlayheadNormalized(progress);
+        waveformPanel.setMidiPlayheadsNormalized(midiPlaybackHeadsScratch);
         previewPanel.setPlaybackActive(audioEngine.isPreviewPlaying());
 
         double durationSeconds = 0.0;

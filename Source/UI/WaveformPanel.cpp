@@ -393,6 +393,8 @@ namespace sw
         g.setColour(darkModeEnabled ? juce::Colour(0xff0f1625) : juce::Colour(0xffdfe9f9));
         g.fillRect(bounds);
 
+        const juce::Colour spectrumBarColour = darkModeEnabled ? juce::Colour(0xff66e0ff) : juce::Colour(0xff1769aa);
+
         const float barGap = 2.0f;
         const float totalGap = barGap * static_cast<float>(kSpectrumBandCount - 1);
         const float barWidth = juce::jmax(1.0f, (bounds.getWidth() - totalGap) / static_cast<float>(kSpectrumBandCount));
@@ -405,17 +407,7 @@ namespace sw
             const float x = bounds.getX() + static_cast<float>(bandIndex) * (barWidth + barGap);
             const float y = bounds.getBottom() - barHeight;
 
-            const auto colour = darkModeEnabled
-                                    ? juce::Colour::fromHSV(0.62f - 0.48f * shaped,
-                                                            0.78f,
-                                                            0.28f + 0.72f * shaped,
-                                                            0.92f)
-                                    : juce::Colour::fromHSV(0.64f - 0.48f * shaped,
-                                                            0.62f,
-                                                            0.40f + 0.55f * shaped,
-                                                            0.86f);
-
-            g.setColour(colour);
+            g.setColour(spectrumBarColour);
             g.fillRoundedRectangle(x, y, barWidth, juce::jmax(1.0f, barHeight), 1.6f);
 
             const float peakNormalized = juce::jlimit(0.0f, 1.0f, spectrumPeakIndicators[static_cast<size_t>(bandIndex)]);

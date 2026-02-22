@@ -550,143 +550,118 @@ namespace sw
                     return;
                 }
 
+                thread_local juce::AudioFormatManager formatManager;
+                thread_local bool formatsRegistered = false;
+                if (!formatsRegistered)
+                {
+                    formatManager.registerBasicFormats();
+                    formatsRegistered = true;
+                }
+
                 constexpr size_t kChunkSize = 32;
                 for (size_t begin = 0; begin < candidates.size(); begin += kChunkSize)
                 {
                     if (isCancelled())
                     {
-                        break;
+                        markJobFinished();
+                        return;
                     }
 
                     const size_t end = std::min(begin + kChunkSize, candidates.size());
-                    auto chunk = std::make_shared<std::vector<ScanCandidate>>();
-                    chunk->reserve(end - begin);
+                    if (!catalogDb.beginTransaction())
+                    {
+                        markJobFinished();
+                        return;
+                    }
+
+                    bool transactionOpen = true;
                     for (size_t i = begin; i < end; ++i)
-                        chunk->push_back(std::move(candidates[i]));
+                    {
+                        const auto &candidate = candidates[i];
 
-                    state->pendingJobs.fetch_add(1, std::memory_order_acq_rel);
-                    jobQueue.enqueue(Job{
-                        [this, chunk, rootId, onProgress, markJobFinished, jobGeneration](const std::atomic<uint64_t> &cancelGeneration, uint64_t)
+                        if (isCancelled())
                         {
-                            const auto isChunkCancelled = [&cancelGeneration, jobGeneration]()
-                            {
-                                return cancelGeneration.load(std::memory_order_relaxed) != jobGeneration;
-                            };
-
-                            if (isChunkCancelled())
-                            {
-                                markJobFinished();
-                                return;
-                            }
-
-                            thread_local juce::AudioFormatManager formatManager;
-                            thread_local bool formatsRegistered = false;
-                            if (!formatsRegistered)
-                            {
-                                formatManager.registerBasicFormats();
-                                formatsRegistered = true;
-                            }
-
-                            if (!catalogDb.beginTransaction())
-                            {
-                                markJobFinished();
-                                return;
-                            }
-
-                            bool transactionOpen = true;
-
-                            for (const auto &candidate : *chunk)
-                            {
-                                if (isChunkCancelled())
-                                {
-                                    if (transactionOpen)
-                                        catalogDb.rollbackTransaction();
-                                    markJobFinished();
-                                    return;
-                                }
-
-                                FileRecord rec;
-                                rec.rootId = rootId;
-                                rec.relativePath = candidate.relativePath;
-                                rec.filename = candidate.absolutePath.filename().string();
-                                rec.extension = candidate.extension;
-                                rec.indexOnly = candidate.indexOnly;
-
-                                // File metadata
-                                std::error_code fileEc;
-                                rec.sizeBytes = static_cast<int64_t>(fs::file_size(candidate.absolutePath, fileEc));
-                                auto ftime = fs::last_write_time(candidate.absolutePath, fileEc);
-                                rec.modifiedTime = static_cast<int64_t>(
-                                    std::chrono::duration_cast<std::chrono::seconds>(
-                                        ftime.time_since_epoch())
-                                        .count());
-
-                                std::vector<float> overviewPeaks;
-
-                                if (candidate.playable)
-                                {
-                                    if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(juce::File(candidate.absolutePath.string()))))
-                                    {
-                                        rec.totalSamples = static_cast<int64_t>(reader->lengthInSamples);
-                                        rec.sampleRate = static_cast<int>(reader->sampleRate);
-                                        rec.channels = static_cast<int>(reader->numChannels);
-                                        rec.bitDepth = reader->bitsPerSample;
-                                        rec.codec = reader->getFormatName().toStdString();
-
-                                        if (reader->sampleRate > 0.0)
-                                            rec.durationSec = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
-
-                                        if (rec.durationSec.has_value() && *rec.durationSec > 0.0 && rec.sizeBytes > 0)
-                                        {
-                                            const auto kbps = static_cast<int>((static_cast<double>(rec.sizeBytes) * 8.0) / (*rec.durationSec * 1000.0));
-                                            rec.bitrateKbps = kbps;
-                                        }
-
-                                        if (candidate.extension == "wav")
-                                            parseWavAcidAndLoopMetadata(candidate.absolutePath, rec);
-                                        else if (candidate.extension == "aif" || candidate.extension == "aiff")
-                                            parseAiffAppleLoopMetadata(candidate.absolutePath, rec);
-
-                                        if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen())
-                                            overviewPeaks = buildOverviewPeaks(*reader, 256);
-                                    }
-                                }
-
-                                if (!catalogDb.upsertFile(rec))
-                                {
-                                    if (transactionOpen)
-                                        catalogDb.rollbackTransaction();
-                                    markJobFinished();
-                                    return;
-                                }
-
-                                if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen() && !overviewPeaks.empty())
-                                {
-                                    const auto cacheKey = buildWaveCacheKey(rec.rootId,
-                                                                            rec.relativePath,
-                                                                            rec.sizeBytes,
-                                                                            rec.modifiedTime);
-
-                                    if (const auto persisted = catalogDb.fileByRootAndRelativePath(rec.rootId, rec.relativePath); persisted.has_value())
-                                        waveCacheBlobDb->upsertPeaksByKey(cacheKey, persisted->id, overviewPeaks);
-                                }
-
-                                if (onProgress)
-                                    onProgress(candidate.relativePath);
-                            }
-
                             if (transactionOpen)
-                            {
-                                if (!catalogDb.commitTransaction())
-                                {
-                                    markJobFinished();
-                                    return;
-                                }
-                            }
-
+                                catalogDb.rollbackTransaction();
                             markJobFinished();
-                        },
-                        JobPriority::Low});
+                            return;
+                        }
+
+                        FileRecord rec;
+                        rec.rootId = rootId;
+                        rec.relativePath = candidate.relativePath;
+                        rec.filename = candidate.absolutePath.filename().string();
+                        rec.extension = candidate.extension;
+                        rec.indexOnly = candidate.indexOnly;
+
+                        std::error_code fileEc;
+                        rec.sizeBytes = static_cast<int64_t>(fs::file_size(candidate.absolutePath, fileEc));
+                        auto ftime = fs::last_write_time(candidate.absolutePath, fileEc);
+                        rec.modifiedTime = static_cast<int64_t>(
+                            std::chrono::duration_cast<std::chrono::seconds>(
+                                ftime.time_since_epoch())
+                                .count());
+
+                        std::vector<float> overviewPeaks;
+
+                        if (candidate.playable)
+                        {
+                            if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(juce::File(candidate.absolutePath.string()))))
+                            {
+                                rec.totalSamples = static_cast<int64_t>(reader->lengthInSamples);
+                                rec.sampleRate = static_cast<int>(reader->sampleRate);
+                                rec.channels = static_cast<int>(reader->numChannels);
+                                rec.bitDepth = reader->bitsPerSample;
+                                rec.codec = reader->getFormatName().toStdString();
+
+                                if (reader->sampleRate > 0.0)
+                                    rec.durationSec = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
+
+                                if (rec.durationSec.has_value() && *rec.durationSec > 0.0 && rec.sizeBytes > 0)
+                                {
+                                    const auto kbps = static_cast<int>((static_cast<double>(rec.sizeBytes) * 8.0) / (*rec.durationSec * 1000.0));
+                                    rec.bitrateKbps = kbps;
+                                }
+
+                                if (candidate.extension == "wav")
+                                    parseWavAcidAndLoopMetadata(candidate.absolutePath, rec);
+                                else if (candidate.extension == "aif" || candidate.extension == "aiff")
+                                    parseAiffAppleLoopMetadata(candidate.absolutePath, rec);
+
+                                if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen())
+                                    overviewPeaks = buildOverviewPeaks(*reader, 256);
+                            }
+                        }
+
+                        if (!catalogDb.upsertFile(rec))
+                        {
+                            if (transactionOpen)
+                                catalogDb.rollbackTransaction();
+                            markJobFinished();
+                            return;
+                        }
+
+                        if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen() && !overviewPeaks.empty())
+                        {
+                            const auto cacheKey = buildWaveCacheKey(rec.rootId,
+                                                                    rec.relativePath,
+                                                                    rec.sizeBytes,
+                                                                    rec.modifiedTime);
+
+                            if (const auto persisted = catalogDb.fileByRootAndRelativePath(rec.rootId, rec.relativePath); persisted.has_value())
+                                waveCacheBlobDb->upsertPeaksByKey(cacheKey, persisted->id, overviewPeaks);
+                        }
+
+                        if (onProgress)
+                            onProgress(candidate.relativePath);
+                    }
+
+                    if (!catalogDb.commitTransaction())
+                    {
+                        markJobFinished();
+                        return;
+                    }
+                    transactionOpen = false;
                 }
 
                 markJobFinished();

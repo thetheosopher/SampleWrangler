@@ -6,6 +6,7 @@
 #include <vector>
 #include <functional>
 #include <mutex>
+#include <utility>
 
 struct sqlite3; // forward declare
 
@@ -47,6 +48,10 @@ namespace sw
         std::vector<FileRecord> listRecentFiles(int limit = 200);
         std::vector<FileRecord> searchFilesByRoot(int64_t rootId, const std::string &query, int limit = 200);
         std::vector<FileRecord> listRecentFilesByRoot(int64_t rootId, int limit = 200);
+        std::pair<int64_t, int64_t> fileStatsAll();
+        std::pair<int64_t, int64_t> fileStatsByRoot(int64_t rootId);
+        std::pair<int64_t, int64_t> fileStatsSearch(const std::string &query);
+        std::pair<int64_t, int64_t> fileStatsSearchByRoot(int64_t rootId, const std::string &query);
         std::optional<FileRecord> fileById(int64_t fileId);
         std::optional<FileRecord> fileByRootAndRelativePath(int64_t rootId, const std::string &relativePath);
 

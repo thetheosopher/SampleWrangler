@@ -1,4 +1,5 @@
 #include "BrowserPanel.h"
+#include <cmath>
 
 namespace sw
 {
@@ -34,6 +35,11 @@ namespace sw
     {
         setWantsKeyboardFocus(true);
         setMouseClickGrabsKeyboardFocus(true);
+
+        addAndMakeVisible(verticalScrollBar);
+        verticalScrollBar.addListener(this);
+        verticalScrollBar.setAutoHide(false);
+        verticalScrollBar.setSingleStepSize(1.0);
     }
 
     void BrowserPanel::paint(juce::Graphics &g)
@@ -57,31 +63,39 @@ namespace sw
         auto listArea = getLocalBounds().reduced(8);
         listArea.removeFromTop(controlsBottomY);
 
+        const int scrollBarWidth = getLookAndFeel().getDefaultScrollbarWidth();
+        auto contentArea = listArea;
+        contentArea.removeFromRight(scrollBarWidth + 4);
+
         g.setFont(12.0f);
 
         if (roots.empty())
         {
             g.setColour(emptyColour);
-            g.drawText("No sources configured", listArea.removeFromTop(20), juce::Justification::left);
+            g.drawText("No sources configured", contentArea.removeFromTop(20), juce::Justification::left);
             return;
         }
 
-        for (const auto &root : roots)
-        {
-            if (listArea.getHeight() < 18)
-                break;
+        constexpr int rowHeight = 18;
+        const int visibleRows = juce::jmax(1, contentArea.getHeight() / rowHeight);
+        const int totalRows = static_cast<int>(roots.size());
+        const int clampedStart = juce::jlimit(0, juce::jmax(0, totalRows - visibleRows), firstVisibleRow);
 
-            auto rowArea = listArea.removeFromTop(18);
+        auto rowArea = contentArea;
+        for (int row = clampedStart; row < totalRows && rowArea.getHeight() >= rowHeight; ++row)
+        {
+            auto drawArea = rowArea.removeFromTop(rowHeight);
+            const auto &root = roots[static_cast<size_t>(row)];
             const bool isSelected = selectedRootId.has_value() && *selectedRootId == root.id;
 
             if (isSelected)
             {
                 g.setColour(selectedColour);
-                g.fillRect(rowArea);
+                g.fillRect(drawArea);
             }
 
             g.setColour(rowTextColour);
-            const auto textArea = rowArea.reduced(2, 0);
+            const auto textArea = drawArea.reduced(2, 0);
             const juce::String line = ellipsizeToWidth(juce::String(root.label), g.getCurrentFont(), textArea.getWidth());
             g.drawText(line, textArea, juce::Justification::left, false);
         }
@@ -89,11 +103,19 @@ namespace sw
 
     void BrowserPanel::resized()
     {
+        constexpr int controlsBottomY = 30;
+        auto listArea = getLocalBounds().reduced(8);
+        listArea.removeFromTop(controlsBottomY);
+
+        const int scrollBarWidth = getLookAndFeel().getDefaultScrollbarWidth();
+        verticalScrollBar.setBounds(listArea.removeFromRight(scrollBarWidth));
+        updateScrollBar();
     }
 
     void BrowserPanel::setRoots(std::vector<RootRecord> newRoots)
     {
         roots = std::move(newRoots);
+        updateScrollBar();
         repaint();
     }
 
@@ -175,6 +197,20 @@ namespace sw
         setTooltip({});
     }
 
+    void BrowserPanel::mouseWheelMove(const juce::MouseEvent &, const juce::MouseWheelDetails &wheel)
+    {
+        if (roots.empty())
+            return;
+
+        const int direction = (wheel.deltaY < 0.0f) ? 1 : -1;
+        if (direction == 0)
+            return;
+
+        firstVisibleRow += direction;
+        updateScrollBar();
+        repaint();
+    }
+
     bool BrowserPanel::keyPressed(const juce::KeyPress &key)
     {
         if (selectedRootId.has_value() && (key.getKeyCode() == juce::KeyPress::deleteKey || key.getKeyCode() == juce::KeyPress::backspaceKey))
@@ -194,6 +230,8 @@ namespace sw
 
         auto listArea = getLocalBounds().reduced(8);
         listArea.removeFromTop(controlsBottomY);
+        const int scrollBarWidth = getLookAndFeel().getDefaultScrollbarWidth();
+        listArea.removeFromRight(scrollBarWidth + 4);
 
         if (y < listArea.getY() || y >= listArea.getBottom())
             return std::nullopt;
@@ -202,11 +240,44 @@ namespace sw
         if (yOffset < 0)
             return std::nullopt;
 
-        const int rowIndex = yOffset / rowHeight;
+        const int rowIndex = firstVisibleRow + (yOffset / rowHeight);
         if (rowIndex < 0 || rowIndex >= static_cast<int>(roots.size()))
             return std::nullopt;
 
         return rowIndex;
+    }
+
+    void BrowserPanel::scrollBarMoved(juce::ScrollBar *scrollBarThatHasMoved, double newRangeStart)
+    {
+        if (scrollBarThatHasMoved != &verticalScrollBar)
+            return;
+
+        firstVisibleRow = juce::jmax(0, static_cast<int>(std::round(newRangeStart)));
+        repaint();
+    }
+
+    void BrowserPanel::updateScrollBar()
+    {
+        constexpr int controlsBottomY = 30;
+        constexpr int rowHeight = 18;
+
+        auto listArea = getLocalBounds().reduced(8);
+        listArea.removeFromTop(controlsBottomY);
+        const int scrollBarWidth = getLookAndFeel().getDefaultScrollbarWidth();
+        listArea.removeFromRight(scrollBarWidth + 4);
+
+        const int visibleRows = juce::jmax(1, listArea.getHeight() / rowHeight);
+        const int totalRows = static_cast<int>(roots.size());
+        const int maxStart = juce::jmax(0, totalRows - visibleRows);
+
+        firstVisibleRow = juce::jlimit(0, maxStart, firstVisibleRow);
+
+        const bool show = totalRows > visibleRows;
+        verticalScrollBar.setVisible(show);
+        verticalScrollBar.setRangeLimits(0.0, static_cast<double>(juce::jmax(visibleRows, totalRows)));
+        verticalScrollBar.setCurrentRange(juce::Range<double>(static_cast<double>(firstVisibleRow),
+                                                              static_cast<double>(firstVisibleRow + visibleRows)));
+        verticalScrollBar.setCurrentRangeStart(static_cast<double>(firstVisibleRow));
     }
 
 } // namespace sw

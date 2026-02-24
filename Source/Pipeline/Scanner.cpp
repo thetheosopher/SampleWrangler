@@ -1,4 +1,5 @@
 #include "Scanner.h"
+#include "RexManager.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <filesystem>
 #include <algorithm>
@@ -81,6 +82,41 @@ namespace sw
                     const float *channelData = tempBuffer.getReadPointer(ch);
                     for (int s = 0; s < blockSamples; ++s)
                         maxAbs = std::max(maxAbs, std::abs(channelData[s]));
+                }
+
+                peaks[static_cast<size_t>(i)] = maxAbs;
+            }
+
+            return peaks;
+        }
+
+        std::vector<float> buildOverviewPeaks(const juce::AudioBuffer<float> &buffer, int targetPeakCount)
+        {
+            const int totalSamples = buffer.getNumSamples();
+            if (totalSamples <= 0)
+                return {};
+
+            const int numChannels = std::max(1, buffer.getNumChannels());
+            const int peakCount = std::max(1, std::min(targetPeakCount, totalSamples));
+            const int samplesPerPeak = std::max(1, totalSamples / peakCount);
+
+            std::vector<float> peaks(static_cast<size_t>(peakCount), 0.0f);
+
+            for (int i = 0; i < peakCount; ++i)
+            {
+                const int startSample = i * samplesPerPeak;
+                const int remaining = totalSamples - startSample;
+                if (remaining <= 0)
+                    break;
+
+                const int blockSamples = std::min(samplesPerPeak, remaining);
+                float maxAbs = 0.0f;
+
+                for (int ch = 0; ch < numChannels; ++ch)
+                {
+                    const float *channelData = buffer.getReadPointer(ch);
+                    for (int s = 0; s < blockSamples; ++s)
+                        maxAbs = std::max(maxAbs, std::abs(channelData[startSample + s]));
                 }
 
                 peaks[static_cast<size_t>(i)] = maxAbs;
@@ -439,12 +475,24 @@ namespace sw
 
     bool Scanner::isPlayableExtension(const std::string &ext)
     {
-        return ext == "wav" || ext == "aif" || ext == "aiff" || ext == "flac" || ext == "mp3";
+        if (ext == "wav" || ext == "aif" || ext == "aiff" || ext == "flac" || ext == "mp3")
+            return true;
+
+        // REX/RX2 files are playable when the REX SDK is available;
+        // otherwise they fall back to index-only.
+        if (isRexExtension(ext))
+            return RexManager::isAvailable();
+
+        return false;
     }
 
     bool Scanner::isIndexOnlyExtension(const std::string &ext)
     {
-        return ext == "rex" || ext == "rex2" || ext == "rx2" || ext == "nki" || ext == "sfz";
+        // REX files without the SDK loaded are index-only.
+        if (isRexExtension(ext))
+            return !RexManager::isAvailable();
+
+        return false;
     }
 
     void Scanner::scanRoot(int64_t rootId,
@@ -604,7 +652,38 @@ namespace sw
 
                         std::vector<float> overviewPeaks;
 
-                        if (candidate.playable)
+                        if (candidate.playable && isRexExtension(candidate.extension))
+                        {
+                            // --- REX / RX2: use the REX SDK for metadata ---
+                            const auto absStr = candidate.absolutePath.string();
+                            if (auto rexInfo = RexManager::readInfo(absStr))
+                            {
+                                rec.sampleRate = rexInfo->sampleRate;
+                                rec.channels = rexInfo->channels;
+                                rec.bitDepth = rexInfo->bitDepth;
+                                rec.totalSamples = rexInfo->totalSamples;
+                                rec.durationSec = rexInfo->durationSec;
+                                rec.bpm = rexInfo->bpm;
+                                rec.sliceCount = rexInfo->sliceCount;
+                                rec.loopType = "rex";
+
+                                rec.codec = (candidate.extension == "rx2") ? "REX2" : "REX";
+
+                                if (rec.durationSec.has_value() && *rec.durationSec > 0.0 && rec.sizeBytes > 0)
+                                {
+                                    const auto kbps = static_cast<int>((static_cast<double>(rec.sizeBytes) * 8.0) / (*rec.durationSec * 1000.0));
+                                    rec.bitrateKbps = kbps;
+                                }
+
+                                if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen())
+                                {
+                                    double decodedSampleRate = 0.0;
+                                    if (auto decoded = RexManager::decodeToBuffer(absStr, decodedSampleRate))
+                                        overviewPeaks = buildOverviewPeaks(*decoded, 256);
+                                }
+                            }
+                        }
+                        else if (candidate.playable)
                         {
                             if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(juce::File(candidate.absolutePath.string()))))
                             {

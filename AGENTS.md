@@ -10,7 +10,8 @@ When acting as a coding agent in this repo:
 ## Constraints
 - Windows-only MVP.
 - ASIO support is required for MVP (use JUCE AudioDeviceManager).
-- No REX/REX2/NKI playback in MVP (index-only).
+- No NKI playback in MVP (index-only).
+- REX/RX2 playback is supported via the Propellerhead REX SDK (dynamic DLL loading).
 
 ## Workflow
 1. Before coding: identify the target module (UI/Catalog/Pipeline/Audio).

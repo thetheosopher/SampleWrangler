@@ -102,6 +102,7 @@ public:
 
                 const int year = currentYear();
                 g.drawText("\u00A9 " + juce::String(year) + " Michael A. McCloskey and GitHub Copilot", content.removeFromTop(24), juce::Justification::centredLeft, false);
+                g.drawText("Licensed under the MIT License", content.removeFromTop(22), juce::Justification::centredLeft, false);
 
                 content.removeFromTop(8);
 

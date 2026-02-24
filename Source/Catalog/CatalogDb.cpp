@@ -166,8 +166,8 @@ namespace sw
                            size_bytes, modified_time, duration_sec, total_samples,
                            sample_rate, channels, bit_depth, bitrate_kbps, codec,
                            bpm, key, loop_type, acid_root_note, acid_beats,
-                           loop_start_sample, loop_end_sample, index_only)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           loop_start_sample, loop_end_sample, index_only, slice_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(root_id, relative_path) DO UPDATE SET
             filename      = excluded.filename,
             extension     = excluded.extension,
@@ -187,7 +187,8 @@ namespace sw
                 acid_beats     = excluded.acid_beats,
                 loop_start_sample = excluded.loop_start_sample,
                 loop_end_sample   = excluded.loop_end_sample,
-            index_only    = excluded.index_only
+            index_only    = excluded.index_only,
+            slice_count   = excluded.slice_count
     )SQL";
 
         sqlite3_stmt *stmt = nullptr;
@@ -273,6 +274,11 @@ namespace sw
 
         sqlite3_bind_int(stmt, 21, rec.indexOnly ? 1 : 0);
 
+        if (rec.sliceCount)
+            sqlite3_bind_int(stmt, 22, *rec.sliceCount);
+        else
+            sqlite3_bind_null(stmt, 22);
+
         bool ok = sqlite3_step(stmt) == SQLITE_DONE;
         sqlite3_finalize(stmt);
         return ok;
@@ -325,7 +331,7 @@ namespace sw
              f.size_bytes, f.modified_time, f.duration_sec, f.total_samples,
              f.sample_rate, f.channels, f.bit_depth, f.bitrate_kbps, f.codec,
                f.bpm, f.key, f.loop_type, f.acid_root_note, f.acid_beats,
-               f.loop_start_sample, f.loop_end_sample, f.index_only
+               f.loop_start_sample, f.loop_end_sample, f.index_only, f.slice_count
         FROM files f
         JOIN files_fts fts ON fts.rowid = f.id
         WHERE files_fts MATCH ?
@@ -379,6 +385,8 @@ namespace sw
             if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
                 r.loopEndSample = sqlite3_column_int64(stmt, 20);
             r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
+            if (sqlite3_column_type(stmt, 22) != SQLITE_NULL)
+                r.sliceCount = sqlite3_column_int(stmt, 22);
 
             results.push_back(std::move(r));
         }
@@ -397,7 +405,7 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-               loop_start_sample, loop_end_sample, index_only
+               loop_start_sample, loop_end_sample, index_only, slice_count
         FROM files
         ORDER BY id DESC
         LIMIT ?
@@ -449,6 +457,8 @@ namespace sw
             if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
                 r.loopEndSample = sqlite3_column_int64(stmt, 20);
             r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
+            if (sqlite3_column_type(stmt, 22) != SQLITE_NULL)
+                r.sliceCount = sqlite3_column_int(stmt, 22);
 
             results.push_back(std::move(r));
         }
@@ -467,7 +477,7 @@ namespace sw
              f.size_bytes, f.modified_time, f.duration_sec, f.total_samples,
              f.sample_rate, f.channels, f.bit_depth, f.bitrate_kbps, f.codec,
                f.bpm, f.key, f.loop_type, f.acid_root_note, f.acid_beats,
-               f.loop_start_sample, f.loop_end_sample, f.index_only
+               f.loop_start_sample, f.loop_end_sample, f.index_only, f.slice_count
         FROM files f
         JOIN files_fts fts ON fts.rowid = f.id
         WHERE f.root_id = ? AND files_fts MATCH ?
@@ -522,6 +532,8 @@ namespace sw
             if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
                 r.loopEndSample = sqlite3_column_int64(stmt, 20);
             r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
+            if (sqlite3_column_type(stmt, 22) != SQLITE_NULL)
+                r.sliceCount = sqlite3_column_int(stmt, 22);
 
             results.push_back(std::move(r));
         }
@@ -541,7 +553,7 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-               loop_start_sample, loop_end_sample, index_only
+               loop_start_sample, loop_end_sample, index_only, slice_count
         FROM files
         WHERE root_id = ?
         ORDER BY id DESC
@@ -595,12 +607,113 @@ namespace sw
             if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
                 r.loopEndSample = sqlite3_column_int64(stmt, 20);
             r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
+            if (sqlite3_column_type(stmt, 22) != SQLITE_NULL)
+                r.sliceCount = sqlite3_column_int(stmt, 22);
 
             results.push_back(std::move(r));
         }
 
         sqlite3_finalize(stmt);
         return results;
+    }
+
+    std::pair<int64_t, int64_t> CatalogDb::fileStatsAll()
+    {
+        SW_DB_GUARD;
+
+        const char *sql = "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM files";
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return {0, 0};
+
+        std::pair<int64_t, int64_t> stats{0, 0};
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            stats.first = sqlite3_column_int64(stmt, 0);
+            stats.second = sqlite3_column_int64(stmt, 1);
+        }
+
+        sqlite3_finalize(stmt);
+        return stats;
+    }
+
+    std::pair<int64_t, int64_t> CatalogDb::fileStatsByRoot(int64_t rootId)
+    {
+        SW_DB_GUARD;
+
+        const char *sql = "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM files WHERE root_id = ?";
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return {0, 0};
+
+        sqlite3_bind_int64(stmt, 1, rootId);
+
+        std::pair<int64_t, int64_t> stats{0, 0};
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            stats.first = sqlite3_column_int64(stmt, 0);
+            stats.second = sqlite3_column_int64(stmt, 1);
+        }
+
+        sqlite3_finalize(stmt);
+        return stats;
+    }
+
+    std::pair<int64_t, int64_t> CatalogDb::fileStatsSearch(const std::string &query)
+    {
+        SW_DB_GUARD;
+
+        const char *sql = R"SQL(
+        SELECT COUNT(*), COALESCE(SUM(f.size_bytes), 0)
+        FROM files f
+        JOIN files_fts fts ON fts.rowid = f.id
+        WHERE files_fts MATCH ?
+    )SQL";
+
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return {0, 0};
+
+        sqlite3_bind_text(stmt, 1, query.c_str(), -1, SQLITE_TRANSIENT);
+
+        std::pair<int64_t, int64_t> stats{0, 0};
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            stats.first = sqlite3_column_int64(stmt, 0);
+            stats.second = sqlite3_column_int64(stmt, 1);
+        }
+
+        sqlite3_finalize(stmt);
+        return stats;
+    }
+
+    std::pair<int64_t, int64_t> CatalogDb::fileStatsSearchByRoot(int64_t rootId, const std::string &query)
+    {
+        SW_DB_GUARD;
+
+        const char *sql = R"SQL(
+        SELECT COUNT(*), COALESCE(SUM(f.size_bytes), 0)
+        FROM files f
+        JOIN files_fts fts ON fts.rowid = f.id
+        WHERE f.root_id = ? AND files_fts MATCH ?
+    )SQL";
+
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+            return {0, 0};
+
+        sqlite3_bind_int64(stmt, 1, rootId);
+        sqlite3_bind_text(stmt, 2, query.c_str(), -1, SQLITE_TRANSIENT);
+
+        std::pair<int64_t, int64_t> stats{0, 0};
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            stats.first = sqlite3_column_int64(stmt, 0);
+            stats.second = sqlite3_column_int64(stmt, 1);
+        }
+
+        sqlite3_finalize(stmt);
+        return stats;
     }
 
     std::optional<FileRecord> CatalogDb::fileById(int64_t fileId)
@@ -612,7 +725,7 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-               loop_start_sample, loop_end_sample, index_only
+               loop_start_sample, loop_end_sample, index_only, slice_count
         FROM files WHERE id = ?
     )SQL";
 
@@ -666,6 +779,8 @@ namespace sw
         if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
             r.loopEndSample = sqlite3_column_int64(stmt, 20);
         r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
+        if (sqlite3_column_type(stmt, 22) != SQLITE_NULL)
+            r.sliceCount = sqlite3_column_int(stmt, 22);
 
         sqlite3_finalize(stmt);
         return r;
@@ -680,7 +795,7 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-               loop_start_sample, loop_end_sample, index_only
+               loop_start_sample, loop_end_sample, index_only, slice_count
         FROM files
         WHERE root_id = ? AND relative_path = ?
         LIMIT 1
@@ -737,6 +852,8 @@ namespace sw
         if (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
             r.loopEndSample = sqlite3_column_int64(stmt, 20);
         r.indexOnly = sqlite3_column_int(stmt, 21) != 0;
+        if (sqlite3_column_type(stmt, 22) != SQLITE_NULL)
+            r.sliceCount = sqlite3_column_int(stmt, 22);
 
         sqlite3_finalize(stmt);
         return r;

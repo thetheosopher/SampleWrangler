@@ -51,6 +51,18 @@ namespace sw
             const int millis = totalMilliseconds % 1000;
             return juce::String::formatted("%02d:%02d:%02d.%03d", hours, minutes, secs, millis);
         }
+
+        juce::String formatBytes(int64_t bytes)
+        {
+            const double value = static_cast<double>(juce::jmax<int64_t>(0, bytes));
+            if (value < 1024.0)
+                return juce::String(static_cast<int64_t>(value)) + " B";
+            if (value < 1024.0 * 1024.0)
+                return juce::String(value / 1024.0, 1) + " KB";
+            if (value < 1024.0 * 1024.0 * 1024.0)
+                return juce::String(value / (1024.0 * 1024.0), 1) + " MB";
+            return juce::String(value / (1024.0 * 1024.0 * 1024.0), 1) + " GB";
+        }
     }
 
     namespace
@@ -774,6 +786,9 @@ namespace sw
 
     MainComponent::MainComponent()
     {
+        // Initialise REX SDK early so Scanner knows whether REX files are playable.
+        RexManager::initialize();
+
         setWantsKeyboardFocus(true);
         setMouseClickGrabsKeyboardFocus(true);
         tooltipWindow.setLookAndFeel(&tooltipLookAndFeel);
@@ -1294,6 +1309,8 @@ namespace sw
         vacuumDbToolbarButton.setLookAndFeel(nullptr);
         themeToolbarButton.setLookAndFeel(nullptr);
         tooltipWindow.setLookAndFeel(nullptr);
+
+        RexManager::shutdown();
     }
 
     bool MainComponent::keyPressed(const juce::KeyPress &key)
@@ -1336,19 +1353,31 @@ namespace sw
         g.setColour(darkModeEnabled ? juce::Colour(0xff1f242b) : juce::Colour(0xffedf1f5));
         g.fillRect(statusBarBounds);
 
+        auto statusContent = statusBarBounds.reduced(10, 0);
+        auto rightStatusArea = statusContent.removeFromRight(130);
+        auto leftStatusArea = statusContent.removeFromLeft(statusContent.getWidth() / 2);
+        auto centerStatusArea = statusContent;
+
         g.setColour(scanInProgress ? (darkModeEnabled ? juce::Colour(0xff8fe3a8) : juce::Colour(0xff1c6a3c))
                                    : (darkModeEnabled ? juce::Colour(0xff95a89b) : juce::Colour(0xff62756a)));
         g.setFont(16.0f);
         g.drawFittedText("Scan: " + scanStatusText,
-                         statusBarBounds.reduced(10, 0),
+                         leftStatusArea,
                          juce::Justification::centredLeft,
+                         1);
+
+        g.setColour(darkModeEnabled ? juce::Colour(0xffb8c7d6) : juce::Colour(0xff465a6d));
+        g.setFont(14.0f);
+        g.drawFittedText(fileStatsStatusText,
+                         centerStatusArea,
+                         juce::Justification::centred,
                          1);
 
         const bool autoPlayEnabled = previewPanel.isAutoPlayEnabled();
         g.setColour(autoPlayEnabled ? (darkModeEnabled ? juce::Colour(0xff8cc8ff) : juce::Colour(0xff1f5f9b))
                                     : (darkModeEnabled ? juce::Colour(0xff9aa3ad) : juce::Colour(0xff5f6974)));
         g.drawFittedText("Auto: " + juce::String(previewPanel.isAutoPlayEnabled() ? "On" : "Off"),
-                         statusBarBounds.reduced(10, 0),
+                         rightStatusArea,
                          juce::Justification::centredRight,
                          1);
 
@@ -1563,20 +1592,39 @@ namespace sw
     {
         currentSearchQuery = query;
 
+        std::pair<int64_t, int64_t> stats{0, 0};
+        const auto statsQuery = query.empty() ? std::string{} : (query + "*");
+
         if (!selectedRootFilterId.has_value())
         {
             if (query.empty())
-                resultsPanel.setResults(catalogDb.listRecentFiles(300));
+            {
+                resultsPanel.setResults(catalogDb.listRecentFiles(-1));
+                stats = catalogDb.fileStatsAll();
+            }
             else
-                resultsPanel.setResults(catalogDb.searchFiles(query + "*", 300));
-            return;
+            {
+                resultsPanel.setResults(catalogDb.searchFiles(statsQuery, -1));
+                stats = catalogDb.fileStatsSearch(statsQuery);
+            }
+        }
+        else
+        {
+            const int64_t rootId = *selectedRootFilterId;
+            if (query.empty())
+            {
+                resultsPanel.setResults(catalogDb.listRecentFilesByRoot(rootId, -1));
+                stats = catalogDb.fileStatsByRoot(rootId);
+            }
+            else
+            {
+                resultsPanel.setResults(catalogDb.searchFilesByRoot(rootId, statsQuery, -1));
+                stats = catalogDb.fileStatsSearchByRoot(rootId, statsQuery);
+            }
         }
 
-        const int64_t rootId = *selectedRootFilterId;
-        if (query.empty())
-            resultsPanel.setResults(catalogDb.listRecentFilesByRoot(rootId, 300));
-        else
-            resultsPanel.setResults(catalogDb.searchFilesByRoot(rootId, query + "*", 300));
+        fileStatsStatusText = juce::String(stats.first) + " files • " + formatBytes(stats.second);
+        repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
     }
 
     void MainComponent::refreshOutputDeviceList()
@@ -2133,10 +2181,11 @@ namespace sw
         setPreviewLoadingState(true, requestId);
 
         const auto absolutePath = resolveAbsolutePath(rootPath, file.relativePath);
+        const auto fileExtension = file.extension;
         juce::Component::SafePointer<MainComponent> safeThis(this);
 
         jobQueue.enqueue(Job{
-            [safeThis, absolutePath, previewType, playWhenReady, requestId](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
+            [safeThis, absolutePath, fileExtension, previewType, playWhenReady, requestId](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
             {
                 auto finishLoadingOnMessageThread = [safeThis, requestId]
                 {
@@ -2176,6 +2225,76 @@ namespace sw
                     finishLoadingOnMessageThread();
                     return;
                 }
+
+#if SW_HAVE_REX
+                // --- REX / RX2 decode path ---
+                if (isRexExtension(fileExtension) && RexManager::isAvailable())
+                {
+                    double rexSampleRate = 0.0;
+                    auto rexBuffer = RexManager::decodeToBuffer(absolutePath, rexSampleRate);
+                    if (!rexBuffer || rexBuffer->getNumSamples() <= 0)
+                    {
+                        failLoadingWithToastOnMessageThread("Unable to load preview for " + previewType + ": REX decode failed.");
+                        return;
+                    }
+
+                    const int numChannels = rexBuffer->getNumChannels();
+                    const int numSamples = rexBuffer->getNumSamples();
+                    auto previewBuffer = std::make_shared<juce::AudioBuffer<float>>(std::move(*rexBuffer));
+
+                    constexpr int targetPeakCount = 1600;
+                    const int peakCount = std::max(1, std::min(targetPeakCount, numSamples));
+                    const int samplesPerPeak = std::max(1, numSamples / peakCount);
+
+                    auto peaks = std::make_shared<std::vector<std::vector<float>>>();
+                    peaks->resize(static_cast<size_t>(numChannels));
+                    for (auto &channelPeaks : *peaks)
+                        channelPeaks.resize(static_cast<size_t>(peakCount), 0.0f);
+
+                    for (int p = 0; p < peakCount; ++p)
+                    {
+                        const int start = p * samplesPerPeak;
+                        const int end = std::min(numSamples, start + samplesPerPeak);
+
+                        for (int ch = 0; ch < numChannels; ++ch)
+                        {
+                            float maxAbs = 0.0f;
+                            const auto *channelData = previewBuffer->getReadPointer(ch);
+                            for (int s = start; s < end; ++s)
+                                maxAbs = std::max(maxAbs, std::abs(channelData[s]));
+
+                            (*peaks)[static_cast<size_t>(ch)][static_cast<size_t>(p)] = maxAbs;
+                        }
+                    }
+
+                    const double sampleRate = rexSampleRate;
+
+                    juce::MessageManager::callAsync([safeThis, previewBuffer, peaks, sampleRate, playWhenReady, absolutePath, requestId]
+                                                    {
+                        if (safeThis == nullptr)
+                            return;
+
+                        if (safeThis->previewLoadRequestCounter.load(std::memory_order_acquire) != requestId)
+                        {
+                            safeThis->setPreviewLoadingState(false, requestId);
+                            return;
+                        }
+
+                        safeThis->audioEngine.loadPreviewBuffer(previewBuffer, sampleRate);
+                        safeThis->updateWindowTitleForLoadedFile(absolutePath);
+                        safeThis->waveformPanel.setPeaks(*peaks);
+                        safeThis->waveformPanel.setPlayheadNormalized(0.0f);
+                        safeThis->updateWaveformLoopOverlay();
+                        safeThis->setPreviewLoadingState(false, requestId);
+                        if (playWhenReady)
+                        {
+                            safeThis->suppressAutoAdvanceAfterManualStop = false;
+                            safeThis->audioEngine.play();
+                        } });
+
+                    return; // REX path handled
+                }
+#endif // SW_HAVE_REX
 
                 thread_local juce::AudioFormatManager formatManager;
                 thread_local bool formatsRegistered = false;

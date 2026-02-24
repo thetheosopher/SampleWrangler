@@ -104,6 +104,8 @@ namespace sw
             return false;
         if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN loop_end_sample INTEGER;"))
             return false;
+        if (!addColumnIfMissing("ALTER TABLE files ADD COLUMN slice_count INTEGER;"))
+            return false;
 
         // --- FTS virtual table for fast filename / path search ---
         if (!exec(db, R"SQL(

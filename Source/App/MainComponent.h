@@ -9,6 +9,7 @@
 #include "Catalog/WaveCacheBlobDb.h"
 #include "Pipeline/JobQueue.h"
 #include "Pipeline/Scanner.h"
+#include "Pipeline/RexManager.h"
 #include "Audio/AudioEngine.h"
 #include "Audio/MidiInputRouter.h"
 
@@ -203,6 +204,7 @@ namespace sw
         juce::String toolbarFeedbackText;
         int toolbarFeedbackTicksRemaining = 0;
         juce::String scanStatusText{"Idle"};
+        juce::String fileStatsStatusText{"0 files • 0 B"};
         juce::String playbackPositionText{"00:00:00.000"};
         juce::Font playbackTimeFont{juce::FontOptions(20.0f)
                                         .withName(juce::Font::getDefaultMonospacedFontName())

@@ -90,3 +90,12 @@ conaninfo.txt
 *.gz
 *.bz2
 *.rar
+
+# Audio sample files
+*.rx2
+*.wav
+*.rex
+*.aiff
+*.flac
+*.aif
+*.mp3

@@ -36,6 +36,42 @@ if(MSVC)
 endif()
 
 # ---------------------------------------------------------------------------
+# REX SDK (dynamic loader — compiles REX.c and loads REX Shared Library.dll
+# at runtime via LoadLibrary / GetProcAddress)
+# ---------------------------------------------------------------------------
+set(SW_HAVE_REX 0)
+set(REX_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/REXSDK_Win_1.9.2")
+
+if(EXISTS "${REX_SDK_DIR}/REX.c" AND EXISTS "${REX_SDK_DIR}/REX.h")
+    message(STATUS "REX SDK found: ${REX_SDK_DIR}")
+
+    # Compile REX.c as a small static C library (like sqlite3).
+    add_library(rex_loader STATIC "${REX_SDK_DIR}/REX.c")
+    target_include_directories(rex_loader PUBLIC "${REX_SDK_DIR}")
+    target_compile_definitions(rex_loader PRIVATE
+        REX_WINDOWS=1
+        REX_MAC=0
+        REX_DLL_LOADER=1
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    if(MSVC)
+        set_property(TARGET rex_loader PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(rex_loader PRIVATE /W0
+            $<$<CONFIG:Debug>:/MTd>
+            $<$<NOT:$<CONFIG:Debug>>:/MT>
+        )
+    endif()
+    # Link shlwapi.lib + version.lib — REX.c uses them for path helpers and
+    # GetFileVersionInfoSize / VerQueryValue.
+    target_link_libraries(rex_loader PRIVATE shlwapi version)
+
+    set(SW_HAVE_REX 1)
+else()
+    message(STATUS "REX SDK not found at ${REX_SDK_DIR}; REX file support disabled")
+endif()
+
+# ---------------------------------------------------------------------------
 # Source files
 # ---------------------------------------------------------------------------
 set(APP_SOURCES
@@ -75,6 +111,8 @@ set(PIPELINE_SOURCES
     Source/Pipeline/Analyzer.h
     Source/Pipeline/WaveformCache.cpp
     Source/Pipeline/WaveformCache.h
+    Source/Pipeline/RexManager.cpp
+    Source/Pipeline/RexManager.h
 )
 
 set(AUDIO_SOURCES
@@ -188,6 +226,7 @@ target_compile_definitions(SampleWrangler PRIVATE
     # Enable ASIO audio device support on Windows
     JUCE_ASIO=1
     SW_HAVE_RUBBERBAND=${SW_HAVE_RUBBERBAND}
+    SW_HAVE_REX=${SW_HAVE_REX}
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SampleWrangler,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SampleWrangler,JUCE_VERSION>"
 )
@@ -221,11 +260,42 @@ if(SW_HAVE_RUBBERBAND)
     target_link_libraries(SampleWrangler PRIVATE rubberband)
 endif()
 
+if(SW_HAVE_REX)
+    target_link_libraries(SampleWrangler PRIVATE rex_loader)
+    target_include_directories(SampleWrangler PRIVATE "${REX_SDK_DIR}")
+    target_compile_definitions(SampleWrangler PRIVATE
+        REX_WINDOWS=1
+        REX_MAC=0
+        REX_DLL_LOADER=1
+    )
+
+    # Copy REX Shared Library DLL next to the built executable so it can
+    # be found at runtime by REXInitializeDLL_DirPath().
+    set(REX_DLL_DIR_DEBUG   "${REX_SDK_DIR}/Win/x64/Testing")
+    set(REX_DLL_DIR_RELEASE "${REX_SDK_DIR}/Win/x64/Deployment")
+    set(REX_DLL_SOURCE "$<IF:$<CONFIG:Debug>,${REX_DLL_DIR_DEBUG}/REX Shared Library Testing.dll,${REX_DLL_DIR_RELEASE}/REX Shared Library.dll>")
+    add_custom_command(TARGET SampleWrangler POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${REX_DLL_SOURCE}"
+            "$<TARGET_FILE_DIR:SampleWrangler>"
+        COMMENT "Copying REX Shared Library DLL alongside executable"
+        COMMAND_EXPAND_LISTS
+    )
+endif()
+
 include(GNUInstallDirs)
 install(TARGETS SampleWrangler
     RUNTIME DESTINATION .
     COMPONENT Runtime
 )
+
+if(SW_HAVE_REX)
+    install(FILES
+        "${REX_SDK_DIR}/Win/x64/Deployment/REX Shared Library.dll"
+        DESTINATION .
+        COMPONENT Runtime
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # Packaging (CPack)
@@ -236,6 +306,7 @@ set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Sample Wrangler")
 set(CPACK_PACKAGE_FILE_NAME "SampleWrangler-${PROJECT_VERSION}-win64")
 set(CPACK_PACKAGE_EXECUTABLES "SampleWrangler;Sample Wrangler")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_MONOLITHIC_INSTALL OFF)
 set(CPACK_COMPONENTS_ALL Runtime)
 set(CPACK_INSTALL_CMAKE_PROJECTS
@@ -247,6 +318,7 @@ if(WIN32)
     set(CPACK_WIX_UI_REF "WixUI_FeatureTree")
     set(CPACK_WIX_PROPERTY_ARPSYSTEMCOMPONENT "0")
     set(CPACK_WIX_PROPERTY_ARPNAME "Sample Wrangler")
+    set(CPACK_WIX_LICENSE_RTF "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LicenseMIT.rtf")
     set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/images/SampleWrangler.ico")
     set(CPACK_WIX_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SampleWranglerShortcuts.wxs")
 endif()
@@ -278,6 +350,7 @@ add_executable(SampleWranglerScannerAppleLoopTests
     Tests/ScannerAppleLoopTests.cpp
     Source/Pipeline/Scanner.cpp
     Source/Pipeline/JobQueue.cpp
+    Source/Pipeline/RexManager.cpp
     Source/Catalog/CatalogDb.cpp
     Source/Catalog/WaveCacheBlobDb.cpp
     Source/Catalog/CatalogSchema.cpp
@@ -292,6 +365,20 @@ target_link_libraries(SampleWranglerScannerAppleLoopTests PRIVATE
     juce::juce_core
     juce::juce_audio_formats
 )
+
+target_compile_definitions(SampleWranglerScannerAppleLoopTests PRIVATE
+    SW_HAVE_REX=${SW_HAVE_REX}
+)
+
+if(SW_HAVE_REX)
+    target_link_libraries(SampleWranglerScannerAppleLoopTests PRIVATE rex_loader)
+    target_include_directories(SampleWranglerScannerAppleLoopTests PRIVATE "${REX_SDK_DIR}")
+    target_compile_definitions(SampleWranglerScannerAppleLoopTests PRIVATE
+        REX_WINDOWS=1
+        REX_MAC=0
+        REX_DLL_LOADER=1
+    )
+endif()
 
 if(MSVC)
     target_link_options(SampleWranglerCatalogDbTests PRIVATE

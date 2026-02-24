@@ -7,7 +7,7 @@ Goal: a fast audio sample librarian MVP with:
 - SQLite catalog + fast search
 - Waveform overview caching (peaks) + simple waveform viewer
 - ASIO preview playback (required) with minimal sampler-like preview features (pitch via MIDI + on-screen keyboard, loop points, basic polyphony)
-- No REX/REX2/NKI playback in MVP (index-only)
+- REX/RX2 playback via Propellerhead REX SDK (dynamic DLL loading); NKI index-only
 UI can be minimal/functional for MVP.
 
 ## Tech Stack
@@ -46,8 +46,8 @@ Typical workflow:
 - Backup/restore: copy DB + settings + waveform cache.
 
 ## Audio File Formats (MVP)
-Playable: WAV (incl ACID), AIFF (incl Apple Loop), FLAC, MP3.
-Index-only: REX/REX2, NKI, SFZ.
+Playable: WAV (incl ACID), AIFF (incl Apple Loop), FLAC, MP3, REX/RX2 (via Propellerhead REX SDK).
+Index-only: NKI, SFZ.
 
 ### MP3 note
 JUCE `MP3AudioFormat` requires enabling `JUCE_USE_MP3AUDIOFORMAT` and includes a legal disclaimer; be explicit if enabling it and document the choice. [5](https://docs.juce.com/develop/classjuce_1_1MP3AudioFormat.html)

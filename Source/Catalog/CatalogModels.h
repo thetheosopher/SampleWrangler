@@ -43,6 +43,7 @@ namespace sw
         std::optional<int> acidBeats;
         std::optional<int64_t> loopStartSample;
         std::optional<int64_t> loopEndSample;
+        std::optional<int> sliceCount; // REX/RX2 slice count
 
         /// True if this format is index-only (REX, NKI, SFZ) and cannot be auditioned.
         bool indexOnly = false;

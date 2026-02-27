@@ -77,50 +77,55 @@ namespace sw
             juce::Graphics g(image);
             g.addTransform(juce::AffineTransform::scale(scale));
 
-            juce::Path folderBack;
-            folderBack.addRoundedRectangle(2.0f, 6.2f, 20.0f, 12.4f, 2.1f);
+            const auto folderBodyFill = juce::Colour(0xffe8c783);
+            const auto folderTabFill = juce::Colour(0xffd6b068);
+            const auto folderStroke = juce::Colour(0xff9a8150);
+            const auto badgeFill = juce::Colour(0xffa8caa8);
+            const auto badgeStroke = juce::Colour(0xff5ea27f);
+            const auto plusColour = juce::Colour(0xffefefef);
+
+            juce::Path folderBody;
+            folderBody.startNewSubPath(1.0f, 5.9f);
+            folderBody.lineTo(8.0f, 5.9f);
+            folderBody.lineTo(9.8f, 4.2f);
+            folderBody.lineTo(23.0f, 4.2f);
+            folderBody.lineTo(23.0f, 21.5f);
+            folderBody.lineTo(1.0f, 21.5f);
+            folderBody.closeSubPath();
 
             juce::Path folderTab;
-            folderTab.addRoundedRectangle(4.0f, 3.2f, 7.8f, 4.2f, 1.2f);
+            folderTab.startNewSubPath(1.0f, 6.0f);
+            folderTab.lineTo(7.6f, 6.0f);
+            folderTab.lineTo(9.3f, 7.7f);
+            folderTab.lineTo(7.7f, 9.0f);
+            folderTab.lineTo(1.0f, 9.0f);
+            folderTab.closeSubPath();
 
-            juce::Path folderFront;
-            folderFront.startNewSubPath(2.2f, 9.5f);
-            folderFront.lineTo(22.0f, 9.5f);
-            folderFront.lineTo(18.6f, 20.0f);
-            folderFront.lineTo(4.4f, 20.0f);
-            folderFront.closeSubPath();
+            g.setColour(folderBodyFill);
+            g.fillPath(folderBody);
 
-            g.setColour(juce::Colour(0x1a000000));
-            g.fillRoundedRectangle(2.2f, 6.7f, 20.0f, 13.2f, 2.1f);
-
-            g.setColour(juce::Colour(0xffd8a64a));
-            g.fillPath(folderBack);
-
-            g.setColour(juce::Colour(0xfff6d178));
+            g.setColour(folderTabFill);
             g.fillPath(folderTab);
 
-            g.setColour(juce::Colour(0xfff1c258));
-            g.fillPath(folderFront);
+            g.setColour(folderStroke);
+            g.strokePath(folderBody, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath(folderTab, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-            juce::Path flapHighlight;
-            flapHighlight.startNewSubPath(3.4f, 10.6f);
-            flapHighlight.lineTo(21.0f, 10.6f);
-            flapHighlight.lineTo(20.5f, 12.1f);
-            flapHighlight.lineTo(3.0f, 12.1f);
-            flapHighlight.closeSubPath();
-            g.setColour(juce::Colour(0x55ffffff));
-            g.fillPath(flapHighlight);
+            g.setColour(badgeFill);
+            g.fillEllipse(13.0f, 13.0f, 10.0f, 10.0f);
+
+            g.setColour(badgeStroke);
+            g.drawEllipse(13.0f, 13.0f, 10.0f, 10.0f, 0.9f);
+
+            g.setColour(plusColour);
+            g.fillRect(17.5f, 15.4f, 1.0f, 5.2f);
+            g.fillRect(15.4f, 17.5f, 5.2f, 1.0f);
 
             const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
-                                         ? colour.withAlpha(0.22f)
-                                         : colour.withAlpha(0.14f);
+                                         ? colour.withAlpha(0.16f)
+                                         : colour.withAlpha(0.08f);
             g.setColour(tintOverlay);
-            g.strokePath(folderFront, juce::PathStrokeType(0.65f));
-
-            g.setColour(juce::Colour(0xc06b4a1f));
-            g.strokePath(folderBack, juce::PathStrokeType(0.9f));
-            g.strokePath(folderFront, juce::PathStrokeType(0.9f));
-            g.strokePath(folderTab, juce::PathStrokeType(0.85f));
+            g.fillEllipse(13.0f, 13.0f, 10.0f, 10.0f);
 
             auto drawable = std::make_unique<juce::DrawableImage>();
             drawable->setImage(image);

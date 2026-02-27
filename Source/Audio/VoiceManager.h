@@ -98,8 +98,7 @@ namespace sw
                          const juce::AudioBuffer<float> &srcBuffer,
                          juce::AudioBuffer<float> &outputBuffer,
                          int startSample,
-                         int numSamples,
-                         bool useFastRubberBandForVoice);
+                         int numSamples);
 
         /// Find an idle voice slot, or steal the oldest if all are occupied.
         /// Called ONLY from the audio thread.
@@ -151,7 +150,6 @@ namespace sw
         std::atomic<int64_t> loopEndSample{-1};
         std::atomic<int> previewRootMidiNote{60};
         std::atomic<bool> preserveLengthEnabled{false};
-        std::atomic<bool> stretchHighQualityEnabled{false};
         std::atomic<int> loadedSampleLength{0};
 
         // Cached pitch for updateAllVoicePitch commands

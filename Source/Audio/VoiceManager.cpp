@@ -133,28 +133,17 @@ namespace sw
             if (segmentSamples <= 0)
                 return;
 
-            int activeVoiceCount = 0;
-            for (const auto &v : voices)
-            {
-                if (v.active)
-                    ++activeVoiceCount;
-            }
-            const int primaryIdx = juce::jlimit(0, kMaxVoices - 1, primaryVoiceIndex.load(std::memory_order_relaxed));
-
             for (int voiceIndex = 0; voiceIndex < kMaxVoices; ++voiceIndex)
             {
                 auto &v = voices[static_cast<size_t>(voiceIndex)];
                 if (!v.active)
                     continue;
 
-                const bool useFastRubberBandForVoice = (activeVoiceCount >= 2) && (voiceIndex != primaryIdx);
-
                 renderVoice(v,
                             *buf,
                             *info.buffer,
                             info.startSample + segmentOffset,
-                            segmentSamples,
-                            useFastRubberBandForVoice);
+                            segmentSamples);
             }
         };
 
@@ -387,12 +376,13 @@ namespace sw
                                    const juce::AudioBuffer<float> &srcBuffer,
                                    juce::AudioBuffer<float> &outputBuffer,
                                    int startSample,
-                                   int numSamples,
-                                   bool useFastRubberBandForVoice)
+                                   int numSamples)
     {
         const int numOutChannels = outputBuffer.getNumChannels();
         const int numSrcChannels = srcBuffer.getNumChannels();
         const int srcLength = srcBuffer.getNumSamples();
+        const float *srcReadPtr0 = srcBuffer.getReadPointer(0);
+        const float *srcReadPtr1 = srcBuffer.getReadPointer((numSrcChannels > 1) ? 1 : 0);
 
         const int64_t configuredLoopStart = loopStartSample.load(std::memory_order_relaxed);
         const int64_t configuredLoopEnd = loopEndSample.load(std::memory_order_relaxed);
@@ -412,18 +402,9 @@ namespace sw
 #endif
         const bool preserveLength = preserveLengthEnabled.load(std::memory_order_relaxed) && std::abs(rate - 1.0) > 0.0001;
 #if SW_HAVE_RUBBERBAND
-        const bool useRubberBandHq = preserveLength &&
-                                     stretchHighQualityEnabled.load(std::memory_order_relaxed) &&
-                                     voice.rubberBandInitialized;
-
-        if (useRubberBandHq)
-        {
-            voice.setRubberBandQualityMode(useFastRubberBandForVoice
-                                               ? Voice::RubberBandQualityMode::Fast
-                                               : Voice::RubberBandQualityMode::HighQuality);
-        }
+        const bool useRubberBandRt = preserveLength && voice.rubberBandInitialized;
 #else
-        constexpr bool useRubberBandHq = false;
+        constexpr bool useRubberBandRt = false;
 #endif
 
         const float fadeRate = 1.0f / (Voice::kFadeTimeMs * 0.001f * static_cast<float>(currentSampleRate));
@@ -527,8 +508,16 @@ namespace sw
             const int idx0 = juce::jlimit(0, srcLength - 1, static_cast<int>(wrappedPos));
             const int idx1 = juce::jmin(idx0 + 1, srcLength - 1);
             const float frac = static_cast<float>(wrappedPos - static_cast<double>(idx0));
-            const float s0 = srcBuffer.getSample(channel, idx0);
-            const float s1 = srcBuffer.getSample(channel, idx1);
+            const float *srcRead = nullptr;
+            if (channel == 0)
+                srcRead = srcReadPtr0;
+            else if (channel == 1)
+                srcRead = srcReadPtr1;
+            else
+                srcRead = srcBuffer.getReadPointer(channel);
+
+            const float s0 = srcRead[idx0];
+            const float s1 = srcRead[idx1];
             return s0 + frac * (s1 - s0);
         };
 
@@ -540,6 +529,139 @@ namespace sw
             voice.resetRubberBand();
 #endif
         }
+
+#if SW_HAVE_RUBBERBAND
+    if (preserveLength && useRubberBandRt && voice.rubberBandStretcher != nullptr && voice.rubberBandBuffers != nullptr)
+        {
+            constexpr int kRenderChunkSize = 256;
+            std::array<float, kRenderChunkSize> mixLeft{};
+            std::array<float, kRenderChunkSize> mixRight{};
+
+            int rendered = 0;
+            while (rendered < numSamples && voice.active)
+            {
+                const int chunkSamples = juce::jmin(kRenderChunkSize, numSamples - rendered);
+                int produced = 0;
+
+                while (produced < chunkSamples && voice.active)
+                {
+                    while (voice.rubberBandOutputFifoCount <= 0 && voice.active)
+                    {
+                        const int needed = juce::jmax(1, voice.rubberBandProcessBlockSize - voice.rubberBandInputFill);
+                        bool fedAny = false;
+
+                        for (int feed = 0; feed < needed; ++feed)
+                        {
+                            if (hasLoopRegion && pos >= loopEndExclusive)
+                            {
+                                pos = static_cast<double>(loopStart) + std::fmod(pos - static_cast<double>(loopStart), loopLength);
+                            }
+
+                            if (pos >= static_cast<double>(srcLength))
+                            {
+                                if (isLoopOn && srcLength > 0)
+                                {
+                                    pos = std::fmod(pos, static_cast<double>(srcLength));
+                                }
+                                else
+                                {
+                                    voice.forceOff();
+                                    break;
+                                }
+                            }
+
+                            const bool provideStartPadSample = (voice.rubberBandPreferredStartPadRemaining > 0);
+                            for (int ch = 0; ch < Voice::kMaxChannels; ++ch)
+                            {
+                                float inSample = 0.0f;
+                                if (!provideStartPadSample)
+                                {
+                                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                                    inSample = readInterpolatedSample(srcCh, pos);
+                                }
+
+                                voice.rubberBandBuffers->input[static_cast<size_t>(ch)][static_cast<size_t>(voice.rubberBandInputFill)] = inSample;
+                            }
+
+                            if (provideStartPadSample)
+                                --voice.rubberBandPreferredStartPadRemaining;
+                            else
+                                pos += (bsr / currentSampleRate);
+
+                            ++voice.rubberBandInputFill;
+                            fedAny = true;
+                        }
+
+                        if (voice.rubberBandInputFill >= voice.rubberBandProcessBlockSize || fedAny)
+                            voice.processRubberBandIfReady();
+
+                        while (voice.rubberBandOutputFifoCount > 0 && voice.rubberBandStartDelayRemaining > 0)
+                        {
+                            voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
+                            --voice.rubberBandOutputFifoCount;
+                            --voice.rubberBandStartDelayRemaining;
+                        }
+
+                        if (!fedAny && voice.rubberBandOutputFifoCount <= 0)
+                            break;
+                    }
+
+                    const float gain = voice.advanceFade(fadeRate);
+                    if (gain <= 0.0f)
+                        break;
+
+                    float outSampleLeft = voice.rubberBandLastOutputLeft;
+                    float outSampleRight = voice.rubberBandLastOutputRight;
+
+                    if (voice.rubberBandOutputFifoCount > 0)
+                    {
+                        outSampleLeft = voice.rubberBandBuffers->outputFifo[0][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
+                        outSampleRight = voice.rubberBandBuffers->outputFifo[1][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
+                        voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
+                        --voice.rubberBandOutputFifoCount;
+                        voice.rubberBandLastOutputLeft = outSampleLeft;
+                        voice.rubberBandLastOutputRight = outSampleRight;
+                    }
+
+                    float rubberBandAttackGain = 1.0f;
+                    if (voice.rubberBandOnsetBlendRemaining > 0)
+                    {
+                        const int clampedRemaining = juce::jlimit(0,
+                                                                  Voice::kRubberBandOnsetBlendSamples,
+                                                                  voice.rubberBandOnsetBlendRemaining);
+                        rubberBandAttackGain = 1.0f - (static_cast<float>(clampedRemaining) /
+                                                       static_cast<float>(Voice::kRubberBandOnsetBlendSamples));
+                        --voice.rubberBandOnsetBlendRemaining;
+                    }
+
+                    mixLeft[static_cast<size_t>(produced)] = outSampleLeft * rubberBandAttackGain * gain;
+                    mixRight[static_cast<size_t>(produced)] = outSampleRight * rubberBandAttackGain * gain;
+                    ++produced;
+                }
+
+                if (produced <= 0)
+                    break;
+
+                outputBuffer.addFrom(0,
+                                     startSample + rendered,
+                                     mixLeft.data(),
+                                     produced);
+
+                for (int ch = 1; ch < numOutChannels; ++ch)
+                {
+                    outputBuffer.addFrom(ch,
+                                         startSample + rendered,
+                                         mixRight.data(),
+                                         produced);
+                }
+
+                rendered += produced;
+            }
+
+            voice.playbackPos = pos;
+            return;
+        }
+#endif
 
         for (int i = 0; i < numSamples; ++i)
         {
@@ -573,10 +695,10 @@ namespace sw
 
             if (preserveLength)
             {
-                if (useRubberBandHq)
+                if (useRubberBandRt)
                 {
 #if SW_HAVE_RUBBERBAND
-                    if (voice.rubberBandStretcher != nullptr)
+                    if (voice.rubberBandStretcher != nullptr && voice.rubberBandBuffers != nullptr)
                     {
                         if (std::abs(currentPitchRatio - voice.rubberBandLastPitchScale) > 1.0e-6)
                         {
@@ -594,7 +716,7 @@ namespace sw
                                 const int srcCh = (ch < numSrcChannels) ? ch : 0;
                                 inSample = readInterpolatedSample(srcCh, pos);
                             }
-                            voice.rubberBandInput[static_cast<size_t>(ch)][static_cast<size_t>(voice.rubberBandInputFill)] = inSample;
+                            voice.rubberBandBuffers->input[static_cast<size_t>(ch)][static_cast<size_t>(voice.rubberBandInputFill)] = inSample;
                         }
 
                         if (provideStartPadSample)
@@ -603,7 +725,14 @@ namespace sw
                             pos += (bsr / currentSampleRate);
 
                         ++voice.rubberBandInputFill;
-                        voice.processRubberBandIfReady();
+                        if (voice.rubberBandInputFill >= voice.rubberBandProcessBlockSize)
+                        {
+                            voice.processRubberBandIfReady();
+                        }
+                        else if (voice.rubberBandOutputFifoCount == 0 && (i & 0x0F) == 0)
+                        {
+                            voice.processRubberBandIfReady();
+                        }
 
                         while (voice.rubberBandOutputFifoCount > 0 && voice.rubberBandStartDelayRemaining > 0)
                         {
@@ -616,18 +745,32 @@ namespace sw
                         float outSampleRight = 0.0f;
                         if (voice.rubberBandOutputFifoCount > 0)
                         {
-                            outSampleLeft = voice.rubberBandOutputFifo[0][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
-                            outSampleRight = voice.rubberBandOutputFifo[1][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
+                            outSampleLeft = voice.rubberBandBuffers->outputFifo[0][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
+                            outSampleRight = voice.rubberBandBuffers->outputFifo[1][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
                             voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
                             --voice.rubberBandOutputFifoCount;
+                            voice.rubberBandLastOutputLeft = outSampleLeft;
+                            voice.rubberBandLastOutputRight = outSampleRight;
                         }
                         else
                         {
-                            const int fallbackIndex = juce::jlimit(0, Voice::kRubberBandMaxBlockSize - 1,
-                                                                   voice.rubberBandInputFill > 0 ? voice.rubberBandInputFill - 1 : 0);
-                            outSampleLeft = voice.rubberBandInput[0][static_cast<size_t>(fallbackIndex)];
-                            outSampleRight = voice.rubberBandInput[1][static_cast<size_t>(fallbackIndex)];
+                            outSampleLeft = voice.rubberBandLastOutputLeft;
+                            outSampleRight = voice.rubberBandLastOutputRight;
                         }
+
+                        float rubberBandAttackGain = 1.0f;
+                        if (voice.rubberBandOnsetBlendRemaining > 0)
+                        {
+                            const int clampedRemaining = juce::jlimit(0,
+                                                                      Voice::kRubberBandOnsetBlendSamples,
+                                                                      voice.rubberBandOnsetBlendRemaining);
+                            rubberBandAttackGain = 1.0f - (static_cast<float>(clampedRemaining) /
+                                                           static_cast<float>(Voice::kRubberBandOnsetBlendSamples));
+                            --voice.rubberBandOnsetBlendRemaining;
+                        }
+
+                        outSampleLeft *= rubberBandAttackGain;
+                        outSampleRight *= rubberBandAttackGain;
 
                         for (int ch = 0; ch < numOutChannels; ++ch)
                         {
@@ -680,8 +823,16 @@ namespace sw
                 for (int ch = 0; ch < numOutChannels; ++ch)
                 {
                     int srcCh = (ch < numSrcChannels) ? ch : 0;
-                    float s0 = srcBuffer.getSample(srcCh, idx0);
-                    float s1 = srcBuffer.getSample(srcCh, idx1);
+                    const float *srcRead = nullptr;
+                    if (srcCh == 0)
+                        srcRead = srcReadPtr0;
+                    else if (srcCh == 1)
+                        srcRead = srcReadPtr1;
+                    else
+                        srcRead = srcBuffer.getReadPointer(srcCh);
+
+                    float s0 = srcRead[idx0];
+                    float s1 = srcRead[idx1];
                     outputBuffer.addSample(ch, startSample + i, (s0 + frac * (s1 - s0)) * gain);
                 }
 
@@ -803,16 +954,16 @@ namespace sw
 
     void VoiceManager::setStretchHighQualityEnabled(bool enabled)
     {
-#if SW_HAVE_RUBBERBAND
-        stretchHighQualityEnabled.store(enabled, std::memory_order_relaxed);
-#else
         (void)enabled;
-#endif
     }
 
     bool VoiceManager::isStretchHighQualityEnabled() const noexcept
     {
-        return stretchHighQualityEnabled.load(std::memory_order_relaxed);
+#if SW_HAVE_RUBBERBAND
+        return true;
+#else
+        return false;
+#endif
     }
 
     bool VoiceManager::isStretchHighQualityAvailable() const noexcept

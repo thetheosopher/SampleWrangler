@@ -51,12 +51,16 @@ namespace sw
 #if SW_HAVE_RUBBERBAND
         static constexpr int kRubberBandMaxBlockSize = 4096;
         static constexpr int kRubberBandOutputFifoSize = 32768;
+        static constexpr int kRubberBandOnsetBlendSamples = 256;
 
-        enum class RubberBandQualityMode
-        {
-            HighQuality,
-            Fast
-        };
+    struct RubberBandBuffers
+    {
+        std::array<std::array<float, kRubberBandMaxBlockSize>, kMaxChannels> input{};
+        std::array<std::array<float, kRubberBandMaxBlockSize>, kMaxChannels> processOutput{};
+        std::array<std::array<float, kRubberBandOutputFifoSize>, kMaxChannels> outputFifo{};
+        std::array<const float *, kMaxChannels> inputPtrs{};
+        std::array<float *, kMaxChannels> processOutputPtrs{};
+    };
 #endif
 
         // --- Fade envelope -------------------------------------------------------
@@ -89,24 +93,21 @@ namespace sw
         uint64_t triggerAge = 0;
 
 #if SW_HAVE_RUBBERBAND
-        std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandStretcherHighQuality;
-        std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandStretcherFast;
+        std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandStretcherOwner;
         RubberBand::RubberBandStretcher *rubberBandStretcher = nullptr;
-        RubberBandQualityMode rubberBandQualityMode = RubberBandQualityMode::HighQuality;
         int rubberBandProcessBlockSize = 0;
         int rubberBandInputFill = 0;
         int rubberBandStartDelayRemaining = 0;
         int rubberBandPreferredStartPadRemaining = 0;
         bool rubberBandInitialized = false;
         double rubberBandLastPitchScale = 1.0;
-        std::array<std::array<float, kRubberBandMaxBlockSize>, kMaxChannels> rubberBandInput{};
-        std::array<std::array<float, kRubberBandMaxBlockSize>, kMaxChannels> rubberBandProcessOutput{};
-        std::array<std::array<float, kRubberBandOutputFifoSize>, kMaxChannels> rubberBandOutputFifo{};
+        std::unique_ptr<RubberBandBuffers> rubberBandBuffers;
         int rubberBandOutputFifoRead = 0;
         int rubberBandOutputFifoWrite = 0;
         int rubberBandOutputFifoCount = 0;
-        std::array<const float *, kMaxChannels> rubberBandInputPtrs{};
-        std::array<float *, kMaxChannels> rubberBandProcessOutputPtrs{};
+        int rubberBandOnsetBlendRemaining = 0;
+        float rubberBandLastOutputLeft = 0.0f;
+        float rubberBandLastOutputRight = 0.0f;
 #endif
 
         // --- Trigger / Release (audio thread ONLY) --------------------------------
@@ -170,36 +171,24 @@ namespace sw
         }
 
 #if SW_HAVE_RUBBERBAND
-        static auto makeRubberBandOptions(RubberBandQualityMode qualityMode)
+        static auto makeRubberBandOptions()
         {
             auto options = RubberBand::RubberBandStretcher::OptionProcessRealTime |
                            RubberBand::RubberBandStretcher::OptionThreadingNever |
-                           RubberBand::RubberBandStretcher::OptionChannelsTogether;
-
-            if (qualityMode == RubberBandQualityMode::HighQuality)
-            {
-                options |= RubberBand::RubberBandStretcher::OptionEngineFiner |
-                           RubberBand::RubberBandStretcher::OptionWindowStandard |
-                           RubberBand::RubberBandStretcher::OptionFormantPreserved |
-                           RubberBand::RubberBandStretcher::OptionPitchHighConsistency;
-            }
-            else
-            {
-                options |= RubberBand::RubberBandStretcher::OptionEngineFaster |
-                           RubberBand::RubberBandStretcher::OptionWindowShort;
-            }
+                           RubberBand::RubberBandStretcher::OptionChannelsTogether |
+                           RubberBand::RubberBandStretcher::OptionEngineFaster |
+                           RubberBand::RubberBandStretcher::OptionWindowStandard;
 
             return options;
         }
 
         static std::unique_ptr<RubberBand::RubberBandStretcher> createRubberBandStretcher(double sampleRate,
-                                                                                          double initialPitchRatio,
-                                                                                          RubberBandQualityMode qualityMode)
+                                                                                          double initialPitchRatio)
         {
             return std::make_unique<RubberBand::RubberBandStretcher>(
                 static_cast<size_t>(juce::jlimit(8000, 192000, static_cast<int>(std::round(sampleRate)))),
                 static_cast<size_t>(kMaxChannels),
-                makeRubberBandOptions(qualityMode),
+                makeRubberBandOptions(),
                 1.0,
                 initialPitchRatio);
         }
@@ -209,29 +198,31 @@ namespace sw
             if (rubberBandInitialized)
                 return;
 
-            rubberBandStretcherHighQuality = createRubberBandStretcher(sampleRate,
-                                                                       initialPitchRatio,
-                                                                       RubberBandQualityMode::HighQuality);
-            rubberBandStretcherFast = createRubberBandStretcher(sampleRate,
-                                                                initialPitchRatio,
-                                                                RubberBandQualityMode::Fast);
+            rubberBandStretcherOwner = createRubberBandStretcher(sampleRate,
+                                                                 initialPitchRatio);
 
-            if (rubberBandStretcherHighQuality == nullptr || rubberBandStretcherFast == nullptr)
+            if (rubberBandStretcherOwner == nullptr)
             {
                 rubberBandInitialized = false;
-                rubberBandStretcherHighQuality.reset();
-                rubberBandStretcherFast.reset();
+                rubberBandStretcherOwner.reset();
                 rubberBandStretcher = nullptr;
                 return;
             }
 
-            rubberBandStretcher = rubberBandStretcherHighQuality.get();
-            rubberBandQualityMode = RubberBandQualityMode::HighQuality;
+            if (rubberBandBuffers == nullptr)
+                rubberBandBuffers = std::make_unique<RubberBandBuffers>();
+
+            if (rubberBandBuffers == nullptr)
+            {
+                rubberBandInitialized = false;
+                rubberBandStretcherOwner.reset();
+                rubberBandStretcher = nullptr;
+                return;
+            }
+
+            rubberBandStretcher = rubberBandStretcherOwner.get();
             rubberBandStretcher->setDebugLevel(0);
             rubberBandStretcher->setMaxProcessSize(static_cast<size_t>(kRubberBandMaxBlockSize));
-
-            rubberBandStretcherFast->setDebugLevel(0);
-            rubberBandStretcherFast->setMaxProcessSize(static_cast<size_t>(kRubberBandMaxBlockSize));
 
             rubberBandProcessBlockSize = static_cast<int>(rubberBandStretcher->getSamplesRequired());
             if (rubberBandProcessBlockSize <= 0 || rubberBandProcessBlockSize > kRubberBandMaxBlockSize)
@@ -241,28 +232,9 @@ namespace sw
             resetRubberBand();
         }
 
-        void setRubberBandQualityMode(RubberBandQualityMode qualityMode)
-        {
-            if (!rubberBandInitialized)
-                return;
-
-            if (rubberBandQualityMode == qualityMode)
-                return;
-
-            rubberBandQualityMode = qualityMode;
-            rubberBandStretcher = (qualityMode == RubberBandQualityMode::HighQuality)
-                                      ? rubberBandStretcherHighQuality.get()
-                                      : rubberBandStretcherFast.get();
-
-            if (rubberBandStretcher == nullptr)
-                return;
-
-            resetRubberBand();
-        }
-
         void resetRubberBand()
         {
-            if (rubberBandStretcher == nullptr)
+            if (rubberBandStretcher == nullptr || rubberBandBuffers == nullptr)
                 return;
 
             rubberBandStretcher->reset();
@@ -274,6 +246,9 @@ namespace sw
             rubberBandOutputFifoRead = 0;
             rubberBandOutputFifoWrite = 0;
             rubberBandOutputFifoCount = 0;
+            rubberBandOnsetBlendRemaining = kRubberBandOnsetBlendSamples;
+            rubberBandLastOutputLeft = 0.0f;
+            rubberBandLastOutputRight = 0.0f;
             rubberBandPreferredStartPadRemaining = static_cast<int>(rubberBandStretcher->getPreferredStartPad());
             rubberBandStartDelayRemaining = static_cast<int>(rubberBandStretcher->getStartDelay());
 
@@ -283,15 +258,21 @@ namespace sw
 
             for (int ch = 0; ch < kMaxChannels; ++ch)
             {
-                std::fill(rubberBandInput[static_cast<size_t>(ch)].begin(), rubberBandInput[static_cast<size_t>(ch)].end(), 0.0f);
-                std::fill(rubberBandProcessOutput[static_cast<size_t>(ch)].begin(), rubberBandProcessOutput[static_cast<size_t>(ch)].end(), 0.0f);
-                std::fill(rubberBandOutputFifo[static_cast<size_t>(ch)].begin(), rubberBandOutputFifo[static_cast<size_t>(ch)].end(), 0.0f);
+                std::fill(rubberBandBuffers->input[static_cast<size_t>(ch)].begin(),
+                          rubberBandBuffers->input[static_cast<size_t>(ch)].end(),
+                          0.0f);
+                std::fill(rubberBandBuffers->processOutput[static_cast<size_t>(ch)].begin(),
+                          rubberBandBuffers->processOutput[static_cast<size_t>(ch)].end(),
+                          0.0f);
+                std::fill(rubberBandBuffers->outputFifo[static_cast<size_t>(ch)].begin(),
+                          rubberBandBuffers->outputFifo[static_cast<size_t>(ch)].end(),
+                          0.0f);
             }
         }
 
         void processRubberBandIfReady()
         {
-            if (rubberBandStretcher == nullptr)
+            if (rubberBandStretcher == nullptr || rubberBandBuffers == nullptr)
                 return;
 
             while (true)
@@ -306,19 +287,19 @@ namespace sw
 
                 for (int ch = 0; ch < kMaxChannels; ++ch)
                 {
-                    rubberBandInputPtrs[static_cast<size_t>(ch)] = rubberBandInput[static_cast<size_t>(ch)].data();
-                    rubberBandProcessOutputPtrs[static_cast<size_t>(ch)] = rubberBandProcessOutput[static_cast<size_t>(ch)].data();
+                    rubberBandBuffers->inputPtrs[static_cast<size_t>(ch)] = rubberBandBuffers->input[static_cast<size_t>(ch)].data();
+                    rubberBandBuffers->processOutputPtrs[static_cast<size_t>(ch)] = rubberBandBuffers->processOutput[static_cast<size_t>(ch)].data();
                 }
 
-                rubberBandStretcher->process(rubberBandInputPtrs.data(), static_cast<size_t>(required), false);
+                rubberBandStretcher->process(rubberBandBuffers->inputPtrs.data(), static_cast<size_t>(required), false);
 
                 const int remaining = rubberBandInputFill - required;
                 if (remaining > 0)
                 {
                     for (int ch = 0; ch < kMaxChannels; ++ch)
                     {
-                        std::memmove(rubberBandInput[static_cast<size_t>(ch)].data(),
-                                     rubberBandInput[static_cast<size_t>(ch)].data() + required,
+                        std::memmove(rubberBandBuffers->input[static_cast<size_t>(ch)].data(),
+                                     rubberBandBuffers->input[static_cast<size_t>(ch)].data() + required,
                                      static_cast<size_t>(remaining) * sizeof(float));
                     }
                 }
@@ -328,7 +309,7 @@ namespace sw
                 while (available > 0)
                 {
                     const size_t toRetrieve = static_cast<size_t>(juce::jmin(available, kRubberBandMaxBlockSize));
-                    const size_t retrieved = rubberBandStretcher->retrieve(rubberBandProcessOutputPtrs.data(), toRetrieve);
+                    const size_t retrieved = rubberBandStretcher->retrieve(rubberBandBuffers->processOutputPtrs.data(), toRetrieve);
                     if (retrieved == 0)
                         break;
 
@@ -342,8 +323,8 @@ namespace sw
 
                         for (int ch = 0; ch < kMaxChannels; ++ch)
                         {
-                            rubberBandOutputFifo[static_cast<size_t>(ch)][static_cast<size_t>(rubberBandOutputFifoWrite)] =
-                                rubberBandProcessOutput[static_cast<size_t>(ch)][frame];
+                            rubberBandBuffers->outputFifo[static_cast<size_t>(ch)][static_cast<size_t>(rubberBandOutputFifoWrite)] =
+                                rubberBandBuffers->processOutput[static_cast<size_t>(ch)][frame];
                         }
 
                         rubberBandOutputFifoWrite = (rubberBandOutputFifoWrite + 1) % kRubberBandOutputFifoSize;

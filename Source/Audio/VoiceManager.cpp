@@ -679,6 +679,12 @@ namespace sw
         }
 #endif
 
+        constexpr int kMaxDirectMixChannels = 32;
+        const int directMixChannels = juce::jmin(numOutChannels, kMaxDirectMixChannels);
+        std::array<float *, kMaxDirectMixChannels> outputWritePtrs{};
+        for (int ch = 0; ch < directMixChannels; ++ch)
+            outputWritePtrs[static_cast<size_t>(ch)] = outputBuffer.getWritePointer(ch, startSample);
+
         for (int i = 0; i < numSamples; ++i)
         {
             // Check if voice finished fading out
@@ -788,7 +794,13 @@ namespace sw
                         outSampleLeft *= rubberBandAttackGain;
                         outSampleRight *= rubberBandAttackGain;
 
-                        for (int ch = 0; ch < numOutChannels; ++ch)
+                        for (int ch = 0; ch < directMixChannels; ++ch)
+                        {
+                            const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
+                            outputWritePtrs[static_cast<size_t>(ch)][i] += sample * gain;
+                        }
+
+                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
                         {
                             const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
                             outputBuffer.addSample(ch, startSample + i, sample * gain);
@@ -809,7 +821,15 @@ namespace sw
 
                 const float blend = 1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples));
 
-                for (int ch = 0; ch < numOutChannels; ++ch)
+                for (int ch = 0; ch < directMixChannels; ++ch)
+                {
+                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                    const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
+                    const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                    outputWritePtrs[static_cast<size_t>(ch)][i] += (sampleA + (sampleB - sampleA) * blend) * gain;
+                }
+
+                for (int ch = directMixChannels; ch < numOutChannels; ++ch)
                 {
                     const int srcCh = (ch < numSrcChannels) ? ch : 0;
                     const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
@@ -836,7 +856,23 @@ namespace sw
                 int idx1 = std::min(idx0 + 1, srcLength - 1);
                 float frac = static_cast<float>(pos - static_cast<double>(idx0));
 
-                for (int ch = 0; ch < numOutChannels; ++ch)
+                for (int ch = 0; ch < directMixChannels; ++ch)
+                {
+                    int srcCh = (ch < numSrcChannels) ? ch : 0;
+                    const float *srcRead = nullptr;
+                    if (srcCh == 0)
+                        srcRead = srcReadPtr0;
+                    else if (srcCh == 1)
+                        srcRead = srcReadPtr1;
+                    else
+                        srcRead = srcBuffer.getReadPointer(srcCh);
+
+                    float s0 = srcRead[idx0];
+                    float s1 = srcRead[idx1];
+                    outputWritePtrs[static_cast<size_t>(ch)][i] += (s0 + frac * (s1 - s0)) * gain;
+                }
+
+                for (int ch = directMixChannels; ch < numOutChannels; ++ch)
                 {
                     int srcCh = (ch < numSrcChannels) ? ch : 0;
                     const float *srcRead = nullptr;

@@ -133,17 +133,32 @@ namespace sw
             if (segmentSamples <= 0)
                 return;
 
+            RenderContext renderContext;
+            renderContext.configuredLoopStart = loopStartSample.load(std::memory_order_relaxed);
+            renderContext.configuredLoopEnd = loopEndSample.load(std::memory_order_relaxed);
+            renderContext.loopEnabled = loopEnabled.load(std::memory_order_relaxed);
+            renderContext.preserveLengthEnabled = preserveLengthEnabled.load(std::memory_order_relaxed);
+            renderContext.bufferSampleRate = bufferSampleRate.load(std::memory_order_relaxed);
+
+            std::array<int, kMaxVoices> activeVoiceIndices{};
+            int activeVoiceCount = 0;
+
             for (int voiceIndex = 0; voiceIndex < kMaxVoices; ++voiceIndex)
             {
                 auto &v = voices[static_cast<size_t>(voiceIndex)];
-                if (!v.active)
-                    continue;
+                if (v.active)
+                    activeVoiceIndices[static_cast<size_t>(activeVoiceCount++)] = voiceIndex;
+            }
 
+            for (int index = 0; index < activeVoiceCount; ++index)
+            {
+                auto &v = voices[static_cast<size_t>(activeVoiceIndices[static_cast<size_t>(index)])];
                 renderVoice(v,
                             *buf,
                             *info.buffer,
                             info.startSample + segmentOffset,
-                            segmentSamples);
+                            segmentSamples,
+                            renderContext);
             }
         };
 
@@ -376,7 +391,8 @@ namespace sw
                                    const juce::AudioBuffer<float> &srcBuffer,
                                    juce::AudioBuffer<float> &outputBuffer,
                                    int startSample,
-                                   int numSamples)
+                                   int numSamples,
+                                   const RenderContext &renderContext)
     {
         const int numOutChannels = outputBuffer.getNumChannels();
         const int numSrcChannels = srcBuffer.getNumChannels();
@@ -384,23 +400,23 @@ namespace sw
         const float *srcReadPtr0 = srcBuffer.getReadPointer(0);
         const float *srcReadPtr1 = srcBuffer.getReadPointer((numSrcChannels > 1) ? 1 : 0);
 
-        const int64_t configuredLoopStart = loopStartSample.load(std::memory_order_relaxed);
-        const int64_t configuredLoopEnd = loopEndSample.load(std::memory_order_relaxed);
+        const int64_t configuredLoopStart = renderContext.configuredLoopStart;
+        const int64_t configuredLoopEnd = renderContext.configuredLoopEnd;
 
         const int loopStart = static_cast<int>(juce::jlimit<int64_t>(0, srcLength - 1, configuredLoopStart));
         const int loopEnd = static_cast<int>(juce::jlimit<int64_t>(0, srcLength - 1, configuredLoopEnd));
-        const bool isLoopOn = loopEnabled.load(std::memory_order_relaxed);
+        const bool isLoopOn = renderContext.loopEnabled;
         const bool hasLoopRegion = isLoopOn && configuredLoopStart >= 0 && configuredLoopEnd >= 0 && loopEnd > loopStart;
         const double loopEndExclusive = static_cast<double>(loopEnd) + 1.0;
         const double loopLength = static_cast<double>(loopEnd - loopStart) + 1.0;
 
         double pos = voice.playbackPos;
-        const double bsr = bufferSampleRate.load(std::memory_order_relaxed);
+        const double bsr = renderContext.bufferSampleRate;
         const double rate = voice.playbackRate * (bsr / currentSampleRate);
 #if SW_HAVE_RUBBERBAND
         const double currentPitchRatio = voice.pitchRatio;
 #endif
-        const bool preserveLength = preserveLengthEnabled.load(std::memory_order_relaxed) && std::abs(rate - 1.0) > 0.0001;
+        const bool preserveLength = renderContext.preserveLengthEnabled && std::abs(rate - 1.0) > 0.0001;
 #if SW_HAVE_RUBBERBAND
         const bool useRubberBandRt = preserveLength && voice.rubberBandInitialized;
 #else
@@ -531,7 +547,7 @@ namespace sw
         }
 
 #if SW_HAVE_RUBBERBAND
-    if (preserveLength && useRubberBandRt && voice.rubberBandStretcher != nullptr && voice.rubberBandBuffers != nullptr)
+        if (preserveLength && useRubberBandRt && voice.rubberBandStretcher != nullptr && voice.rubberBandBuffers != nullptr)
         {
             constexpr int kRenderChunkSize = 256;
             std::array<float, kRenderChunkSize> mixLeft{};

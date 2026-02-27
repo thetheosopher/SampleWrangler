@@ -93,12 +93,22 @@ namespace sw
         void getActiveMidiPlaybackHeadsNormalized(std::vector<float> &headsOut) const;
 
     private:
+        struct RenderContext
+        {
+            int64_t configuredLoopStart = -1;
+            int64_t configuredLoopEnd = -1;
+            bool loopEnabled = false;
+            bool preserveLengthEnabled = false;
+            double bufferSampleRate = 44100.0;
+        };
+
         /// Render one voice for the given block, adding its output into the buffer.
         void renderVoice(Voice &voice,
                          const juce::AudioBuffer<float> &srcBuffer,
                          juce::AudioBuffer<float> &outputBuffer,
                          int startSample,
-                         int numSamples);
+                         int numSamples,
+                         const RenderContext &renderContext);
 
         /// Find an idle voice slot, or steal the oldest if all are occupied.
         /// Called ONLY from the audio thread.

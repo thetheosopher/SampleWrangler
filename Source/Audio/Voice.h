@@ -53,14 +53,14 @@ namespace sw
         static constexpr int kRubberBandOutputFifoSize = 32768;
         static constexpr int kRubberBandOnsetBlendSamples = 256;
 
-    struct RubberBandBuffers
-    {
-        std::array<std::array<float, kRubberBandMaxBlockSize>, kMaxChannels> input{};
-        std::array<std::array<float, kRubberBandMaxBlockSize>, kMaxChannels> processOutput{};
-        std::array<std::array<float, kRubberBandOutputFifoSize>, kMaxChannels> outputFifo{};
-        std::array<const float *, kMaxChannels> inputPtrs{};
-        std::array<float *, kMaxChannels> processOutputPtrs{};
-    };
+        struct RubberBandBuffers
+        {
+            std::array<std::array<float, kRubberBandMaxBlockSize>, kMaxChannels> input{};
+            std::array<std::array<float, kRubberBandMaxBlockSize>, kMaxChannels> processOutput{};
+            std::array<std::array<float, kRubberBandOutputFifoSize>, kMaxChannels> outputFifo{};
+            std::array<const float *, kMaxChannels> inputPtrs{};
+            std::array<float *, kMaxChannels> processOutputPtrs{};
+        };
 #endif
 
         // --- Fade envelope -------------------------------------------------------

@@ -134,7 +134,6 @@ namespace sw
 
         std::unique_ptr<juce::Drawable> createRescanIcon(const juce::Colour colour)
         {
-            juce::ignoreUnused(colour);
             constexpr int iconSizePx = 96;
             constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
 
@@ -142,60 +141,98 @@ namespace sw
             juce::Graphics g(image);
             g.addTransform(juce::AffineTransform::scale(scale));
 
-            constexpr float arcRadius = 7.0f;
-            constexpr float arcEndAngle = juce::MathConstants<float>::pi * 1.89f;
+            const auto folderBodyFill = juce::Colour(0xffe8c783);
+            const auto folderTabFill = juce::Colour(0xffd6b068);
+            const auto folderStroke = juce::Colour(0xff9a8150);
+            const auto refreshBlue = juce::Colour(0xff4fa8e9);
+            const auto refreshOutline = juce::Colour(0xff15184f);
 
-            juce::Path circularArrow;
-            circularArrow.addCentredArc(12.0f, 12.0f, arcRadius, arcRadius, 0.0f,
-                                        juce::MathConstants<float>::pi * 0.23f,
-                                        arcEndAngle,
-                                        true);
+            juce::Path folderBody;
+            folderBody.startNewSubPath(1.0f, 5.9f);
+            folderBody.lineTo(8.0f, 5.9f);
+            folderBody.lineTo(9.8f, 4.2f);
+            folderBody.lineTo(23.0f, 4.2f);
+            folderBody.lineTo(23.0f, 21.5f);
+            folderBody.lineTo(1.0f, 21.5f);
+            folderBody.closeSubPath();
 
-            const float arcEndX = 12.0f + arcRadius * std::cos(arcEndAngle);
-            const float arcEndY = 12.0f + arcRadius * std::sin(arcEndAngle);
+            juce::Path folderTab;
+            folderTab.startNewSubPath(1.0f, 6.0f);
+            folderTab.lineTo(7.6f, 6.0f);
+            folderTab.lineTo(9.3f, 7.7f);
+            folderTab.lineTo(7.7f, 9.0f);
+            folderTab.lineTo(1.0f, 9.0f);
+            folderTab.closeSubPath();
 
-            const juce::Point<float> tangent(-std::sin(arcEndAngle), std::cos(arcEndAngle));
-            const juce::Point<float> normal(-tangent.y, tangent.x);
+            g.setColour(folderBodyFill);
+            g.fillPath(folderBody);
+            g.setColour(folderTabFill);
+            g.fillPath(folderTab);
+            g.setColour(folderStroke);
+            g.strokePath(folderBody, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath(folderTab, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-            constexpr float arrowTipOffset = 3.8f * 1.5f;
-            constexpr float arrowTailOffset = 0.9f * 1.5f;
-            constexpr float arrowHalfWidth = 2.9f * 1.5f;
+            constexpr float cx = 17.3f;
+            constexpr float cy = 15.8f;
+            constexpr float radius = 4.45f;
+            constexpr float sweep = juce::MathConstants<float>::twoPi * 0.76f;
 
-            const auto arcEnd = juce::Point<float>(arcEndX, arcEndY);
-            const auto baseCenter = arcEnd + tangent * arrowTailOffset;
-            const auto tip = arcEnd - tangent * arrowTipOffset;
-            const auto baseA = baseCenter + normal * arrowHalfWidth;
-            const auto baseB = baseCenter - normal * arrowHalfWidth;
+            const float topStart = juce::MathConstants<float>::pi * 1.02f;
+            const float topEnd = topStart + sweep;
 
-            juce::Path arrowHead;
-            arrowHead.addTriangle(tip.x, tip.y,
-                                  baseA.x, baseA.y,
-                                  baseB.x, baseB.y);
+            const float bottomStart = juce::MathConstants<float>::pi * 0.00f;
+            const float bottomEnd = bottomStart + sweep;
 
-            juce::Path arrowNeck;
-            arrowNeck.startNewSubPath((arcEnd + tangent * 0.15f).x, (arcEnd + tangent * 0.15f).y);
-            arrowNeck.lineTo((baseCenter - tangent * 0.9f).x, (baseCenter - tangent * 0.9f).y);
+            juce::Path topArc;
+            topArc.addCentredArc(cx, cy, radius, radius, 0.0f, topStart, topEnd, true);
 
-            juce::Path arrowHeadBackdrop;
-            arrowHeadBackdrop.addTriangle((tip - tangent * 0.35f).x, (tip - tangent * 0.35f).y,
-                                          (baseA + tangent * 0.2f + normal * 0.35f).x, (baseA + tangent * 0.2f + normal * 0.35f).y,
-                                          (baseB + tangent * 0.2f - normal * 0.35f).x, (baseB + tangent * 0.2f - normal * 0.35f).y);
+            juce::Path bottomArc;
+            bottomArc.addCentredArc(cx, cy, radius, radius, 0.0f, bottomStart, bottomEnd, true);
 
-            g.setColour(juce::Colour(0xff2f8dff));
-            g.strokePath(circularArrow, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            auto makeArrowHead = [](juce::Point<float> tip,
+                                    juce::Point<float> tangent,
+                                    float length,
+                                    float width)
+            {
+                juce::Point<float> normal(-tangent.y, tangent.x);
+                juce::Path head;
+                const auto baseCenter = tip + tangent * length;
+                const auto baseA = baseCenter + normal * width;
+                const auto baseB = baseCenter - normal * width;
+                head.addTriangle(tip.x, tip.y,
+                                 baseA.x, baseA.y,
+                                 baseB.x, baseB.y);
+                return head;
+            };
 
-            g.setColour(juce::Colour(0xff1b5e8f));
-            g.strokePath(circularArrow, juce::PathStrokeType(0.55f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            const juce::Point<float> topTip(cx + radius * std::cos(topEnd),
+                                            cy + radius * std::sin(topEnd));
+            const juce::Point<float> topTangent(-std::sin(topEnd), std::cos(topEnd));
+            juce::Path topHead = makeArrowHead(topTip, topTangent, 1.35f, 1.05f);
 
-            // Opaque backing ensures the head reads clearly over the ring.
-            g.setColour(juce::Colours::white);
-            g.fillPath(arrowHeadBackdrop);
+            const juce::Point<float> bottomTip(cx + radius * std::cos(bottomEnd),
+                                               cy + radius * std::sin(bottomEnd));
+            const juce::Point<float> bottomTangent(-std::sin(bottomEnd), std::cos(bottomEnd));
+            juce::Path bottomHead = makeArrowHead(bottomTip, bottomTangent, 1.35f, 1.05f);
 
-            g.setColour(juce::Colour(0xff2abf85));
-            g.fillPath(arrowHead);
-            g.strokePath(arrowNeck, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-            g.setColour(juce::Colour(0xff1a8b66));
-            g.strokePath(arrowHead, juce::PathStrokeType(0.65f));
+            g.setColour(refreshBlue);
+            g.strokePath(topArc, juce::PathStrokeType(2.45f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath(bottomArc, juce::PathStrokeType(2.45f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.fillPath(topHead);
+            g.fillPath(bottomHead);
+
+            g.setColour(refreshOutline);
+            g.strokePath(topArc, juce::PathStrokeType(0.45f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath(bottomArc, juce::PathStrokeType(0.45f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath(topHead, juce::PathStrokeType(0.35f));
+            g.strokePath(bottomHead, juce::PathStrokeType(0.35f));
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.16f)
+                                         : colour.withAlpha(0.08f);
+            g.setColour(tintOverlay);
+            g.fillPath(topHead);
+            g.fillPath(bottomHead);
 
             auto drawable = std::make_unique<juce::DrawableImage>();
             drawable->setImage(image);
@@ -435,77 +472,101 @@ namespace sw
             juce::Graphics g(image);
             g.addTransform(juce::AffineTransform::scale(scale));
 
-            juce::Path folderBack;
-            folderBack.addRoundedRectangle(2.0f, 6.4f, 15.6f, 11.8f, 1.9f);
+            const auto folderBodyFill = juce::Colour(0xffe8c783);
+            const auto folderTabFill = juce::Colour(0xffd6b068);
+            const auto folderStroke = juce::Colour(0xff9a8150);
+            const auto rocketBlue = juce::Colour(0xff2f8dff);
+            const auto rocketBlueDark = juce::Colour(0xff1b5e8f);
+            const auto rocketWindow = juce::Colour(0xffbfe4ff);
+            const auto flameOrange = juce::Colour(0xffffa24a);
+            const auto flameYellow = juce::Colour(0xffffdc6b);
+
+            juce::Path folderBody;
+            folderBody.startNewSubPath(1.0f, 5.9f);
+            folderBody.lineTo(8.0f, 5.9f);
+            folderBody.lineTo(9.8f, 4.2f);
+            folderBody.lineTo(23.0f, 4.2f);
+            folderBody.lineTo(23.0f, 21.5f);
+            folderBody.lineTo(1.0f, 21.5f);
+            folderBody.closeSubPath();
 
             juce::Path folderTab;
-            folderTab.addRoundedRectangle(3.8f, 3.5f, 6.8f, 3.7f, 1.1f);
+            folderTab.startNewSubPath(1.0f, 6.0f);
+            folderTab.lineTo(7.6f, 6.0f);
+            folderTab.lineTo(9.3f, 7.7f);
+            folderTab.lineTo(7.7f, 9.0f);
+            folderTab.lineTo(1.0f, 9.0f);
+            folderTab.closeSubPath();
 
-            juce::Path folderFront;
-            folderFront.startNewSubPath(2.2f, 9.4f);
-            folderFront.lineTo(18.0f, 9.4f);
-            folderFront.lineTo(15.2f, 19.4f);
-            folderFront.lineTo(4.0f, 19.4f);
-            folderFront.closeSubPath();
+            g.setColour(folderBodyFill);
+            g.fillPath(folderBody);
 
-            g.setColour(juce::Colour(0x1a000000));
-            g.fillRoundedRectangle(2.3f, 6.9f, 15.6f, 12.5f, 2.0f);
-
-            g.setColour(juce::Colour(0xffd6a149));
-            g.fillPath(folderBack);
-            g.setColour(juce::Colour(0xfff2cc73));
+            g.setColour(folderTabFill);
             g.fillPath(folderTab);
-            g.setColour(juce::Colour(0xffeebe56));
-            g.fillPath(folderFront);
 
-            juce::Path flapHighlight;
-            flapHighlight.startNewSubPath(3.1f, 10.5f);
-            flapHighlight.lineTo(17.2f, 10.5f);
-            flapHighlight.lineTo(16.8f, 11.9f);
-            flapHighlight.lineTo(2.8f, 11.9f);
-            flapHighlight.closeSubPath();
-            g.setColour(juce::Colour(0x55ffffff));
-            g.fillPath(flapHighlight);
+            g.setColour(folderStroke);
+            g.strokePath(folderBody, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath(folderTab, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-            juce::Path explorerWindow;
-            explorerWindow.addRoundedRectangle(14.0f, 5.0f, 7.6f, 7.6f, 1.2f);
-            g.setColour(juce::Colour(0xff4ea3ff));
-            g.fillPath(explorerWindow);
+            juce::Path rocketBody;
+            rocketBody.addEllipse(16.4f, 13.8f, 4.0f, 6.2f);
 
-            g.setColour(juce::Colour(0x55ffffff));
-            g.fillRoundedRectangle(14.4f, 5.5f, 6.8f, 2.0f, 0.8f);
+            juce::Path rocketNose;
+            rocketNose.addTriangle(18.4f, 12.4f,
+                                   17.1f, 14.0f,
+                                   19.7f, 14.0f);
 
-            juce::Path openArrow;
-            openArrow.startNewSubPath(15.5f, 10.6f);
-            openArrow.lineTo(20.0f, 6.1f);
-            openArrow.startNewSubPath(17.3f, 6.1f);
-            openArrow.lineTo(20.0f, 6.1f);
-            openArrow.lineTo(20.0f, 8.8f);
-            g.setColour(juce::Colours::white.withAlpha(0.95f));
-            g.strokePath(openArrow, juce::PathStrokeType(1.35f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            juce::Path rocketFinLeft;
+            rocketFinLeft.addTriangle(16.7f, 18.7f,
+                                      15.4f, 20.0f,
+                                      17.2f, 19.5f);
 
-            g.setColour(juce::Colour(0xc0476ea4));
-            g.strokePath(explorerWindow, juce::PathStrokeType(0.85f));
-            g.setColour(juce::Colour(0xc06b4a1f));
-            g.strokePath(folderBack, juce::PathStrokeType(0.85f));
-            g.strokePath(folderFront, juce::PathStrokeType(0.85f));
-            g.strokePath(folderTab, juce::PathStrokeType(0.8f));
+            juce::Path rocketFinRight;
+            rocketFinRight.addTriangle(20.1f, 18.7f,
+                                       21.4f, 20.0f,
+                                       19.6f, 19.5f);
+
+            juce::Path flameOuter;
+            flameOuter.startNewSubPath(18.4f, 20.2f);
+            flameOuter.quadraticTo(17.2f, 22.2f, 18.4f, 23.1f);
+            flameOuter.quadraticTo(19.6f, 22.2f, 18.4f, 20.2f);
+            flameOuter.closeSubPath();
+
+            juce::Path flameInner;
+            flameInner.startNewSubPath(18.4f, 20.6f);
+            flameInner.quadraticTo(17.7f, 21.8f, 18.4f, 22.4f);
+            flameInner.quadraticTo(19.1f, 21.8f, 18.4f, 20.6f);
+            flameInner.closeSubPath();
+
+            g.setColour(rocketBlue);
+            g.fillPath(rocketBody);
+            g.fillPath(rocketNose);
+            g.fillPath(rocketFinLeft);
+            g.fillPath(rocketFinRight);
+
+            g.setColour(rocketWindow);
+            g.fillEllipse(17.55f, 15.35f, 1.7f, 1.7f);
+
+            g.setColour(flameOrange);
+            g.fillPath(flameOuter);
+            g.setColour(flameYellow);
+            g.fillPath(flameInner);
+
+            g.setColour(rocketBlueDark);
+            g.strokePath(rocketBody, juce::PathStrokeType(0.5f));
+            g.strokePath(rocketNose, juce::PathStrokeType(0.45f));
+            g.strokePath(rocketFinLeft, juce::PathStrokeType(0.45f));
+            g.strokePath(rocketFinRight, juce::PathStrokeType(0.45f));
+            g.drawEllipse(17.55f, 15.35f, 1.7f, 1.7f, 0.35f);
 
             const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
-                                         ? colour.withAlpha(0.24f)
-                                         : colour.withAlpha(0.14f);
+                                         ? colour.withAlpha(0.16f)
+                                         : colour.withAlpha(0.08f);
             g.setColour(tintOverlay);
-            g.strokePath(folderFront, juce::PathStrokeType(0.6f));
-
-            // Repaint the Explorer badge on top so its background remains fully opaque.
-            g.setColour(juce::Colour(0xff4ea3ff));
-            g.fillPath(explorerWindow);
-            g.setColour(juce::Colour(0x55ffffff));
-            g.fillRoundedRectangle(14.4f, 5.5f, 6.8f, 2.0f, 0.8f);
-            g.setColour(juce::Colours::white.withAlpha(0.95f));
-            g.strokePath(openArrow, juce::PathStrokeType(1.35f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-            g.setColour(juce::Colour(0xc0476ea4));
-            g.strokePath(explorerWindow, juce::PathStrokeType(0.85f));
+            g.fillPath(rocketBody);
+            g.fillPath(rocketNose);
+            g.fillPath(rocketFinLeft);
+            g.fillPath(rocketFinRight);
 
             auto drawable = std::make_unique<juce::DrawableImage>();
             drawable->setImage(image);
@@ -521,33 +582,80 @@ namespace sw
             juce::Graphics g(image);
             g.addTransform(juce::AffineTransform::scale(scale));
 
-            juce::Path folder;
-            folder.addRoundedRectangle(3.0f, 8.0f, 11.5f, 10.2f, 1.6f);
+            const auto folderBodyFill = juce::Colour(0xffe8c783);
+            const auto folderTabFill = juce::Colour(0xffd6b068);
+            const auto folderStroke = juce::Colour(0xff9a8150);
+
+            const auto mapPaperFill = juce::Colour(0xfff2f7ff);
+            const auto mapPaperStroke = juce::Colour(0xff8ea5c4);
+            const auto mapCountryFill = juce::Colour(0xff6aa06f);
+            const auto mapCountryStroke = juce::Colour(0xff3f6f4a);
+
+            juce::Path folderBody;
+            folderBody.startNewSubPath(1.0f, 5.9f);
+            folderBody.lineTo(8.0f, 5.9f);
+            folderBody.lineTo(9.8f, 4.2f);
+            folderBody.lineTo(23.0f, 4.2f);
+            folderBody.lineTo(23.0f, 21.5f);
+            folderBody.lineTo(1.0f, 21.5f);
+            folderBody.closeSubPath();
+
             juce::Path folderTab;
-            folderTab.addRoundedRectangle(4.2f, 5.6f, 5.2f, 2.6f, 0.8f);
+            folderTab.startNewSubPath(1.0f, 6.0f);
+            folderTab.lineTo(7.6f, 6.0f);
+            folderTab.lineTo(9.3f, 7.7f);
+            folderTab.lineTo(7.7f, 9.0f);
+            folderTab.lineTo(1.0f, 9.0f);
+            folderTab.closeSubPath();
 
-            g.setColour(juce::Colour(0xffd6a149));
-            g.fillPath(folder);
-            g.setColour(juce::Colour(0xfff2cc73));
+            g.setColour(folderBodyFill);
+            g.fillPath(folderBody);
+            g.setColour(folderTabFill);
             g.fillPath(folderTab);
-            g.setColour(juce::Colour(0xc06b4a1f));
-            g.strokePath(folder, juce::PathStrokeType(0.75f));
+            g.setColour(folderStroke);
+            g.strokePath(folderBody, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath(folderTab, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-            juce::Path arrow;
-            arrow.startNewSubPath(12.5f, 12.0f);
-            arrow.lineTo(20.0f, 12.0f);
-            arrow.startNewSubPath(17.2f, 9.2f);
-            arrow.lineTo(20.0f, 12.0f);
-            arrow.lineTo(17.2f, 14.8f);
+            // Overlapped map panel (~50% of folder width) for remap semantics.
+            juce::Path mapPanel;
+            mapPanel.addRoundedRectangle(12.4f, 12.9f, 10.0f, 7.8f, 1.0f);
 
-            g.setColour(juce::Colour(0xff4ea3ff));
-            g.strokePath(arrow, juce::PathStrokeType(1.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            juce::Path mapFold;
+            mapFold.addTriangle(20.8f, 12.9f,
+                                22.4f, 14.5f,
+                                20.8f, 14.5f);
+
+            juce::Path fictionalCountry;
+            fictionalCountry.startNewSubPath(14.5f, 16.5f);
+            fictionalCountry.lineTo(15.8f, 15.2f);
+            fictionalCountry.lineTo(17.3f, 15.5f);
+            fictionalCountry.lineTo(18.1f, 14.8f);
+            fictionalCountry.lineTo(19.4f, 15.4f);
+            fictionalCountry.lineTo(19.9f, 16.7f);
+            fictionalCountry.lineTo(19.1f, 17.8f);
+            fictionalCountry.lineTo(17.9f, 18.1f);
+            fictionalCountry.lineTo(17.2f, 19.2f);
+            fictionalCountry.lineTo(15.8f, 18.9f);
+            fictionalCountry.lineTo(14.9f, 17.8f);
+            fictionalCountry.closeSubPath();
+
+            g.setColour(mapPaperFill);
+            g.fillPath(mapPanel);
+            g.setColour(juce::Colour(0xffdbe8ff));
+            g.fillPath(mapFold);
+            g.setColour(mapPaperStroke);
+            g.strokePath(mapPanel, juce::PathStrokeType(0.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            g.setColour(mapCountryFill);
+            g.fillPath(fictionalCountry);
+            g.setColour(mapCountryStroke);
+            g.strokePath(fictionalCountry, juce::PathStrokeType(0.45f));
 
             const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
                                          ? colour.withAlpha(0.22f)
                                          : colour.withAlpha(0.14f);
             g.setColour(tintOverlay);
-            g.strokePath(arrow, juce::PathStrokeType(0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.fillPath(mapPanel);
 
             auto drawable = std::make_unique<juce::DrawableImage>();
             drawable->setImage(image);
@@ -765,16 +873,47 @@ namespace sw
             }
             else
             {
+                const auto moonColour = juce::Colour(0xff201b22);
+
                 juce::Path moonCrescent;
-                moonCrescent.startNewSubPath(16.8f, 3.4f);
-                moonCrescent.cubicTo(8.6f, 3.7f, 4.7f, 8.0f, 4.6f, 12.0f);
-                moonCrescent.cubicTo(4.7f, 16.0f, 8.6f, 20.3f, 16.8f, 20.6f);
-                moonCrescent.cubicTo(13.0f, 18.1f, 11.3f, 15.3f, 11.2f, 12.0f);
-                moonCrescent.cubicTo(11.3f, 8.7f, 13.0f, 5.9f, 16.8f, 3.4f);
+                moonCrescent.startNewSubPath(16.9f, 3.6f);
+                moonCrescent.cubicTo(8.8f, 3.9f, 4.9f, 8.1f, 4.8f, 12.0f);
+                moonCrescent.cubicTo(4.9f, 15.9f, 8.8f, 20.1f, 16.9f, 20.4f);
+                moonCrescent.cubicTo(13.2f, 18.1f, 11.5f, 15.3f, 11.4f, 12.0f);
+                moonCrescent.cubicTo(11.5f, 8.7f, 13.2f, 5.9f, 16.9f, 3.6f);
                 moonCrescent.closeSubPath();
 
-                g.setColour(colour);
+                moonCrescent.applyTransform(juce::AffineTransform::rotation(juce::degreesToRadians(-45.0f),
+                                                                            12.0f,
+                                                                            12.0f));
+
+                g.setColour(moonColour);
                 g.fillPath(moonCrescent);
+
+                auto makeStarPath = [](float cx, float cy, float outerRadius, float innerRadius)
+                {
+                    juce::Path star;
+                    for (int i = 0; i < 10; ++i)
+                    {
+                        const bool outer = (i % 2) == 0;
+                        const float radius = outer ? outerRadius : innerRadius;
+                        const float angle = juce::MathConstants<float>::halfPi + static_cast<float>(i) * juce::MathConstants<float>::pi / 5.0f;
+                        const float x = cx + std::cos(angle) * radius;
+                        const float y = cy - std::sin(angle) * radius;
+
+                        if (i == 0)
+                            star.startNewSubPath(x, y);
+                        else
+                            star.lineTo(x, y);
+                    }
+                    star.closeSubPath();
+                    return star;
+                };
+
+                juce::Path largeStar = makeStarPath(14.9f, 7.4f, 2.5f, 1.15f);
+
+                g.setColour(moonColour);
+                g.fillPath(largeStar);
             }
 
             const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f

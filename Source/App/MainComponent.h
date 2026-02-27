@@ -211,6 +211,7 @@ namespace sw
                                         .withStyle("Regular")};
         bool darkModeEnabled = true;
         bool suppressAutoAdvanceAfterManualStop = false;
+        std::atomic<bool> midiAutoPlayDisablePending{false};
         std::chrono::steady_clock::time_point scanStartTime{};
         std::vector<float> oscilloscopeFrameScratch;
         std::vector<float> midiPlaybackHeadsScratch;

@@ -1,9 +1,33 @@
 #include "AudioEngine.h"
 #include "Util/Logging.h"
+#include <algorithm>
 #include <cmath>
 
 namespace sw
 {
+
+    namespace
+    {
+        int chooseClosestBufferSize(const juce::Array<int> &sizes, int preferred)
+        {
+            if (sizes.isEmpty())
+                return 0;
+
+            int best = sizes[0];
+            int bestDiff = std::abs(best - preferred);
+            for (int i = 1; i < sizes.size(); ++i)
+            {
+                const int candidate = sizes[i];
+                const int diff = std::abs(candidate - preferred);
+                if (diff < bestDiff)
+                {
+                    best = candidate;
+                    bestDiff = diff;
+                }
+            }
+            return best;
+        }
+    }
 
     AudioEngine::AudioEngine() = default;
 
@@ -19,6 +43,7 @@ namespace sw
 
     void AudioEngine::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
     {
+        midiMessageCollector.reset(sampleRate);
         voiceManager.prepareToPlay(samplesPerBlockExpected, sampleRate);
     }
 
@@ -29,8 +54,15 @@ namespace sw
 
     void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill)
     {
+        juce::ScopedNoDenormals noDenormals;
+
+        juce::MidiBuffer midiMessages;
+        midiMessageCollector.removeNextBlockOfMessages(midiMessages, bufferToFill.numSamples);
+
         // RT-safe: delegate to voice manager which reads from pre-decoded buffers
-        voiceManager.getNextAudioBlock(bufferToFill);
+        voiceManager.getNextAudioBlock(bufferToFill,
+                                       midiMessages,
+                                       basePitchSemitones.load(std::memory_order_relaxed));
 
         // RT-safe oscilloscope tap: capture composite output waveform.
         if (bufferToFill.buffer == nullptr || bufferToFill.numSamples <= 0)
@@ -40,16 +72,46 @@ namespace sw
         if (numChannels <= 0)
             return;
 
+        const int start = bufferToFill.startSample;
         uint32_t write = oscilloscopeWriteIndex.load(std::memory_order_relaxed);
-        for (int i = 0; i < bufferToFill.numSamples; ++i)
-        {
-            float composite = 0.0f;
-            for (int ch = 0; ch < numChannels; ++ch)
-                composite += bufferToFill.buffer->getSample(ch, bufferToFill.startSample + i);
 
-            composite /= static_cast<float>(numChannels);
-            oscilloscopeRing[write % kOscilloscopeRingSize] = composite;
-            ++write;
+        if (numChannels == 1)
+        {
+            const float *mono = bufferToFill.buffer->getReadPointer(0, start);
+            for (int i = 0; i < bufferToFill.numSamples; ++i)
+            {
+                oscilloscopeRing[write % kOscilloscopeRingSize] = mono[i];
+                ++write;
+            }
+        }
+        else if (numChannels == 2)
+        {
+            const float *left = bufferToFill.buffer->getReadPointer(0, start);
+            const float *right = bufferToFill.buffer->getReadPointer(1, start);
+            for (int i = 0; i < bufferToFill.numSamples; ++i)
+            {
+                oscilloscopeRing[write % kOscilloscopeRingSize] = 0.5f * (left[i] + right[i]);
+                ++write;
+            }
+        }
+        else
+        {
+            constexpr int kMaxTapChannels = 32;
+            const int tapChannels = std::min(numChannels, kMaxTapChannels);
+            std::array<const float *, kMaxTapChannels> readPtrs{};
+            for (int ch = 0; ch < tapChannels; ++ch)
+                readPtrs[static_cast<size_t>(ch)] = bufferToFill.buffer->getReadPointer(ch, start);
+
+            const float invChannels = 1.0f / static_cast<float>(tapChannels);
+            for (int i = 0; i < bufferToFill.numSamples; ++i)
+            {
+                float composite = 0.0f;
+                for (int ch = 0; ch < tapChannels; ++ch)
+                    composite += readPtrs[static_cast<size_t>(ch)][i];
+
+                oscilloscopeRing[write % kOscilloscopeRingSize] = composite * invChannels;
+                ++write;
+            }
         }
 
         oscilloscopeWriteIndex.store(write, std::memory_order_release);
@@ -80,6 +142,8 @@ namespace sw
         {
             SW_LOG_ERR("Audio device initialisation failed: " << result);
         }
+
+        applyLowLatencyDeviceSetup();
 
         sourcePlayer.setSource(this);
         deviceManager.addAudioCallback(&sourcePlayer);
@@ -155,28 +219,7 @@ namespace sw
 
     void AudioEngine::handleMidiMessage(const juce::MidiMessage &message)
     {
-        if (message.isNoteOn())
-        {
-            const int note = message.getNoteNumber();
-            const int rootNote = voiceManager.getPreviewRootMidiNote();
-            const double base = basePitchSemitones.load(std::memory_order_relaxed);
-            const double totalSemitones = base + static_cast<double>(note - rootNote);
-            const double ratio = std::pow(2.0, totalSemitones / 12.0);
-
-            voiceManager.noteOn(note, ratio, ratio);
-            return;
-        }
-
-        if (message.isAllNotesOff() || message.isAllSoundOff())
-        {
-            voiceManager.allNotesOff();
-            return;
-        }
-
-        if (message.isNoteOff())
-        {
-            voiceManager.noteOff(message.getNoteNumber());
-        }
+        midiMessageCollector.addMessageToQueue(message);
     }
 
     juce::StringArray AudioEngine::getAvailableOutputDeviceTypes()
@@ -244,6 +287,9 @@ namespace sw
         deviceManager.addAudioCallback(&sourcePlayer);
 
         const bool success = (deviceManager.getCurrentAudioDeviceType() == typeName);
+        if (success)
+            applyLowLatencyDeviceSetup();
+
         if (errorMessage != nullptr)
             *errorMessage = success ? juce::String() : juce::String("Requested device type was not applied.");
 
@@ -293,6 +339,8 @@ namespace sw
         setup.outputDeviceName = deviceName;
 
         const auto error = deviceManager.setAudioDeviceSetup(setup, true);
+        if (error.isEmpty())
+            applyLowLatencyDeviceSetup();
 
         sourcePlayer.setSource(this);
         deviceManager.addAudioCallback(&sourcePlayer);
@@ -382,6 +430,29 @@ namespace sw
     {
         const double base = basePitchSemitones.load(std::memory_order_relaxed);
         voiceManager.updateAllVoicePitch(base);
+    }
+
+    void AudioEngine::applyLowLatencyDeviceSetup()
+    {
+        auto *device = deviceManager.getCurrentAudioDevice();
+        if (device == nullptr)
+            return;
+
+        const auto availableBufferSizes = device->getAvailableBufferSizes();
+        if (availableBufferSizes.isEmpty())
+            return;
+
+        auto setup = deviceManager.getAudioDeviceSetup();
+        const bool isAsio = deviceManager.getCurrentAudioDeviceType().equalsIgnoreCase("ASIO");
+        const int preferredBufferSize = isAsio ? 128 : 256;
+        const int targetBufferSize = chooseClosestBufferSize(availableBufferSizes, preferredBufferSize);
+        if (targetBufferSize <= 0 || setup.bufferSize == targetBufferSize)
+            return;
+
+        setup.bufferSize = targetBufferSize;
+        const auto error = deviceManager.setAudioDeviceSetup(setup, true);
+        if (error.isNotEmpty())
+            SW_LOG_WARN("Failed to apply low-latency buffer size " << targetBufferSize << ": " << error);
     }
 
 } // namespace sw

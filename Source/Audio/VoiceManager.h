@@ -22,7 +22,7 @@ namespace sw
     class VoiceManager final : public juce::AudioSource
     {
     public:
-        static constexpr int kMaxVoices = 8;
+        static constexpr int kMaxVoices = 16;
 
         /// Lock-free SPSC (single-producer single-consumer) command FIFO.
         /// Multiple producers are serialized via a spinlock since both the
@@ -36,6 +36,9 @@ namespace sw
         void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override;
         void releaseResources() override;
         void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override;
+        void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill,
+                               const juce::MidiBuffer &midiMessages,
+                               double basePitchSemitones);
 
         // --- Control (message/MIDI thread — enqueue to FIFO) ----------------------
 
@@ -95,7 +98,8 @@ namespace sw
                          const juce::AudioBuffer<float> &srcBuffer,
                          juce::AudioBuffer<float> &outputBuffer,
                          int startSample,
-                         int numSamples);
+                         int numSamples,
+                         bool useFastRubberBandForVoice);
 
         /// Find an idle voice slot, or steal the oldest if all are occupied.
         /// Called ONLY from the audio thread.

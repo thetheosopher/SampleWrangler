@@ -1,4 +1,5 @@
 #include "WaveformCache.h"
+#include "WaveformPeak.h"
 #include "Util/Hashing.h"
 #include "Util/Logging.h"
 #include "Util/Paths.h"
@@ -94,37 +95,66 @@ namespace sw
 
                 constexpr int targetPeakCount = 1600;
                 const int peakCount = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(static_cast<int64_t>(targetPeakCount), totalSamples)));
-                const int64_t samplesPerPeak = std::max<int64_t>(1, totalSamples / peakCount);
-
                 std::vector<float> peaks(static_cast<size_t>(peakCount), 0.0f);
-                juce::AudioBuffer<float> tempBuffer(numChannels, static_cast<int>(samplesPerPeak));
+                std::vector<int64_t> peakBoundaries(static_cast<size_t>(peakCount + 1), 0);
+                for (int p = 0; p <= peakCount; ++p)
+                    peakBoundaries[static_cast<size_t>(p)] = (static_cast<int64_t>(p) * totalSamples) / peakCount;
+                peakBoundaries[static_cast<size_t>(peakCount)] = totalSamples;
 
-                for (int p = 0; p < peakCount; ++p)
+                constexpr int readChunkSamples = 65536;
+                juce::AudioBuffer<float> tempBuffer(numChannels, readChunkSamples);
+                int currentPeak = 0;
+
+                for (int64_t chunkStartSample = 0; chunkStartSample < totalSamples; chunkStartSample += readChunkSamples)
                 {
                     if (cancelGeneration.load(std::memory_order_relaxed) != jobGeneration)
                         return;
 
-                    const int64_t startSample = static_cast<int64_t>(p) * samplesPerPeak;
-                    const int64_t remaining = totalSamples - startSample;
+                    const int64_t remaining = totalSamples - chunkStartSample;
                     if (remaining <= 0)
                         break;
 
-                    const int blockSamples = static_cast<int>(std::min<int64_t>(samplesPerPeak, remaining));
+                    const int blockSamples = static_cast<int>(std::min<int64_t>(readChunkSamples, remaining));
                     if (blockSamples <= 0)
                         break;
 
                     tempBuffer.clear();
-                    if (!reader->read(&tempBuffer, 0, blockSamples, startSample, true, true))
+                    if (!reader->read(&tempBuffer, 0, blockSamples, chunkStartSample, true, true))
                         break;
 
-                    float maxAbs = 0.0f;
-                    for (int ch = 0; ch < numChannels; ++ch)
+                    const int64_t chunkEndSample = chunkStartSample + blockSamples;
+                    while ((currentPeak + 1) <= peakCount &&
+                           peakBoundaries[static_cast<size_t>(currentPeak + 1)] <= chunkStartSample)
                     {
-                        const float *channelData = tempBuffer.getReadPointer(ch);
-                        for (int s = 0; s < blockSamples; ++s)
-                            maxAbs = std::max(maxAbs, std::abs(channelData[s]));
+                        ++currentPeak;
                     }
-                    peaks[static_cast<size_t>(p)] = maxAbs;
+
+                    int localOffset = 0;
+                    while (localOffset < blockSamples && currentPeak < peakCount)
+                    {
+                        const int64_t segmentStartSample = chunkStartSample + localOffset;
+                        const int64_t peakEndSample = peakBoundaries[static_cast<size_t>(currentPeak + 1)];
+                        const int64_t segmentEndSample = std::min<int64_t>(chunkEndSample, peakEndSample);
+                        const int segmentSamples = static_cast<int>(segmentEndSample - segmentStartSample);
+
+                        if (segmentSamples <= 0)
+                        {
+                            ++currentPeak;
+                            continue;
+                        }
+
+                        float maxAbs = peaks[static_cast<size_t>(currentPeak)];
+                        for (int ch = 0; ch < numChannels; ++ch)
+                        {
+                            const float *channelData = tempBuffer.getReadPointer(ch) + localOffset;
+                            maxAbs = std::max(maxAbs, peakAbsVectorized(channelData, segmentSamples));
+                        }
+                        peaks[static_cast<size_t>(currentPeak)] = maxAbs;
+
+                        localOffset += segmentSamples;
+                        if (segmentEndSample >= peakEndSample)
+                            ++currentPeak;
+                    }
                 }
 
                 const auto cachePath = (std::filesystem::path(cacheDirectory) / (key + ".peak")).string();

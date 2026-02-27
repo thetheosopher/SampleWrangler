@@ -91,6 +91,7 @@ namespace sw
 
     private:
         void applyCurrentPitch();
+        void applyLowLatencyDeviceSetup();
 
         juce::AudioDeviceManager deviceManager;
         juce::AudioSourcePlayer sourcePlayer;
@@ -98,6 +99,7 @@ namespace sw
         std::mutex deviceConfigMutex;
 
         std::atomic<double> basePitchSemitones{0.0};
+        juce::MidiMessageCollector midiMessageCollector;
 
         static constexpr int kOscilloscopeRingSize = 8192;
         static constexpr int kOscilloscopeFrameSize = 4096;

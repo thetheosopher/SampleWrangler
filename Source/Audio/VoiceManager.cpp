@@ -1,7 +1,7 @@
 #include "VoiceManager.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <algorithm>
 
 namespace sw
 {
@@ -30,6 +30,18 @@ namespace sw
 
     void VoiceManager::getNextAudioBlock(const juce::AudioSourceChannelInfo &info)
     {
+        const juce::MidiBuffer emptyMidi;
+        getNextAudioBlock(info,
+                          emptyMidi,
+                          lastBasePitchSemitones.load(std::memory_order_relaxed));
+    }
+
+    void VoiceManager::getNextAudioBlock(const juce::AudioSourceChannelInfo &info,
+                                         const juce::MidiBuffer &midiMessages,
+                                         double basePitchSemitones)
+    {
+        lastBasePitchSemitones.store(basePitchSemitones, std::memory_order_relaxed);
+
         // RT-SAFE — no allocations, locks, I/O, or logging.
 
         // 1. Drain command FIFO — all voice mutations happen here on audio thread.
@@ -47,41 +59,130 @@ namespace sw
             return;
         }
 
-        // Check if any voice is active
-        bool anyActive = false;
-        for (const auto &v : voices)
-        {
-            if (v.active)
-            {
-                anyActive = true;
-                break;
-            }
-        }
-
-        if (!anyActive)
-        {
-            info.clearActiveBufferRegion();
-            anyVoiceActive.store(false, std::memory_order_relaxed);
-            primaryVoiceActive.store(false, std::memory_order_relaxed);
-            return;
-        }
-
         // Clear output buffer — voices will add into it
         info.clearActiveBufferRegion();
 
         const int primaryIdx = juce::jlimit(0, kMaxVoices - 1, primaryVoiceIndex.load(std::memory_order_relaxed));
         const bool wasPrimaryActive = voices[static_cast<size_t>(primaryIdx)].active;
 
-        bool anyStillActive = false;
-        for (auto &v : voices)
+        auto allocateMidiVoice = [&]() -> Voice *
         {
-            if (!v.active)
-                continue;
+            const bool reservePrimaryVoice = voices[0].active && voices[0].midiNote < 0;
+            const int firstMidiVoiceIndex = reservePrimaryVoice ? 1 : 0;
 
-            renderVoice(v, *buf, *info.buffer, info.startSample, info.numSamples);
+            for (int i = firstMidiVoiceIndex; i < kMaxVoices; ++i)
+            {
+                if (!voices[static_cast<size_t>(i)].active)
+                    return &voices[static_cast<size_t>(i)];
+            }
 
+            Voice *oldest = &voices[static_cast<size_t>(firstMidiVoiceIndex)];
+            for (int i = firstMidiVoiceIndex + 1; i < kMaxVoices; ++i)
+            {
+                auto &candidate = voices[static_cast<size_t>(i)];
+                if (candidate.triggerAge < oldest->triggerAge)
+                    oldest = &candidate;
+            }
+
+            oldest->forceOff();
+            return oldest;
+        };
+
+        auto applyMidiMessage = [&](const juce::MidiMessage &message)
+        {
+            if (message.isNoteOn())
+            {
+                playbackFinished.store(false, std::memory_order_relaxed);
+
+                const int note = message.getNoteNumber();
+                const int rootNote = previewRootMidiNote.load(std::memory_order_relaxed);
+                const double totalSemitones = basePitchSemitones + static_cast<double>(note - rootNote);
+                const double ratio = std::pow(2.0, totalSemitones / 12.0);
+
+                if (auto *voice = allocateMidiVoice(); voice != nullptr)
+                {
+                    voice->noteOn(note, ratio, ratio, ++voiceAgeCounter);
+                    anyVoiceActive.store(true, std::memory_order_relaxed);
+                }
+                return;
+            }
+
+            if (message.isAllNotesOff() || message.isAllSoundOff())
+            {
+                for (auto &v : voices)
+                {
+                    if (v.active)
+                        v.noteOff();
+                }
+                return;
+            }
+
+            if (message.isNoteOff())
+            {
+                const int note = message.getNoteNumber();
+                for (auto &v : voices)
+                {
+                    if (v.active && v.midiNote == note)
+                        v.noteOff();
+                }
+            }
+        };
+
+        auto renderSegment = [&](int segmentOffset, int segmentSamples)
+        {
+            if (segmentSamples <= 0)
+                return;
+
+            int activeVoiceCount = 0;
+            for (const auto &v : voices)
+            {
+                if (v.active)
+                    ++activeVoiceCount;
+            }
+            const int primaryIdx = juce::jlimit(0, kMaxVoices - 1, primaryVoiceIndex.load(std::memory_order_relaxed));
+
+            for (int voiceIndex = 0; voiceIndex < kMaxVoices; ++voiceIndex)
+            {
+                auto &v = voices[static_cast<size_t>(voiceIndex)];
+                if (!v.active)
+                    continue;
+
+                const bool useFastRubberBandForVoice = (activeVoiceCount >= 2) && (voiceIndex != primaryIdx);
+
+                renderVoice(v,
+                            *buf,
+                            *info.buffer,
+                            info.startSample + segmentOffset,
+                            segmentSamples,
+                            useFastRubberBandForVoice);
+            }
+        };
+
+        int renderedSamples = 0;
+        for (const auto metadata : midiMessages)
+        {
+            const int sampleOffset = juce::jlimit(0, info.numSamples, metadata.samplePosition);
+            const int segmentSamples = sampleOffset - renderedSamples;
+            if (segmentSamples > 0)
+            {
+                renderSegment(renderedSamples, segmentSamples);
+                renderedSamples = sampleOffset;
+            }
+
+            applyMidiMessage(metadata.getMessage());
+        }
+
+        if (renderedSamples < info.numSamples)
+            renderSegment(renderedSamples, info.numSamples - renderedSamples);
+
+        bool anyStillActive = false;
+        for (const auto &v : voices)
+        {
             if (v.active)
+            {
                 anyStillActive = true;
+                break;
+            }
         }
 
         anyVoiceActive.store(anyStillActive, std::memory_order_relaxed);
@@ -140,8 +241,11 @@ namespace sw
 
                 playbackFinished.store(false, std::memory_order_relaxed);
 
+                const bool reservePrimaryVoice = voices[0].active && voices[0].midiNote < 0;
+                const int firstMidiVoiceIndex = reservePrimaryVoice ? 1 : 0;
+
                 Voice *selectedVoice = nullptr;
-                for (int i = 1; i < kMaxVoices; ++i)
+                for (int i = firstMidiVoiceIndex; i < kMaxVoices; ++i)
                 {
                     if (!voices[static_cast<size_t>(i)].active)
                     {
@@ -152,8 +256,8 @@ namespace sw
 
                 if (selectedVoice == nullptr)
                 {
-                    Voice *oldest = &voices[1];
-                    for (int i = 2; i < kMaxVoices; ++i)
+                    Voice *oldest = &voices[static_cast<size_t>(firstMidiVoiceIndex)];
+                    for (int i = firstMidiVoiceIndex + 1; i < kMaxVoices; ++i)
                     {
                         auto &candidate = voices[static_cast<size_t>(i)];
                         if (candidate.triggerAge < oldest->triggerAge)
@@ -283,7 +387,8 @@ namespace sw
                                    const juce::AudioBuffer<float> &srcBuffer,
                                    juce::AudioBuffer<float> &outputBuffer,
                                    int startSample,
-                                   int numSamples)
+                                   int numSamples,
+                                   bool useFastRubberBandForVoice)
     {
         const int numOutChannels = outputBuffer.getNumChannels();
         const int numSrcChannels = srcBuffer.getNumChannels();
@@ -310,11 +415,84 @@ namespace sw
         const bool useRubberBandHq = preserveLength &&
                                      stretchHighQualityEnabled.load(std::memory_order_relaxed) &&
                                      voice.rubberBandInitialized;
+
+        if (useRubberBandHq)
+        {
+            voice.setRubberBandQualityMode(useFastRubberBandForVoice
+                                               ? Voice::RubberBandQualityMode::Fast
+                                               : Voice::RubberBandQualityMode::HighQuality);
+        }
 #else
         constexpr bool useRubberBandHq = false;
 #endif
 
         const float fadeRate = 1.0f / (Voice::kFadeTimeMs * 0.001f * static_cast<float>(currentSampleRate));
+
+        if (!preserveLength &&
+            !isLoopOn &&
+            !hasLoopRegion &&
+            std::abs(rate - 1.0) < 1.0e-9)
+        {
+            const int srcStart = juce::jlimit(0, srcLength - 1, static_cast<int>(pos));
+            const int remainingSrc = srcLength - srcStart;
+            const int samplesToRender = juce::jmin(numSamples, remainingSrc);
+
+            if (samplesToRender > 0)
+            {
+                const auto fadeState = voice.fadeState;
+                if (fadeState == Voice::FadeState::Active)
+                {
+                    for (int ch = 0; ch < numOutChannels; ++ch)
+                    {
+                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                        outputBuffer.addFrom(ch, startSample, srcBuffer, srcCh, srcStart, samplesToRender);
+                    }
+                }
+                else if (fadeState == Voice::FadeState::FadingIn || fadeState == Voice::FadeState::FadingOut)
+                {
+                    const float startGain = voice.fadeGain;
+                    const float signedRate = (fadeState == Voice::FadeState::FadingIn) ? fadeRate : -fadeRate;
+                    const float endGain = juce::jlimit(0.0f,
+                                                       1.0f,
+                                                       startGain + signedRate * static_cast<float>(samplesToRender));
+
+                    for (int ch = 0; ch < numOutChannels; ++ch)
+                    {
+                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                        outputBuffer.addFromWithRamp(ch,
+                                                     startSample,
+                                                     srcBuffer.getReadPointer(srcCh, srcStart),
+                                                     samplesToRender,
+                                                     startGain,
+                                                     endGain);
+                    }
+
+                    voice.fadeGain = endGain;
+                    if (fadeState == Voice::FadeState::FadingIn)
+                    {
+                        if (endGain >= 1.0f)
+                            voice.fadeState = Voice::FadeState::Active;
+                    }
+                    else
+                    {
+                        if (endGain <= 0.0f)
+                            voice.forceOff();
+                    }
+                }
+                else
+                {
+                    voice.forceOff();
+                }
+
+                pos += static_cast<double>(samplesToRender);
+            }
+
+            if (samplesToRender < numSamples)
+                voice.forceOff();
+
+            voice.playbackPos = pos;
+            return;
+        }
 
         // Wrap position helper
         auto wrapReadPosition = [&](double readPos)

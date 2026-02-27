@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "Pipeline/WaveformCache.h"
+#include "Util/Logging.h"
 #include "Util/Paths.h"
 
 #include <JuceHeader.h>
@@ -1260,28 +1261,7 @@ namespace sw
         midiRouter.setMidiCallback([this](const juce::MidiMessage &message)
                                    {
             if (message.isNoteOn())
-            {
-                juce::Component::SafePointer<MainComponent> safeThis(this);
-                juce::MessageManager::callAsync([safeThis]
-                                                {
-                    if (safeThis == nullptr)
-                        return;
-
-                    bool changed = false;
-                    if (safeThis->previewPanel.isAutoPlayEnabled())
-                    {
-                        safeThis->previewPanel.setAutoPlayEnabled(false);
-                        safeThis->persistPreviewAutoPlayEnabled(false);
-                        changed = true;
-                    }
-
-                    if (changed)
-                    {
-                        safeThis->applyEffectiveLoopPlaybackMode();
-                        safeThis->repaint(0, safeThis->getHeight() - kStatusBarHeight, safeThis->getWidth(), kStatusBarHeight);
-                    }
-                });
-            }
+                midiAutoPlayDisablePending.store(true, std::memory_order_release);
 
             audioEngine.handleMidiMessage(message); });
         midiRouter.attachKeyboardState(keyboardState);
@@ -2450,6 +2430,15 @@ namespace sw
             refreshMidiInputDeviceList(false);
         }
 
+        if (midiAutoPlayDisablePending.exchange(false, std::memory_order_acq_rel) &&
+            previewPanel.isAutoPlayEnabled())
+        {
+            previewPanel.setAutoPlayEnabled(false);
+            persistPreviewAutoPlayEnabled(false);
+            applyEffectiveLoopPlaybackMode();
+            repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
+        }
+
         if (toolbarFeedbackTicksRemaining > 0)
         {
             --toolbarFeedbackTicksRemaining;
@@ -2673,10 +2662,12 @@ namespace sw
                     scanInProgress = false;
                     const auto now = std::chrono::steady_clock::now();
                     const auto elapsedSec = std::chrono::duration<double>(now - scanStartTime).count();
+
                     const auto summary = "Idle (last [" + rootDisplayName + "]: " + juce::String(scannedFilesCount)
                                        + " files in " + juce::String(elapsedSec, 1) + "s)";
                     setScanStatusText(summary);
                     persistScanSummaryStatus(summary);
+
                     updateToolbarScanState(false);
                     refreshResults();
                     resultsPanel.selectFirstRowIfNoneSelected();
@@ -2769,6 +2760,7 @@ namespace sw
                                + " files in " + juce::String(cancelledElapsedSec, 1) + "s)";
             setScanStatusText(summary);
             persistScanSummaryStatus(summary);
+
             updateToolbarScanState(false);
             refreshResults();
             resultsPanel.selectFirstRowIfNoneSelected(); });

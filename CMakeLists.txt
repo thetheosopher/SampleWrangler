@@ -111,6 +111,8 @@ set(PIPELINE_SOURCES
     Source/Pipeline/Analyzer.h
     Source/Pipeline/WaveformCache.cpp
     Source/Pipeline/WaveformCache.h
+    Source/Pipeline/WaveformPeak.cpp
+    Source/Pipeline/WaveformPeak.h
     Source/Pipeline/RexManager.cpp
     Source/Pipeline/RexManager.h
 )
@@ -356,6 +358,19 @@ add_executable(SampleWranglerScannerAppleLoopTests
     Source/Catalog/CatalogSchema.cpp
 )
 
+add_executable(SampleWranglerWaveformPeakTests
+    Tests/WaveformPeakTests.cpp
+    Source/Pipeline/WaveformPeak.cpp
+)
+
+target_include_directories(SampleWranglerWaveformPeakTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source
+)
+
+target_link_libraries(SampleWranglerWaveformPeakTests PRIVATE
+    juce::juce_audio_basics
+)
+
 target_include_directories(SampleWranglerScannerAppleLoopTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
 )
@@ -389,6 +404,11 @@ if(MSVC)
         /NODEFAULTLIB:MSVCRT
         /NODEFAULTLIB:MSVCRTD
     )
+    target_link_options(SampleWranglerWaveformPeakTests PRIVATE
+        /NODEFAULTLIB:MSVCRT
+        /NODEFAULTLIB:MSVCRTD
+    )
 endif()
 
 add_test(NAME SampleWrangler.ScannerAppleLoop COMMAND SampleWranglerScannerAppleLoopTests)
+add_test(NAME SampleWrangler.WaveformPeak COMMAND SampleWranglerWaveformPeakTests)

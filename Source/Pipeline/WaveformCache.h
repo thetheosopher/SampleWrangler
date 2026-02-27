@@ -2,6 +2,7 @@
 
 #include "JobQueue.h"
 #include "Catalog/CatalogDb.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 

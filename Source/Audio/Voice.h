@@ -51,6 +51,12 @@ namespace sw
 #if SW_HAVE_RUBBERBAND
         static constexpr int kRubberBandMaxBlockSize = 4096;
         static constexpr int kRubberBandOutputFifoSize = 32768;
+
+        enum class RubberBandQualityMode
+        {
+            HighQuality,
+            Fast
+        };
 #endif
 
         // --- Fade envelope -------------------------------------------------------
@@ -83,7 +89,10 @@ namespace sw
         uint64_t triggerAge = 0;
 
 #if SW_HAVE_RUBBERBAND
-        std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandStretcher;
+        std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandStretcherHighQuality;
+        std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandStretcherFast;
+        RubberBand::RubberBandStretcher *rubberBandStretcher = nullptr;
+        RubberBandQualityMode rubberBandQualityMode = RubberBandQualityMode::HighQuality;
         int rubberBandProcessBlockSize = 0;
         int rubberBandInputFill = 0;
         int rubberBandStartDelayRemaining = 0;
@@ -161,40 +170,93 @@ namespace sw
         }
 
 #if SW_HAVE_RUBBERBAND
+        static auto makeRubberBandOptions(RubberBandQualityMode qualityMode)
+        {
+            auto options = RubberBand::RubberBandStretcher::OptionProcessRealTime |
+                           RubberBand::RubberBandStretcher::OptionThreadingNever |
+                           RubberBand::RubberBandStretcher::OptionChannelsTogether;
+
+            if (qualityMode == RubberBandQualityMode::HighQuality)
+            {
+                options |= RubberBand::RubberBandStretcher::OptionEngineFiner |
+                           RubberBand::RubberBandStretcher::OptionWindowStandard |
+                           RubberBand::RubberBandStretcher::OptionFormantPreserved |
+                           RubberBand::RubberBandStretcher::OptionPitchHighConsistency;
+            }
+            else
+            {
+                options |= RubberBand::RubberBandStretcher::OptionEngineFaster |
+                           RubberBand::RubberBandStretcher::OptionWindowShort;
+            }
+
+            return options;
+        }
+
+        static std::unique_ptr<RubberBand::RubberBandStretcher> createRubberBandStretcher(double sampleRate,
+                                                                                          double initialPitchRatio,
+                                                                                          RubberBandQualityMode qualityMode)
+        {
+            return std::make_unique<RubberBand::RubberBandStretcher>(
+                static_cast<size_t>(juce::jlimit(8000, 192000, static_cast<int>(std::round(sampleRate)))),
+                static_cast<size_t>(kMaxChannels),
+                makeRubberBandOptions(qualityMode),
+                1.0,
+                initialPitchRatio);
+        }
+
         void initialiseRubberBand(double sampleRate, double initialPitchRatio)
         {
             if (rubberBandInitialized)
                 return;
 
-            const auto options = RubberBand::RubberBandStretcher::OptionProcessRealTime |
-                                 RubberBand::RubberBandStretcher::OptionEngineFiner |
-                                 RubberBand::RubberBandStretcher::OptionThreadingNever |
-                                 RubberBand::RubberBandStretcher::OptionWindowStandard |
-                                 RubberBand::RubberBandStretcher::OptionChannelsTogether |
-                                 RubberBand::RubberBandStretcher::OptionFormantPreserved |
-                                 RubberBand::RubberBandStretcher::OptionPitchHighConsistency;
+            rubberBandStretcherHighQuality = createRubberBandStretcher(sampleRate,
+                                                                       initialPitchRatio,
+                                                                       RubberBandQualityMode::HighQuality);
+            rubberBandStretcherFast = createRubberBandStretcher(sampleRate,
+                                                                initialPitchRatio,
+                                                                RubberBandQualityMode::Fast);
 
-            rubberBandStretcher = std::make_unique<RubberBand::RubberBandStretcher>(
-                static_cast<size_t>(juce::jlimit(8000, 192000, static_cast<int>(std::round(sampleRate)))),
-                static_cast<size_t>(kMaxChannels),
-                options,
-                1.0,
-                initialPitchRatio);
-
-            if (rubberBandStretcher == nullptr)
+            if (rubberBandStretcherHighQuality == nullptr || rubberBandStretcherFast == nullptr)
             {
                 rubberBandInitialized = false;
+                rubberBandStretcherHighQuality.reset();
+                rubberBandStretcherFast.reset();
+                rubberBandStretcher = nullptr;
                 return;
             }
 
+            rubberBandStretcher = rubberBandStretcherHighQuality.get();
+            rubberBandQualityMode = RubberBandQualityMode::HighQuality;
             rubberBandStretcher->setDebugLevel(0);
             rubberBandStretcher->setMaxProcessSize(static_cast<size_t>(kRubberBandMaxBlockSize));
+
+            rubberBandStretcherFast->setDebugLevel(0);
+            rubberBandStretcherFast->setMaxProcessSize(static_cast<size_t>(kRubberBandMaxBlockSize));
 
             rubberBandProcessBlockSize = static_cast<int>(rubberBandStretcher->getSamplesRequired());
             if (rubberBandProcessBlockSize <= 0 || rubberBandProcessBlockSize > kRubberBandMaxBlockSize)
                 rubberBandProcessBlockSize = 1024;
 
             rubberBandInitialized = true;
+            resetRubberBand();
+        }
+
+        void setRubberBandQualityMode(RubberBandQualityMode qualityMode)
+        {
+            if (!rubberBandInitialized)
+                return;
+
+            if (rubberBandQualityMode == qualityMode)
+                return;
+
+            rubberBandQualityMode = qualityMode;
+            rubberBandStretcher = (qualityMode == RubberBandQualityMode::HighQuality)
+                                      ? rubberBandStretcherHighQuality.get()
+                                      : rubberBandStretcherFast.get();
+
+            if (rubberBandStretcher == nullptr)
+                return;
+
             resetRubberBand();
         }
 

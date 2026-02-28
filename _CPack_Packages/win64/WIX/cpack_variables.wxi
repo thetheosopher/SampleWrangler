@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<Include xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <?define CPACK_WIX_PRODUCT_GUID="BBCB6ABA-F4AB-4FB7-BE5A-64A5EA6C1FED"?>
+    <?define CPACK_WIX_UPGRADE_GUID="E795F1BB-4E44-4F6C-BAE6-4371EA683986"?>
+    <?define CPACK_PACKAGE_VENDOR="Sample Wrangler"?>
+    <?define CPACK_PACKAGE_NAME="Sample Wrangler"?>
+    <?define CPACK_PACKAGE_VERSION="0.9.5"?>
+    <?define CPACK_WIX_LICENSE_RTF="C:/Projects/other/SampleWrangler/cmake/LicenseMIT.rtf"?>
+    <?define CPACK_WIX_PRODUCT_ICON="C:/Projects/other/SampleWrangler/images/SampleWrangler.ico"?>
+    <?define CPACK_WIX_PROGRAM_MENU_FOLDER="Sample Wrangler"?>
+    <?define CPACK_WIX_UI_REF="WixUI_FeatureTree"?>
+    <?define CPACK_WIX_INSTALL_SCOPE="NONE"?>
+</Include>

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(SampleWrangler VERSION 0.9.3 LANGUAGES CXX)
+project(SampleWrangler VERSION 0.9.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -140,7 +140,7 @@ set(UTIL_SOURCES
 # ---------------------------------------------------------------------------
 juce_add_gui_app(SampleWrangler
     PRODUCT_NAME "SampleWrangler"
-    VERSION "0.9.3"
+    VERSION "0.9.5"
     COMPANY_NAME "SampleWrangler"
 )
 

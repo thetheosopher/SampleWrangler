@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Fragment>
+        <DirectoryRef Id="INSTALL_ROOT">
+            <Component Id="CM_CP_REX_Shared_Library.dll" Guid="*">
+                <File Id="CM_FP_REX_Shared_Library.dll" Source="C:/Projects/other/SampleWrangler/_CPack_Packages/win64/WIX/SampleWrangler-0.9.5-win64/REX Shared Library.dll" KeyPath="yes"/>
+            </Component>
+        </DirectoryRef>
+        <DirectoryRef Id="INSTALL_ROOT">
+            <Component Id="CM_CP_SampleWrangler.exe" Guid="*">
+                <File Id="CM_FP_SampleWrangler.exe" Source="C:/Projects/other/SampleWrangler/_CPack_Packages/win64/WIX/SampleWrangler-0.9.5-win64/SampleWrangler.exe" KeyPath="yes"/>
+            </Component>
+        </DirectoryRef>
+        <DirectoryRef Id="PROGRAM_MENU_FOLDER">
+            <Component Id="CM_SHORTCUT" Guid="*">
+                <Shortcut Id="CM_SP_SampleWrangler.exe" Name="Sample Wrangler" Target="[#CM_FP_SampleWrangler.exe]" WorkingDirectory="INSTALL_ROOT"/>
+                <RegistryValue Root="HKCU" Key="Software\Sample Wrangler\Sample Wrangler" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+                <RemoveFolder Id="CM_REMOVE_PROGRAM_MENU_FOLDER" On="uninstall"/>
+                <Shortcut Id="UNINSTALL" Name="Uninstall Sample Wrangler" Description="Uninstalls Sample Wrangler" Target="[SystemFolder]msiexec.exe" Arguments="/x [ProductCode]"/>
+            </Component>
+        </DirectoryRef>
+    </Fragment>
+</Wix>

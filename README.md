@@ -1,113 +1,106 @@
 # SampleWrangler
 
-SampleWrangler is a Windows desktop audio sample librarian and preview tool built with JUCE, modern C++, and SQLite. It is aimed at fast local sample browsing: add source folders, scan them into a catalog, search by name or path, inspect waveform metadata, and audition files with low-latency playback, looping, and MIDI-driven pitch preview.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.txt)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010+-0078D4?logo=windows)](https://github.com/thetheosopher/SampleWrangler)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus)](https://en.cppreference.com/w/cpp/20)
+[![Built with JUCE](https://img.shields.io/badge/Built%20with-JUCE-8DC63F)](https://juce.com)
 
-The current codebase is an MVP-focused application rather than a generic framework. It targets Windows 10+, uses CMake with Visual Studio 2022, prefers ASIO on startup when available, and keeps cataloging, scanning, waveform generation, and audio playback separated into distinct modules.
+A fast Windows desktop audio sample librarian and preview tool built with JUCE, modern C++, and SQLite.
 
-## Highlights
+Add source folders, scan them into a searchable catalog, inspect waveform and metadata, and audition files with low-latency ASIO playback, looping, and MIDI-driven pitch preview — all from a single lightweight application.
 
-- Source folder management with add, rename, remap, delete, rescan, and reveal-in-Explorer actions.
-- SQLite-backed catalog with FTS5 search over file names and relative paths.
-- Background scanning and rescanning on a worker queue with cancellation support.
-- Metadata-rich results including file size, duration, sample rate, channels, bit depth, bitrate, codec, BPM, key, loop markers, and REX slice count where available.
-- Cached waveform overviews for fast redraws in both the results list and the main waveform view.
-- Preview playback controls for play, stop, loop, autoplay, pitch transpose, stretch, and optional high-quality stretch.
-- MIDI preview from both physical MIDI inputs and the on-screen keyboard.
-- Polyphonic preview voice management with RT-safe audio-thread rules in the playback engine.
-- Multiple analysis views in the waveform panel: waveform, spectrogram, oscilloscope, and spectrum analyzer.
-- Persisted app state for theme, audio device, MIDI input, preview settings, layout, and last selection.
-- Database maintenance tools including VACUUM from the toolbar.
-- External drag-and-drop of files from the results list into Explorer or other desktop applications.
+---
 
-## What The App Does
+## Table of Contents
 
-SampleWrangler is designed around a simple workflow:
+- [Features](#features)
+- [Supported Formats](#supported-formats)
+- [Build Requirements](#build-requirements)
+- [Quick Start](#quick-start)
+- [CMake Presets](#cmake-presets)
+- [Packaging](#packaging)
+- [Running Tests](#running-tests)
+- [Runtime Data Storage](#runtime-data-storage)
+- [Repository Layout](#repository-layout)
+- [Technology Stack](#technology-stack)
+- [License](#license)
 
-1. Add one or more sample source folders.
-2. Scan those folders into a local catalog.
-3. Search and filter the indexed files.
-4. Select a file to inspect metadata and waveform information.
-5. Audition it through the selected audio device, optionally using MIDI or the on-screen keyboard to repitch playback.
+---
 
-The UI is organized into a source browser, a searchable results panel, a waveform display, and a preview/control area.
-
-## Implemented Feature Set
+## Features
 
 ### Library and Catalog
 
-- Local-only catalog stored in SQLite.
-- Root/source records stored separately from file records.
-- File identity based on source root plus relative path, which makes source-folder remapping practical.
-- Fast text search using SQLite FTS5.
-- Search scopes include whole-library search and per-root search.
-- File statistics are tracked for the entire library, a single root, or the current search result set.
+- Local-only SQLite catalog with FTS5 full-text search over file names and paths.
+- Source folder management: add, rename, remap, delete, rescan, and reveal in Explorer.
+- File identity based on source root + relative path, making source-folder relocation practical.
+- Search scopes: whole-library or per-root. File statistics tracked per library, root, or result set.
 
 ### Scanning and Metadata Extraction
 
-- Recursive scanning of source folders on background worker threads.
-- Transaction-batched database updates during scans.
-- ACID WAV metadata parsing, including BPM, root note, beats, and loop points when present.
-- Apple Loop AIFF metadata parsing, including root note and loop markers.
-- REX and RX2 metadata extraction through the bundled REX SDK integration when available.
-- Automatic waveform overview generation during scanning for playable files.
+- Recursive background scanning with cancellation support and transaction-batched DB updates.
+- Rich metadata: file size, duration, sample rate, channels, bit depth, bitrate, codec, BPM, key, loop markers, and REX slice count.
+- ACID WAV metadata parsing (BPM, root note, beats, loop points).
+- Apple Loop AIFF metadata parsing (root note, loop markers).
+- REX/RX2 metadata extraction via the bundled REX SDK when available.
+- Automatic waveform overview generation during scanning.
 
 ### Preview and Audio
 
-- JUCE-based output device management.
-- ASIO support enabled on Windows builds.
-- Preference for low-latency device setup, including smaller buffer sizes for ASIO devices.
-- Play/stop preview workflow with spacebar support.
-- Loop playback for the current selection.
-- Autoplay option for stepping through results.
+- JUCE-based audio output with ASIO support and preference for low-latency buffer sizes.
+- Play/stop (spacebar), loop, and autoplay controls.
 - Resample-style pitch shifting in semitones.
-- Optional stretch mode and optional high-quality stretch mode when Rubber Band is available.
-- Physical MIDI input routing plus an on-screen keyboard component.
-- Polyphonic MIDI-triggered preview playback with preallocated voices.
+- Optional time-stretch mode with high-quality stretch via [Rubber Band Library](https://breakfastquay.com/rubberband/).
+- Physical MIDI input routing and on-screen keyboard for pitch preview.
+- Polyphonic MIDI-triggered preview with preallocated voices and RT-safe audio thread.
 
 ### Waveform and Visual Analysis
 
-- Cached peak-overview waveform rendering.
-- Scrubbable main waveform display with playhead and loop overlays.
-- Alternate right-click display modes: spectrogram, oscilloscope, and spectrum analyzer.
-- Small waveform previews directly in search results.
+- Cached peak-overview waveform rendering in results list and main display.
+- Scrubbable waveform with playhead and loop overlays.
+- Right-click display modes: spectrogram, oscilloscope, and spectrum analyzer.
 
 ### Usability
 
-- Dark and light theme support.
+- Dark and light themes.
 - Resizable split layout with persisted panel ratios.
-- Toolbar actions for source management, rescanning, canceling scans, resetting layout, and compressing databases.
-- Reveal selected source in Windows Explorer.
-- Drag indexed files out of the application to external destinations.
+- Database maintenance (VACUUM) from the toolbar.
+- Drag-and-drop files out of the application to Explorer or other programs.
+- Persisted app state: theme, audio device, MIDI input, preview settings, layout, and last selection.
+
+---
 
 ## Supported Formats
 
-### Playable
+| Format | Playback | Metadata |
+|--------|:--------:|:--------:|
+| WAV (incl. ACID) | Yes | Duration, sample rate, channels, bit depth, bitrate, codec, BPM, root note, loop markers |
+| AIFF / AIF (incl. Apple Loop) | Yes | Duration, sample rate, channels, bit depth, bitrate, codec, root note, loop markers |
+| FLAC | Yes | Standard JUCE reader metadata |
+| MP3 | Yes | Standard JUCE reader metadata |
+| REX / RX2 | Yes | Sample rate, channels, bit depth, duration, BPM, slice count |
 
-- WAV
-- AIFF / AIF
-- FLAC
-- MP3
-- REX / RX2 when the REX SDK is available
+> **Note:** REX/RX2 support requires the Propellerhead REX SDK DLL at runtime.
+> MP3 reading is enabled via `JUCE_USE_MP3AUDIOFORMAT=1`. See the [JUCE MP3 legal disclaimer](https://docs.juce.com/develop/classjuce_1_1MP3AudioFormat.html).
 
-### Metadata Notes
-
-- WAV: duration, sample rate, channels, bit depth, bitrate estimate, codec, ACID metadata, and loop markers when present.
-- AIFF: duration, sample rate, channels, bit depth, bitrate estimate, codec, Apple Loop metadata, and loop markers when present.
-- FLAC and MP3: standard reader metadata available through JUCE.
-- REX / RX2: sample rate, channels, bit depth, duration, BPM, and slice count when decoded through the REX SDK.
+---
 
 ## Build Requirements
 
-- Windows 10+
-- Visual Studio 2022 with the Desktop C++ workload
-- CMake 3.15+
-- Git
+| Requirement | Version |
+|-------------|---------|
+| Windows | 10+ |
+| Visual Studio | 2022 with Desktop C++ workload |
+| CMake | 3.15+ |
+| Git | Any recent version |
 
-This repository is configured for MSVC and CMake presets. The documented workflow does not target MinGW.
+> This project targets **MSVC only**. MinGW is not supported.
+
+---
 
 ## Quick Start
 
-Clone the repo with submodules:
+Clone the repository with submodules:
 
 ```bash
 git clone https://github.com/thetheosopher/SampleWrangler.git
@@ -115,89 +108,132 @@ cd SampleWrangler
 git submodule update --init --recursive
 ```
 
-Configure and build the default debug preset:
+Configure and build:
 
 ```bash
 cmake --preset vs2022-debug
 cmake --build --preset vs2022-debug
 ```
 
-Run the app:
+Run the application:
 
 ```bash
 .\build\vs2022-debug\SampleWrangler_artefacts\Debug\SampleWrangler.exe
 ```
 
-Release build:
+For a release build:
 
 ```bash
 cmake --preset vs2022-release
 cmake --build --preset vs2022-release
+.\build\vs2022-release\SampleWrangler_artefacts\Release\SampleWrangler.exe
 ```
 
-Create a release package:
+---
+
+## CMake Presets
+
+| Preset | Configuration | Rubber Band HQ Stretch |
+|--------|:-------------:|:----------------------:|
+| `vs2022-debug` | Debug | Enabled |
+| `vs2022-release` | Release | Enabled |
+| `vs2022-debug-nohq` | Debug | Disabled |
+| `vs2022-release-nohq` | Release | Disabled |
+
+All presets target **x64** with the Visual Studio 17 2022 generator. The MSVC runtime is statically linked (`/MT` / `/MTd`).
+
+Rubber Band Library v4 (GPL) is included as a git submodule in `third_party/rubberband`. If you cloned without `--recursive`, initialize it with:
+
+```bash
+git submodule update --init third_party/rubberband
+```
+
+Use the `-nohq` presets to build without Rubber Band (granular stretch only).
+
+---
+
+## Packaging
+
+To create a release installer and ZIP archive:
 
 ```bash
 cmake --preset vs2022-release
 cmake --build --preset vs2022-release --target PACKAGE
 ```
 
-If WiX is installed, packaging produces installer artifacts under `build/vs2022-release/`.
+Requires [WiX Toolset](https://wixtoolset.org/) for MSI generation. Output is written to `build/vs2022-release/`.
 
-## CMake Presets
+---
 
-- `vs2022-debug`: Debug build with Rubber Band high-quality stretch enabled.
-- `vs2022-release`: Release build with Rubber Band high-quality stretch enabled.
-- `vs2022-debug-nohq`: Debug build without Rubber Band.
-- `vs2022-release-nohq`: Release build without Rubber Band.
-
-## Runtime Data Storage
-
-By default, SampleWrangler stores its local data in the Windows Local AppData area:
-
-- Catalog database: `C:\Users\<user>\AppData\Local\SampleWrangler\catalog.db`
-- Waveform cache database: `C:\Users\<user>\AppData\Local\SampleWrangler\wave_cache.db`
-
-The waveform cache is currently stored as SQLite BLOB data rather than loose `.peak` files.
-
-## Tests
+## Running Tests
 
 The repository includes lightweight native tests for non-audio modules:
 
-- `SampleWranglerCatalogDbTests`
-- `SampleWranglerScannerAppleLoopTests`
-- `SampleWranglerWaveformPeakTests`
+| Test Target | Coverage |
+|-------------|----------|
+| `SampleWranglerCatalogDbTests` | SQLite catalog queries and schema |
+| `SampleWranglerScannerAppleLoopTests` | Apple Loop AIFF metadata parsing |
+| `SampleWranglerWaveformPeakTests` | Waveform peak generation |
 
-After building a preset, you can run them with CTest:
+After building, run with CTest:
 
 ```bash
 ctest --test-dir build/vs2022-debug -C Debug
 ```
 
+---
+
+## Runtime Data Storage
+
+SampleWrangler stores data in the Windows Local AppData directory:
+
+| File | Path |
+|------|------|
+| Catalog database | `%LOCALAPPDATA%\SampleWrangler\catalog.db` |
+| Waveform cache | `%LOCALAPPDATA%\SampleWrangler\wave_cache.db` |
+
+The waveform cache is stored as SQLite BLOB data.
+
+---
+
 ## Repository Layout
 
-```text
-Source/
-  App/          Application entry point and top-level UI wiring
-  UI/           Browser, results, waveform, and preview panels
-  Catalog/      SQLite catalog, schema, models, and waveform cache DB
-  Pipeline/     Job queue, scanner, analysis, waveform cache, REX support
-  Audio/        Audio engine, voices, and MIDI input routing
-  Util/         Paths, hashing, and logging helpers
-Tests/          Native tests for catalog, scanner metadata, and waveform peaks
-third_party/
-  sqlite/       Vendored SQLite amalgamation
-  rubberband/   Rubber Band v4 source submodule
-JUCE/           JUCE framework submodule
-REXSDK_Win_1.9.2/  REX SDK integration assets
-docs/           Setup and archive notes
 ```
+Source/
+  App/            Application entry point and top-level UI wiring
+  UI/             Browser, results, waveform, and preview panels
+  Catalog/        SQLite catalog, schema, models, and waveform cache
+  Pipeline/       Job queue, scanner, analyzer, waveform cache, REX support
+  Audio/          Audio engine, voice manager, and MIDI input routing
+  Util/           Path helpers, hashing, and logging
+Tests/            Native tests for catalog, scanner, and waveform peaks
+third_party/
+  sqlite/         Vendored SQLite amalgamation
+  rubberband/     Rubber Band Library v4 (git submodule, GPL)
+JUCE/             JUCE framework (git submodule)
+REXSDK_Win_1.9.2/ REX SDK integration files
+cmake/            CPack/WiX packaging resources
+docs/             Developer setup and archive notes
+```
+
+---
 
 ## Technology Stack
 
-- C++20
-- JUCE
-- SQLite with FTS5
+- **Language:** C++20
+- **Framework:** [JUCE](https://juce.com)
+- **Database:** [SQLite](https://sqlite.org/) with FTS5
+- **Stretch:** [Rubber Band Library](https://breakfastquay.com/rubberband/) v4 (optional, GPL)
+- **Build:** CMake 3.15+ / MSVC
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE.txt).
+
+> **Third-party licenses:** JUCE is dual-licensed (GPLv3 / commercial). Rubber Band Library is GPL unless commercially licensed. See each submodule for details.
+
 - CMake presets for Visual Studio 2022
 - Rubber Band v4 for optional high-quality stretch
 - Propellerhead REX SDK integration for REX and RX2 support

@@ -2,10 +2,20 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run SampleWrangler",
+      "name": "Debug: SampleWrangler",
       "type": "cppvsdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/vs2022-debug/SampleWrangler_artefacts/Debug/SampleWrangler.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": []
+    },
+    {
+      "name": "Release: SampleWrangler",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/vs2022-release/SampleWrangler_artefacts/Release/SampleWrangler.exe",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",

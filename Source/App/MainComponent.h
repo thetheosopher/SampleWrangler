@@ -86,6 +86,7 @@ namespace sw
         void timerCallback() override;
         void updateToolbarScanState(bool inProgress);
         void applyThemeMode(bool darkMode, bool persist);
+        static juce::String makeFileStatsStatusText(int64_t fileCount, int64_t totalBytes);
 
         class SplitterBar final : public juce::Component
         {
@@ -204,7 +205,7 @@ namespace sw
         juce::String toolbarFeedbackText;
         int toolbarFeedbackTicksRemaining = 0;
         juce::String scanStatusText{"Idle"};
-        juce::String fileStatsStatusText{"0 files • 0 B"};
+        juce::String fileStatsStatusText{makeFileStatsStatusText(0, 0)};
         juce::String playbackPositionText{"00:00:00.000"};
         juce::Font playbackTimeFont{juce::FontOptions(20.0f)
                                         .withName(juce::Font::getDefaultMonospacedFontName())

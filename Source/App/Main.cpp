@@ -101,7 +101,8 @@ public:
                 g.drawText("Version " + appVersion, content.removeFromTop(24), juce::Justification::centredLeft, false);
 
                 const int year = currentYear();
-                g.drawText("\u00A9 " + juce::String(year) + " Michael A. McCloskey and GitHub Copilot", content.removeFromTop(24), juce::Justification::centredLeft, false);
+                const auto copyrightSymbol = juce::String::charToString(static_cast<juce_wchar>(0x00A9));
+                g.drawText(copyrightSymbol + " " + juce::String(year) + " Michael A. McCloskey and GitHub Copilot", content.removeFromTop(24), juce::Justification::centredLeft, false);
                 g.drawText("Licensed under the MIT License", content.removeFromTop(22), juce::Justification::centredLeft, false);
 
                 content.removeFromTop(8);
@@ -112,12 +113,9 @@ public:
 
                 g.setColour(bodyColour);
                 g.setFont(juce::FontOptions(14.0f));
-                juce::String featuresText =
-                    "\u2022 Source library management and incremental scanning\n"
-                    "\u2022 Fast catalog search with metadata-rich results\n"
-                    "\u2022 Waveform and spectrogram preview display modes\n"
-                    "\u2022 Real-time preview playback with MIDI/keyboard pitch control\n"
-                    "\u2022 Loop and time-stretch preview controls";
+                const auto bullet = juce::String::charToString(static_cast<juce_wchar>(0x2022));
+                const juce::String featuresText =
+                    bullet + " Source library management and incremental scanning\n" + bullet + " Fast catalog search with metadata-rich results\n" + bullet + " Waveform and spectrogram preview display modes\n" + bullet + " Real-time preview playback with MIDI/keyboard pitch control\n" + bullet + " Loop and time-stretch preview controls";
                 g.drawFittedText(featuresText,
                                  content.removeFromTop(108),
                                  juce::Justification::topLeft,
@@ -217,7 +215,7 @@ public:
             if (auto menu = ::GetSystemMenu(hwnd, FALSE))
             {
                 ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-                ::AppendMenuW(menu, MF_STRING, kAboutSystemMenuId, L"About Schema Wrangler...");
+                ::AppendMenuW(menu, MF_STRING, kAboutSystemMenuId, L"About Sample Wrangler...");
             }
 
             windowHandle = hwnd;

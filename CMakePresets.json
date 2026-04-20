@@ -16,7 +16,6 @@
             },
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_CXX_STANDARD": "20",
                 "SW_REQUIRE_RUBBERBAND": "ON",
                 "RUBBERBAND_SOURCE_DIR": "${sourceDir}/third_party/rubberband"
@@ -32,7 +31,6 @@
             },
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_CXX_STANDARD": "20",
                 "SW_REQUIRE_RUBBERBAND": "ON",
                 "RUBBERBAND_SOURCE_DIR": "${sourceDir}/third_party/rubberband"
@@ -48,7 +46,6 @@
             },
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_CXX_STANDARD": "20",
                 "SW_REQUIRE_RUBBERBAND": "OFF"
             }
@@ -63,7 +60,6 @@
             },
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_CXX_STANDARD": "20",
                 "SW_REQUIRE_RUBBERBAND": "OFF"
             }

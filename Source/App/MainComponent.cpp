@@ -66,6 +66,12 @@ namespace sw
         }
     }
 
+    juce::String MainComponent::makeFileStatsStatusText(int64_t fileCount, int64_t totalBytes)
+    {
+        const auto separator = juce::String::charToString(static_cast<juce_wchar>(0x2022));
+        return juce::String(fileCount) + " files " + separator + " " + formatBytes(totalBytes);
+    }
+
     namespace
     {
         std::unique_ptr<juce::Drawable> createFolderIcon(const juce::Colour colour)
@@ -1747,7 +1753,7 @@ namespace sw
             }
         }
 
-        fileStatsStatusText = juce::String(stats.first) + " files • " + formatBytes(stats.second);
+        fileStatsStatusText = makeFileStatsStatusText(stats.first, stats.second);
         repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
     }
 

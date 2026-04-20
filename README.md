@@ -9,10 +9,18 @@ A fast Windows desktop audio sample librarian and preview tool built with JUCE, 
 
 Add source folders, scan them into a searchable catalog, inspect waveform and metadata, and audition files with low-latency ASIO playback, looping, and MIDI-driven pitch preview — all from a single lightweight application.
 
+## Screenshot
+
+![SampleWrangler main window](docs/MainWindow.png)
+
+The main window shows the source browser, searchable results list, waveform view, and preview controls in a single layout.
+
 ---
 
 ## Table of Contents
 
+- [Screenshot](#screenshot)
+- [Support](#support)
 - [Features](#features)
 - [Supported Formats](#supported-formats)
 - [Build Requirements](#build-requirements)
@@ -24,6 +32,14 @@ Add source folders, scan them into a searchable catalog, inspect waveform and me
 - [Repository Layout](#repository-layout)
 - [Technology Stack](#technology-stack)
 - [License](#license)
+
+---
+
+## Support
+
+If you find SampleWrangler useful and want to support continued development, you can buy me a coffee here:
+
+[☕ Buy Me a Coffee](https://buymeacoffee.com/theosopher)
 
 ---
 
@@ -72,13 +88,11 @@ Add source folders, scan them into a searchable catalog, inspect waveform and me
 
 ## Supported Formats
 
-| Format | Playback | Metadata |
-|--------|:--------:|:--------:|
-| WAV (incl. ACID) | Yes | Duration, sample rate, channels, bit depth, bitrate, codec, BPM, root note, loop markers |
-| AIFF / AIF (incl. Apple Loop) | Yes | Duration, sample rate, channels, bit depth, bitrate, codec, root note, loop markers |
-| FLAC | Yes | Standard JUCE reader metadata |
-| MP3 | Yes | Standard JUCE reader metadata |
-| REX / RX2 | Yes | Sample rate, channels, bit depth, duration, BPM, slice count |
+- `WAV (incl. ACID)`: playback plus duration, sample rate, channels, bit depth, bitrate, codec, BPM, root note, and loop-marker metadata.
+- `AIFF / AIF (incl. Apple Loop)`: playback plus duration, sample rate, channels, bit depth, bitrate, codec, root note, and loop-marker metadata.
+- `FLAC`: playback with standard JUCE reader metadata.
+- `MP3`: playback with standard JUCE reader metadata.
+- `REX / RX2`: playback plus sample rate, channels, bit depth, duration, BPM, and slice count.
 
 > **Note:** REX/RX2 support requires the Propellerhead REX SDK DLL at runtime.
 > MP3 reading is enabled via `JUCE_USE_MP3AUDIOFORMAT=1`. See the [JUCE MP3 legal disclaimer](https://docs.juce.com/develop/classjuce_1_1MP3AudioFormat.html).
@@ -87,12 +101,12 @@ Add source folders, scan them into a searchable catalog, inspect waveform and me
 
 ## Build Requirements
 
-| Requirement | Version |
-|-------------|---------|
-| Windows | 10+ |
-| Visual Studio | 2022 with Desktop C++ workload |
-| CMake | 3.15+ |
-| Git | Any recent version |
+| Requirement   | Version                                |
+| ------------- | -------------------------------------- |
+| Windows       | 10+                                    |
+| Visual Studio | 2022 with Desktop C++ workload         |
+| CMake         | 3.15+                                  |
+| Git           | Any recent version                     |
 
 > This project targets **MSVC only**. MinGW is not supported.
 
@@ -133,12 +147,12 @@ cmake --build --preset vs2022-release
 
 ## CMake Presets
 
-| Preset | Configuration | Rubber Band HQ Stretch |
-|--------|:-------------:|:----------------------:|
-| `vs2022-debug` | Debug | Enabled |
-| `vs2022-release` | Release | Enabled |
-| `vs2022-debug-nohq` | Debug | Disabled |
-| `vs2022-release-nohq` | Release | Disabled |
+| Preset                 | Configuration | Rubber Band HQ Stretch |
+| ---------------------- | :-----------: | :--------------------: |
+| `vs2022-debug`         |     Debug     |         Enabled        |
+| `vs2022-release`       |    Release    |         Enabled        |
+| `vs2022-debug-nohq`    |     Debug     |        Disabled        |
+| `vs2022-release-nohq`  |    Release    |        Disabled        |
 
 All presets target **x64** with the Visual Studio 17 2022 generator. The MSVC runtime is statically linked (`/MT` / `/MTd`).
 
@@ -154,14 +168,28 @@ Use the `-nohq` presets to build without Rubber Band (granular stretch only).
 
 ## Packaging
 
-To create a release installer and ZIP archive:
+To create both release artifacts:
 
 ```bash
 cmake --preset vs2022-release
-cmake --build --preset vs2022-release --target PACKAGE
+cmake --build --preset vs2022-release-artifacts
 ```
 
-Requires [WiX Toolset](https://wixtoolset.org/) for MSI generation. Output is written to `build/vs2022-release/`.
+This produces:
+
+- `build/vs2022-release/packages/SampleWrangler-1.0.0-win64-setup.exe`
+- `build/vs2022-release/packages/SampleWrangler-1.0.0-win64-portable.zip`
+
+The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php) and supports per-user or per-machine installs, Add/Remove Programs registration, and optional Start Menu/Desktop shortcuts.
+
+If Inno Setup 6 is not auto-detected, set `SW_INNO_SETUP_COMPILER` to the full path of `ISCC.exe` when configuring. If you only want the portable ZIP, build:
+
+```bash
+cmake --preset vs2022-release
+cmake --build --preset vs2022-release-portable-zip
+```
+
+Release artifacts are statically linked where possible. The only unavoidable external runtime dependency currently shipped beside the executable is the REX SDK DLL when REX support is enabled.
 
 ---
 
@@ -169,11 +197,11 @@ Requires [WiX Toolset](https://wixtoolset.org/) for MSI generation. Output is wr
 
 The repository includes lightweight native tests for non-audio modules:
 
-| Test Target | Coverage |
-|-------------|----------|
-| `SampleWranglerCatalogDbTests` | SQLite catalog queries and schema |
-| `SampleWranglerScannerAppleLoopTests` | Apple Loop AIFF metadata parsing |
-| `SampleWranglerWaveformPeakTests` | Waveform peak generation |
+| Test Target                           | Coverage                          |
+| ------------------------------------- | --------------------------------- |
+| `SampleWranglerCatalogDbTests`        | SQLite catalog queries and schema |
+| `SampleWranglerScannerAppleLoopTests` | Apple Loop AIFF metadata parsing  |
+| `SampleWranglerWaveformPeakTests`     | Waveform peak generation          |
 
 After building, run with CTest:
 
@@ -187,10 +215,8 @@ ctest --test-dir build/vs2022-debug -C Debug
 
 SampleWrangler stores data in the Windows Local AppData directory:
 
-| File | Path |
-|------|------|
-| Catalog database | `%LOCALAPPDATA%\SampleWrangler\catalog.db` |
-| Waveform cache | `%LOCALAPPDATA%\SampleWrangler\wave_cache.db` |
+- `Catalog database`: `%LOCALAPPDATA%\SampleWrangler\catalog.db`
+- `Waveform cache`: `%LOCALAPPDATA%\SampleWrangler\wave_cache.db`
 
 The waveform cache is stored as SQLite BLOB data.
 
@@ -198,7 +224,7 @@ The waveform cache is stored as SQLite BLOB data.
 
 ## Repository Layout
 
-```
+```text
 Source/
   App/            Application entry point and top-level UI wiring
   UI/             Browser, results, waveform, and preview panels
@@ -212,7 +238,7 @@ third_party/
   rubberband/     Rubber Band Library v4 (git submodule, GPL)
 JUCE/             JUCE framework (git submodule)
 REXSDK_Win_1.9.2/ REX SDK integration files
-cmake/            CPack/WiX packaging resources
+cmake/            Inno Setup packaging scripts and release helpers
 docs/             Developer setup and archive notes
 ```
 

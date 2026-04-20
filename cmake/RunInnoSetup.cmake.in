@@ -1,0 +1,17 @@
+file(MAKE_DIRECTORY "@SW_PACKAGE_OUTPUT_DIR@")
+
+set(SW_INNO_COMPILER "@SW_INNO_SETUP_COMPILER_RESOLVED@")
+if(NOT SW_INNO_COMPILER OR NOT EXISTS "${SW_INNO_COMPILER}")
+    message(FATAL_ERROR
+        "Inno Setup 6 compiler not found. Install Inno Setup 6 or set SW_INNO_SETUP_COMPILER to the full path of ISCC.exe before building the SampleWranglerInnoSetup target.")
+endif()
+
+execute_process(
+    COMMAND "${SW_INNO_COMPILER}" "@CMAKE_CURRENT_BINARY_DIR@/SampleWranglerInstaller.iss"
+    WORKING_DIRECTORY "@CMAKE_CURRENT_BINARY_DIR@"
+    RESULT_VARIABLE SW_INNO_RESULT
+)
+
+if(NOT SW_INNO_RESULT EQUAL 0)
+    message(FATAL_ERROR "Inno Setup failed with exit code ${SW_INNO_RESULT}")
+endif()

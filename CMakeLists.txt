@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(SampleWrangler VERSION 0.9.5 LANGUAGES CXX)
+project(SampleWrangler VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -140,7 +140,7 @@ set(UTIL_SOURCES
 # ---------------------------------------------------------------------------
 juce_add_gui_app(SampleWrangler
     PRODUCT_NAME "SampleWrangler"
-    VERSION "0.9.5"
+    VERSION "1.0.0"
     COMPANY_NAME "SampleWrangler"
 )
 
@@ -291,6 +291,13 @@ install(TARGETS SampleWrangler
     COMPONENT Runtime
 )
 
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+    DESTINATION .
+    COMPONENT Runtime
+)
+
 if(SW_HAVE_REX)
     install(FILES
         "${REX_SDK_DIR}/Win/x64/Deployment/REX Shared Library.dll"
@@ -300,32 +307,92 @@ if(SW_HAVE_REX)
 endif()
 
 # ---------------------------------------------------------------------------
-# Packaging (CPack)
+# Packaging (Inno Setup + portable ZIP)
 # ---------------------------------------------------------------------------
-set(CPACK_PACKAGE_NAME "Sample Wrangler")
-set(CPACK_PACKAGE_VENDOR "Sample Wrangler")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "Sample Wrangler")
-set(CPACK_PACKAGE_FILE_NAME "SampleWrangler-${PROJECT_VERSION}-win64")
-set(CPACK_PACKAGE_EXECUTABLES "SampleWrangler;Sample Wrangler")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
-set(CPACK_MONOLITHIC_INSTALL OFF)
-set(CPACK_COMPONENTS_ALL Runtime)
-set(CPACK_INSTALL_CMAKE_PROJECTS
-    "${CMAKE_BINARY_DIR};${CMAKE_PROJECT_NAME};Runtime;/")
+set(SW_PACKAGE_BASENAME "SampleWrangler-${PROJECT_VERSION}-win64")
+set(SW_PACKAGE_OUTPUT_DIR "${CMAKE_BINARY_DIR}/packages")
+set(SW_INSTALL_STAGE_DIR "${CMAKE_BINARY_DIR}/package-stage/install-root")
+set(SW_PORTABLE_STAGE_DIR "${CMAKE_BINARY_DIR}/package-stage/portable-root")
+set(SW_PORTABLE_FOLDER_NAME "${SW_PACKAGE_BASENAME}-portable")
+set(SW_PORTABLE_ARCHIVE "${SW_PACKAGE_OUTPUT_DIR}/${SW_PORTABLE_FOLDER_NAME}.zip")
+set(SW_INNO_OUTPUT_BASENAME "${SW_PACKAGE_BASENAME}-setup")
+set(SW_INNO_OUTPUT_FILE "${SW_PACKAGE_OUTPUT_DIR}/${SW_INNO_OUTPUT_BASENAME}.exe")
+set(SW_INNO_SETUP_COMPILER "" CACHE FILEPATH "Path to Inno Setup 6 ISCC.exe")
 
-if(WIN32)
-    set(CPACK_GENERATOR "WIX;ZIP")
-    set(CPACK_WIX_UPGRADE_GUID "E795F1BB-4E44-4F6C-BAE6-4371EA683986")
-    set(CPACK_WIX_UI_REF "WixUI_FeatureTree")
-    set(CPACK_WIX_PROPERTY_ARPSYSTEMCOMPONENT "0")
-    set(CPACK_WIX_PROPERTY_ARPNAME "Sample Wrangler")
-    set(CPACK_WIX_LICENSE_RTF "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LicenseMIT.rtf")
-    set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/images/SampleWrangler.ico")
-    set(CPACK_WIX_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SampleWranglerShortcuts.wxs")
+set(SW_INNO_SETUP_COMPILER_RESOLVED "${SW_INNO_SETUP_COMPILER}")
+if(WIN32 AND NOT SW_INNO_SETUP_COMPILER_RESOLVED)
+    foreach(candidate
+        "$ENV{LOCALAPPDATA}/Programs/Inno Setup 6/ISCC.exe"
+        "$ENV{LOCALAPPDATA}/Inno Setup 6/ISCC.exe"
+        "C:/Program Files (x86)/Inno Setup 6/ISCC.exe"
+        "C:/Program Files/Inno Setup 6/ISCC.exe")
+        if(EXISTS "${candidate}")
+            set(SW_INNO_SETUP_COMPILER_RESOLVED "${candidate}")
+            break()
+        endif()
+    endforeach()
 endif()
 
-include(CPack)
+if(SW_INNO_SETUP_COMPILER_RESOLVED)
+    message(STATUS "Inno Setup 6 compiler found: ${SW_INNO_SETUP_COMPILER_RESOLVED}")
+else()
+    message(STATUS "Inno Setup 6 compiler not found; set SW_INNO_SETUP_COMPILER to build the installer artifact")
+endif()
+
+file(TO_NATIVE_PATH "${SW_INSTALL_STAGE_DIR}" SW_INSTALL_STAGE_DIR_NATIVE)
+file(TO_NATIVE_PATH "${SW_PACKAGE_OUTPUT_DIR}" SW_PACKAGE_OUTPUT_DIR_NATIVE)
+file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/images/SampleWrangler.ico" SW_SETUP_ICON_NATIVE)
+file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt" SW_LICENSE_FILE_NATIVE)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SampleWranglerInstaller.iss.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/SampleWranglerInstaller.iss"
+    @ONLY
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunInnoSetup.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/RunInnoSetup.cmake"
+    @ONLY
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CreatePortableZip.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/CreatePortableZip.cmake"
+    @ONLY
+)
+
+add_custom_target(SampleWranglerStageRelease
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${SW_INSTALL_STAGE_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${SW_INSTALL_STAGE_DIR}"
+    COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --config Release --component Runtime --prefix "${SW_INSTALL_STAGE_DIR}"
+    DEPENDS SampleWrangler
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+            "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+    COMMENT "Staging release files for packaging"
+    VERBATIM
+)
+
+add_custom_target(SampleWranglerPortableZip
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_BINARY_DIR}/CreatePortableZip.cmake"
+    DEPENDS SampleWranglerStageRelease
+            "${CMAKE_CURRENT_BINARY_DIR}/CreatePortableZip.cmake"
+    COMMENT "Creating portable ZIP artifact"
+    VERBATIM
+)
+
+add_custom_target(SampleWranglerInnoSetup
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_BINARY_DIR}/RunInnoSetup.cmake"
+    DEPENDS SampleWranglerStageRelease
+            "${CMAKE_CURRENT_BINARY_DIR}/SampleWranglerInstaller.iss"
+            "${CMAKE_CURRENT_BINARY_DIR}/RunInnoSetup.cmake"
+    COMMENT "Building Inno Setup installer artifact"
+    VERBATIM
+)
+
+add_custom_target(SampleWranglerReleaseArtifacts
+    DEPENDS SampleWranglerInnoSetup SampleWranglerPortableZip
+)
 
 # ---------------------------------------------------------------------------
 # Tests (lightweight non-audio modules)

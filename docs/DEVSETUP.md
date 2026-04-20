@@ -1,6 +1,7 @@
 # DEV SETUP — SampleWrangler (JUCE, Windows)
 
 ## Prerequisites
+
 - **Visual Studio 2022** (Build Tools or full IDE) with the **Desktop C++** workload (MSVC toolchain)
 - **CMake 3.15+** (ships with VS 2022, or install separately)
 - **Git**
@@ -32,31 +33,45 @@ cmake --preset vs2022-release
 cmake --build --preset vs2022-release
 ```
 
-### Release installer / package
+### Release artifacts (installer + portable ZIP)
 
 ```bash
 cmake --preset vs2022-release
-cmake --build --preset vs2022-release --target PACKAGE
+cmake --build --preset vs2022-release-artifacts
 ```
 
-If WiX is available, this generates both `.msi` and `.zip` in one run.
-If WiX is not available, package generation will fail; install WiX tooling on the build machine.
+This creates an Inno Setup 6 installer and a portable ZIP in one run.
+If Inno Setup 6 is not auto-detected, set `SW_INNO_SETUP_COMPILER` to the full path of `ISCC.exe` when configuring.
 
 Package artifacts are written under:
 
-```
-build/vs2022-release/
+```text
+build/vs2022-release/packages/
 ```
 
-### Installer options (MSI)
+### Installer options (Inno Setup)
 
-The MSI uses the WiX feature selection UI.
+The installer supports either per-user or per-machine installs.
 During install, users can choose whether to create:
 
 - a **Start Menu Shortcut**
 - a **Desktop Shortcut**
 
-Both shortcut options are optional installer features.
+Both shortcut options are optional installer tasks.
+
+### Portable ZIP only
+
+```bash
+cmake --preset vs2022-release
+cmake --build --preset vs2022-release-portable-zip
+```
+
+### Installer only
+
+```bash
+cmake --preset vs2022-release
+cmake --build --preset vs2022-release-inno-setup
+```
 
 ### Preset cache recovery (VS instance changed)
 
@@ -78,9 +93,16 @@ cmake --build --preset vs2022-debug
 
 The executable is written to:
 
-```
+```text
 build/vs2022-debug/SampleWrangler_artefacts/Debug/SampleWrangler.exe      (Debug)
 build/vs2022-release/SampleWrangler_artefacts/Release/SampleWrangler.exe  (Release)
+```
+
+The packaged release artifacts are written to:
+
+```text
+build/vs2022-release/packages/SampleWrangler-1.0.0-win64-setup.exe
+build/vs2022-release/packages/SampleWrangler-1.0.0-win64-portable.zip
 ```
 
 ## Run
@@ -116,6 +138,7 @@ cmake --build --preset vs2022-debug
 ```
 
 Rubber Band is built as a static library from the single-file source (`single/RubberBandSingle.cpp`) and linked into SampleWrangler.
+Release artifacts are also statically linked to the MSVC runtime; the REX SDK DLL remains external because it is loaded dynamically at runtime.
 
 ### Fallback presets (no HQ Stretch dependency)
 
@@ -141,7 +164,7 @@ Rubber Band Library is GPL unless you have a commercial licence; ensure distribu
 
 ## Project layout
 
-```
+```text
 Source/
   App/          Main entry point + MainComponent
   UI/           Panels: Browser, Results, Waveform, Preview

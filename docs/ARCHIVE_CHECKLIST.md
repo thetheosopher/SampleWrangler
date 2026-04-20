@@ -23,15 +23,13 @@ Use this checklist before creating a shareable source archive.
   - `JUCE/`
   - `REXSDK_Win_1.9.2/`
 - Optional release artifacts (if you want to distribute installers with the archive):
-  - `SampleWrangler-*-win64.msi`
-  - `SampleWrangler-*-win64.zip`
+  - `build/vs2022-release/packages/SampleWrangler-*-win64-setup.exe`
+  - `build/vs2022-release/packages/SampleWrangler-*-win64-portable.zip`
 
 ## Exclude From Archive
 
 - Temporary/generated build outputs:
   - `build/`
-  - `packages/`
-  - `_CPack_Packages/`
   - `Testing/Temporary/`
 - IDE/local state folders (if present):
   - `.vs/`
@@ -40,14 +38,14 @@ Use this checklist before creating a shareable source archive.
 ## Quick PowerShell Cleanup (safe defaults)
 
 ```powershell
-$paths = @('build','packages','_CPack_Packages','Testing/Temporary')
+$paths = @('build','Testing/Temporary')
 foreach ($p in $paths) { if (Test-Path $p) { Remove-Item -Recurse -Force $p } }
 ```
 
 ## Optional Validation Before Archiving
 
 ```powershell
-$dirs = @('build','packages','_CPack_Packages','Testing/Temporary')
+$dirs = @('build','Testing/Temporary')
 $dirs | ForEach-Object { "$_ => " + (Test-Path $_) }
 Get-ChildItem -File -Name
 ```

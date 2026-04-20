@@ -87,21 +87,30 @@
             "configuration": "Release"
         },
         {
-            "name": "vs2022-release-package",
-            "displayName": "VS 2022 Release Package",
+            "name": "vs2022-release-portable-zip",
+            "displayName": "VS 2022 Release Portable ZIP",
             "configurePreset": "vs2022-release",
             "configuration": "Release",
             "targets": [
-                "PACKAGE"
+                "SampleWranglerPortableZip"
             ]
         },
         {
-            "name": "vs2022-release-package-msi-zip",
-            "displayName": "VS 2022 Release Package (MSI+ZIP)",
+            "name": "vs2022-release-inno-setup",
+            "displayName": "VS 2022 Release Inno Setup Installer",
             "configurePreset": "vs2022-release",
             "configuration": "Release",
             "targets": [
-                "PACKAGE"
+                "SampleWranglerInnoSetup"
+            ]
+        },
+        {
+            "name": "vs2022-release-artifacts",
+            "displayName": "VS 2022 Release Artifacts (Inno+ZIP)",
+            "configurePreset": "vs2022-release",
+            "configuration": "Release",
+            "targets": [
+                "SampleWranglerReleaseArtifacts"
             ]
         }
     ]

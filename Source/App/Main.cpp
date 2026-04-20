@@ -51,6 +51,25 @@ public:
             explicit AboutContent(const juce::String &version)
                 : appVersion(version)
             {
+                configureLinkButton(githubButton,
+                                    "View on GitHub",
+                                    "Open the SampleWrangler project on GitHub",
+                                    juce::Colour(0xff24292f),
+                                    juce::Colours::white,
+                                    "https://github.com/thetheosopher/SampleWrangler");
+
+                configureLinkButton(supportButton,
+                                    "Buy Me A Coffee",
+                                    "Open the Buy Me a Coffee support page",
+                                    juce::Colour(0xfff5c147),
+                                    juce::Colour(0xff2a241f),
+                                    "https://buymeacoffee.com/theosopher");
+            }
+
+            ~AboutContent() override
+            {
+                githubButton.setLookAndFeel(nullptr);
+                supportButton.setLookAndFeel(nullptr);
             }
 
             void paint(juce::Graphics &g) override
@@ -90,7 +109,7 @@ public:
                 g.setColour(juce::Colour(0xff9a5f14));
                 g.fillPath(lassoTip);
 
-                content.removeFromLeft(190);
+                content = getTextColumnBounds(getLocalBounds());
 
                 g.setColour(titleColour);
                 g.setFont(juce::FontOptions(32.0f).withStyle("Bold"));
@@ -102,7 +121,7 @@ public:
 
                 const int year = currentYear();
                 const auto copyrightSymbol = juce::String::charToString(static_cast<juce_wchar>(0x00A9));
-                g.drawText(copyrightSymbol + " " + juce::String(year) + " Michael A. McCloskey and GitHub Copilot", content.removeFromTop(24), juce::Justification::centredLeft, false);
+                g.drawText(copyrightSymbol + " " + juce::String(year) + " Michael A. McCloskey", content.removeFromTop(24), juce::Justification::centredLeft, false);
                 g.drawText("Licensed under the MIT License", content.removeFromTop(22), juce::Justification::centredLeft, false);
 
                 content.removeFromTop(8);
@@ -120,9 +139,109 @@ public:
                                  content.removeFromTop(108),
                                  juce::Justification::topLeft,
                                  7);
+
+                content.removeFromTop(16);
+
+                g.setColour(titleColour);
+                g.setFont(juce::FontOptions(16.0f).withStyle("Bold"));
+                g.drawText("Links", content.removeFromTop(24), juce::Justification::centredLeft, false);
+
+                g.setColour(bodyColour);
+                g.setFont(juce::FontOptions(14.0f));
+                g.drawFittedText("View the project on GitHub or support my continued efforts",
+                                 content.removeFromTop(42),
+                                 juce::Justification::topLeft,
+                                 2);
+            }
+
+            void resized() override
+            {
+                auto content = getTextColumnBounds(getLocalBounds());
+                content.removeFromTop(48);
+                content.removeFromTop(24);
+                content.removeFromTop(24);
+                content.removeFromTop(22);
+                content.removeFromTop(8);
+                content.removeFromTop(24);
+                content.removeFromTop(108);
+                content.removeFromTop(16);
+                content.removeFromTop(24);
+                content.removeFromTop(42);
+
+                auto buttons = content.removeFromTop(40);
+                constexpr int gap = 12;
+                const int buttonWidth = (buttons.getWidth() - gap) / 2;
+                githubButton.setBounds(buttons.removeFromLeft(buttonWidth));
+                buttons.removeFromLeft(gap);
+                supportButton.setBounds(buttons.removeFromLeft(buttonWidth));
             }
 
         private:
+            class LinkButtonLookAndFeel final : public juce::LookAndFeel_V4
+            {
+            public:
+                juce::Font getTextButtonFont(juce::TextButton &, int buttonHeight) override
+                {
+                    const auto fontHeight = static_cast<float>(juce::jlimit(13, 16, buttonHeight / 2));
+                    return juce::FontOptions(fontHeight).withStyle("Bold");
+                }
+
+                void drawButtonBackground(juce::Graphics &g,
+                                          juce::Button &button,
+                                          const juce::Colour &backgroundColour,
+                                          bool shouldDrawButtonAsHighlighted,
+                                          bool shouldDrawButtonAsDown) override
+                {
+                    auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
+                    auto colour = backgroundColour;
+
+                    if (!button.isEnabled())
+                        colour = colour.withMultipliedAlpha(0.4f);
+                    else if (shouldDrawButtonAsDown)
+                        colour = colour.darker(0.16f);
+                    else if (shouldDrawButtonAsHighlighted)
+                        colour = colour.brighter(0.06f);
+
+                    g.setColour(juce::Colours::black.withAlpha(0.08f));
+                    g.fillRoundedRectangle(bounds.translated(0.0f, 1.5f), 11.0f);
+
+                    g.setColour(colour);
+                    g.fillRoundedRectangle(bounds, 11.0f);
+
+                    g.setColour(colour.contrasting(0.2f).withAlpha(0.28f));
+                    g.drawRoundedRectangle(bounds, 11.0f, 1.0f);
+                }
+            };
+
+            static juce::Rectangle<int> getTextColumnBounds(juce::Rectangle<int> bounds)
+            {
+                auto content = bounds.reduced(24);
+                content.removeFromLeft(190);
+                return content;
+            }
+
+            void configureLinkButton(juce::TextButton &button,
+                                     const juce::String &text,
+                                     const juce::String &tooltip,
+                                     juce::Colour backgroundColour,
+                                     juce::Colour textColour,
+                                     const juce::String &url)
+            {
+                button.setButtonText(text);
+                button.setTooltip(tooltip);
+                button.setLookAndFeel(&linkButtonLookAndFeel);
+                button.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+                button.setColour(juce::TextButton::buttonColourId, backgroundColour);
+                button.setColour(juce::TextButton::buttonOnColourId, backgroundColour);
+                button.setColour(juce::TextButton::textColourOffId, textColour);
+                button.setColour(juce::TextButton::textColourOnId, textColour);
+                button.onClick = [url]
+                {
+                    juce::URL(url).launchInDefaultBrowser();
+                };
+                addAndMakeVisible(button);
+            }
+
             static int currentYear()
             {
                 const auto now = std::chrono::system_clock::now();
@@ -137,6 +256,9 @@ public:
             }
 
             juce::String appVersion;
+            LinkButtonLookAndFeel linkButtonLookAndFeel;
+            juce::TextButton githubButton;
+            juce::TextButton supportButton;
         };
 
         explicit MainWindow(const juce::String &name)

@@ -4,6 +4,12 @@ project(SampleWrangler VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+string(TIMESTAMP SW_BUILD_YEAR "%Y")
+set(SW_COMPANY_NAME "Michael A. McCloskey")
+set(SW_PRODUCT_NAME "SampleWrangler")
+set(SW_COPYRIGHT_TEXT "Copyright (c) ${SW_BUILD_YEAR} ${SW_COMPANY_NAME}")
+set(SW_FILE_VERSION_COMMA "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0")
+
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
@@ -78,7 +84,6 @@ set(APP_SOURCES
     Source/App/Main.cpp
     Source/App/MainComponent.cpp
     Source/App/MainComponent.h
-    Source/App/SampleWranglerIcon.rc
 )
 
 set(UI_SOURCES
@@ -141,7 +146,9 @@ set(UTIL_SOURCES
 juce_add_gui_app(SampleWrangler
     PRODUCT_NAME "SampleWrangler"
     VERSION "1.0.0"
-    COMPANY_NAME "SampleWrangler"
+    BUNDLE_ID "com.michaelamccloskey.samplewrangler"
+    COMPANY_NAME "${SW_COMPANY_NAME}"
+    COMPANY_COPYRIGHT "${SW_COPYRIGHT_TEXT}"
 )
 
 juce_add_binary_data(SampleWranglerAssets
@@ -162,6 +169,7 @@ target_sources(SampleWrangler PRIVATE
 
 target_include_directories(SampleWrangler PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 # ---------------------------------------------------------------------------
@@ -229,6 +237,7 @@ target_compile_definitions(SampleWrangler PRIVATE
     JUCE_ASIO=1
     SW_HAVE_RUBBERBAND=${SW_HAVE_RUBBERBAND}
     SW_HAVE_REX=${SW_HAVE_REX}
+    JUCE_USER_DEFINED_RC_FILE="SampleWranglerVersion.rc"
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SampleWrangler,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SampleWrangler,JUCE_VERSION>"
 )
@@ -322,7 +331,10 @@ set(SW_INNO_SETUP_COMPILER "" CACHE FILEPATH "Path to Inno Setup 6 ISCC.exe")
 set(SW_INNO_SETUP_COMPILER_RESOLVED "${SW_INNO_SETUP_COMPILER}")
 if(WIN32 AND NOT SW_INNO_SETUP_COMPILER_RESOLVED)
     foreach(candidate
+        "$ENV{USERPROFILE}/AppData/Local/Programs/Inno Setup 6/ISCC.exe"
         "$ENV{LOCALAPPDATA}/Programs/Inno Setup 6/ISCC.exe"
+        "$ENV{USERPROFILE}/scoop/apps/innosetup/current/ISCC.exe"
+        "$ENV{USERPROFILE}/AppData/Local/Microsoft/WinGet/Packages/JRSoftware.InnoSetup_*/*/ISCC.exe"
         "$ENV{LOCALAPPDATA}/Inno Setup 6/ISCC.exe"
         "C:/Program Files (x86)/Inno Setup 6/ISCC.exe"
         "C:/Program Files/Inno Setup 6/ISCC.exe")
@@ -331,6 +343,22 @@ if(WIN32 AND NOT SW_INNO_SETUP_COMPILER_RESOLVED)
             break()
         endif()
     endforeach()
+
+    if(NOT SW_INNO_SETUP_COMPILER_RESOLVED)
+        file(GLOB SW_INNO_WINGET_CANDIDATES LIST_DIRECTORIES false
+            "$ENV{LOCALAPPDATA}/Microsoft/WinGet/Packages/JRSoftware.InnoSetup_*/*/ISCC.exe"
+            "$ENV{USERPROFILE}/AppData/Local/Microsoft/WinGet/Packages/JRSoftware.InnoSetup_*/*/ISCC.exe")
+
+        list(SORT SW_INNO_WINGET_CANDIDATES)
+        list(REVERSE SW_INNO_WINGET_CANDIDATES)
+
+        foreach(candidate IN LISTS SW_INNO_WINGET_CANDIDATES)
+            if(EXISTS "${candidate}")
+                set(SW_INNO_SETUP_COMPILER_RESOLVED "${candidate}")
+                break()
+            endif()
+        endforeach()
+    endif()
 endif()
 
 if(SW_INNO_SETUP_COMPILER_RESOLVED)
@@ -339,10 +367,18 @@ else()
     message(STATUS "Inno Setup 6 compiler not found; set SW_INNO_SETUP_COMPILER to build the installer artifact")
 endif()
 
+set(SW_INNO_SETUP_COMPILER_CMAKE_PATH "")
+if(SW_INNO_SETUP_COMPILER_RESOLVED)
+    file(TO_CMAKE_PATH "${SW_INNO_SETUP_COMPILER_RESOLVED}" SW_INNO_SETUP_COMPILER_CMAKE_PATH)
+endif()
+
 file(TO_NATIVE_PATH "${SW_INSTALL_STAGE_DIR}" SW_INSTALL_STAGE_DIR_NATIVE)
 file(TO_NATIVE_PATH "${SW_PACKAGE_OUTPUT_DIR}" SW_PACKAGE_OUTPUT_DIR_NATIVE)
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/images/SampleWrangler.ico" SW_SETUP_ICON_NATIVE)
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt" SW_LICENSE_FILE_NATIVE)
+set(SW_APP_ICON_RC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/images/SampleWrangler.ico")
+set(SW_APP_PUBLISHER "${SW_COMPANY_NAME}")
+set(SW_APP_COPYRIGHT "${SW_COPYRIGHT_TEXT}")
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SampleWranglerInstaller.iss.in"
@@ -362,12 +398,18 @@ configure_file(
     @ONLY
 )
 
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SampleWranglerVersion.rc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/SampleWranglerVersion.rc"
+    @ONLY
+)
+
 add_custom_target(SampleWranglerStageRelease
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${SW_INSTALL_STAGE_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${SW_INSTALL_STAGE_DIR}"
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --config Release --target SampleWrangler
     COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --config Release --component Runtime --prefix "${SW_INSTALL_STAGE_DIR}"
-    DEPENDS SampleWrangler
-            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
             "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
     COMMENT "Staging release files for packaging"
     VERBATIM

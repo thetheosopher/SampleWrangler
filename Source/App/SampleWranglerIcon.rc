@@ -1,5 +1,0 @@
-#include <windows.h>
-
-#define IDI_MAIN_ICON 101
-
-IDI_MAIN_ICON ICON "../../images/SampleWrangler.ico"

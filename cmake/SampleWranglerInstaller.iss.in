@@ -1,7 +1,8 @@
 #define MyAppId "{{E795F1BB-4E44-4F6C-BAE6-4371EA683986}"
 #define MyAppName "Sample Wrangler"
 #define MyAppVersion "@PROJECT_VERSION@"
-#define MyAppPublisher "Michael A. McCloskey"
+#define MyAppPublisher "@SW_APP_PUBLISHER@"
+#define MyAppCopyright "@SW_APP_COPYRIGHT@"
 #define MyAppURL "https://github.com/thetheosopher/SampleWrangler"
 #define MyAppExeName "SampleWrangler.exe"
 #define MyAppSupportURL "https://buymeacoffee.com/theosopher"
@@ -39,6 +40,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Installer
+VersionInfoProductName={#MyAppName}
+VersionInfoCopyright={#MyAppCopyright}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

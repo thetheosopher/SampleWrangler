@@ -1,0 +1,37 @@
+#pragma code_page(65001)
+
+#include <windows.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @SW_FILE_VERSION_COMMA@
+PRODUCTVERSION @SW_FILE_VERSION_COMMA@
+FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+FILEFLAGS VS_FF_DEBUG
+#else
+FILEFLAGS 0x0L
+#endif
+FILEOS VOS__WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE 0x0L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904E4"
+    BEGIN
+      VALUE "CompanyName", "@SW_COMPANY_NAME@\0"
+      VALUE "FileDescription", "@SW_PRODUCT_NAME@\0"
+      VALUE "FileVersion", "@PROJECT_VERSION@\0"
+      VALUE "LegalCopyright", "@SW_COPYRIGHT_TEXT@\0"
+      VALUE "OriginalFilename", "SampleWrangler.exe\0"
+      VALUE "ProductName", "@SW_PRODUCT_NAME@\0"
+      VALUE "ProductVersion", "@PROJECT_VERSION@\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1252
+  END
+END
+
+IDI_MAIN_ICON ICON "@SW_APP_ICON_RC_PATH@"

@@ -26,7 +26,8 @@ namespace sw
             UpdatePitch,
             Play, // UI play button (non-MIDI, voice 0)
             Stop,
-            SetPlaybackProgress
+            SetPlaybackProgress,
+            SwapSampleBuffer
         };
 
         Type type = Type::NoteOn;
@@ -34,6 +35,9 @@ namespace sw
         double playbackRate = 1.0;
         double pitchRatio = 1.0;
         double normalizedProgress = 0.0; // for SetPlaybackProgress
+        int sampleSlot = -1;
+        int sampleBufferLength = 0;
+        double sampleBufferSampleRate = 44100.0;
     };
 
     /// Per-voice playback state for polyphonic sample preview.

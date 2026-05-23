@@ -63,7 +63,7 @@ namespace sw
             if (onStretchHighQualityChanged)
                 onStretchHighQualityChanged(stretchHighQualityButton.getToggleState());
         };
-        stretchHighQualityButton.setTooltip("Use Rubber Band v4 high-quality pitch shifting for Stretch mode");
+        stretchHighQualityButton.setTooltip("Use higher-quality interpolation for resampling, and Rubber Band when Stretch mode is enabled");
 
         addAndMakeVisible(playButton);
         addAndMakeVisible(stopButton);

@@ -6,6 +6,63 @@
 namespace sw
 {
 
+    namespace
+    {
+        constexpr double kRateEpsilon = 1.0e-9;
+
+        float readLinearInterpolatedSample(const float *srcRead, int srcLength, double readPos) noexcept
+        {
+            const int idx0 = juce::jlimit(0, srcLength - 1, static_cast<int>(readPos));
+            const int idx1 = juce::jmin(idx0 + 1, srcLength - 1);
+            const float frac = static_cast<float>(readPos - static_cast<double>(idx0));
+            const float s0 = srcRead[idx0];
+            const float s1 = srcRead[idx1];
+            return s0 + frac * (s1 - s0);
+        }
+
+        float readHermiteInterpolatedSample(const float *srcRead, int srcLength, double readPos) noexcept
+        {
+            if (srcLength < 4)
+                return readLinearInterpolatedSample(srcRead, srcLength, readPos);
+
+            const int idx0 = juce::jlimit(0, srcLength - 1, static_cast<int>(readPos));
+            const int idxM1 = juce::jmax(0, idx0 - 1);
+            const int idx1 = juce::jmin(idx0 + 1, srcLength - 1);
+            const int idx2 = juce::jmin(idx0 + 2, srcLength - 1);
+            const float frac = static_cast<float>(readPos - static_cast<double>(idx0));
+
+            const float xm1 = srcRead[idxM1];
+            const float x0 = srcRead[idx0];
+            const float x1 = srcRead[idx1];
+            const float x2 = srcRead[idx2];
+
+            const float c0 = x0;
+            const float c1 = 0.5f * (x1 - xm1);
+            const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+            const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+            return ((c3 * frac + c2) * frac + c1) * frac + c0;
+        }
+
+        int computeContiguousSpan(double readPos,
+                                  double boundaryExclusive,
+                                  double rate,
+                                  int remainingSamples) noexcept
+        {
+            if (remainingSamples <= 0)
+                return 0;
+
+            if (rate <= kRateEpsilon)
+                return 1;
+
+            const double distance = boundaryExclusive - readPos;
+            if (distance <= kRateEpsilon)
+                return 1;
+
+            const int span = static_cast<int>(std::ceil(distance / rate));
+            return juce::jlimit(1, remainingSamples, span);
+        }
+    }
+
     VoiceManager::VoiceManager() = default;
     VoiceManager::~VoiceManager() = default;
 
@@ -47,9 +104,8 @@ namespace sw
         // 1. Drain command FIFO — all voice mutations happen here on audio thread.
         drainCommandFifo();
 
-        // 2. Load sample buffer. Keep a local copy for this callback.
-        auto loadedBuffer = sampleBuffer.load(std::memory_order_acquire);
-        auto *buf = loadedBuffer.get();
+        // 2. Load the atomically published sample pointer for this callback.
+        auto *buf = publishedSampleBuffer.load(std::memory_order_acquire);
 
         if (buf == nullptr || buf->getNumSamples() == 0)
         {
@@ -138,6 +194,7 @@ namespace sw
             renderContext.configuredLoopEnd = loopEndSample.load(std::memory_order_relaxed);
             renderContext.loopEnabled = loopEnabled.load(std::memory_order_relaxed);
             renderContext.preserveLengthEnabled = preserveLengthEnabled.load(std::memory_order_relaxed);
+            renderContext.stretchHighQualityEnabled = stretchHighQualityEnabled.load(std::memory_order_relaxed);
             renderContext.bufferSampleRate = bufferSampleRate.load(std::memory_order_relaxed);
 
             std::array<int, kMaxVoices> activeVoiceIndices{};
@@ -238,9 +295,53 @@ namespace sw
 
             switch (cmd.type)
             {
+            case VoiceCommand::Type::SwapSampleBuffer:
+            {
+                for (auto &v : voices)
+                {
+                    v.forceOff();
+                    v.playbackPos = 0.0;
+                    v.fadeGain = 0.0f;
+                    v.grainSamplesRemaining = 0;
+                    v.granularResetRequested = true;
+                }
+
+                anyVoiceActive.store(false, std::memory_order_relaxed);
+                primaryVoiceActive.store(false, std::memory_order_relaxed);
+                playbackFinished.store(false, std::memory_order_relaxed);
+                primaryVoiceIndex.store(0, std::memory_order_relaxed);
+                loadedSampleLength.store(cmd.sampleBufferLength, std::memory_order_relaxed);
+                bufferSampleRate.store(cmd.sampleBufferSampleRate, std::memory_order_relaxed);
+
+                const int newSlot = cmd.sampleSlot;
+                juce::AudioBuffer<float> *newBuffer = nullptr;
+                if (newSlot >= 0 && newSlot < kSampleBufferSlotCount)
+                    newBuffer = sampleBufferSlots[static_cast<size_t>(newSlot)].get();
+
+                const int oldSlot = publishedSampleSlot.exchange(newSlot, std::memory_order_acq_rel);
+                publishedSampleBuffer.store(newBuffer, std::memory_order_release);
+
+                if (oldSlot >= 0 && oldSlot != newSlot)
+                {
+                    const int retireWp = retireWritePos.load(std::memory_order_relaxed);
+                    const int nextRetireWp = (retireWp + 1) % kRetireRingSize;
+                    const int retireRp = retireReadPos.load(std::memory_order_acquire);
+                    if (nextRetireWp != retireRp)
+                    {
+                        retireRing[static_cast<size_t>(retireWp)] = oldSlot;
+                        retireWritePos.store(nextRetireWp, std::memory_order_release);
+                    }
+                    else
+                    {
+                        jassertfalse;
+                    }
+                }
+                break;
+            }
+
             case VoiceCommand::Type::NoteOn:
             {
-                if (sampleBuffer.load(std::memory_order_relaxed) == nullptr)
+                if (publishedSampleBuffer.load(std::memory_order_relaxed) == nullptr)
                     break;
 
                 playbackFinished.store(false, std::memory_order_relaxed);
@@ -319,7 +420,7 @@ namespace sw
 
             case VoiceCommand::Type::Play:
             {
-                if (sampleBuffer.load(std::memory_order_relaxed) == nullptr)
+                if (publishedSampleBuffer.load(std::memory_order_relaxed) == nullptr)
                     break;
 
                 playbackFinished.store(false, std::memory_order_relaxed);
@@ -376,11 +477,29 @@ namespace sw
 
         while (rp != wp)
         {
-            retireRing[static_cast<size_t>(rp)].reset(); // deallocate on message thread
+            const int slot = retireRing[static_cast<size_t>(rp)];
+            if (slot >= 0 && slot < kSampleBufferSlotCount)
+                sampleBufferSlots[static_cast<size_t>(slot)].reset();
+
             rp = (rp + 1) % kRetireRingSize;
         }
 
         retireReadPos.store(rp, std::memory_order_release);
+    }
+
+    int VoiceManager::findAvailableSampleBufferSlot() const noexcept
+    {
+        const int publishedSlot = publishedSampleSlot.load(std::memory_order_acquire);
+        for (int slot = 0; slot < kSampleBufferSlotCount; ++slot)
+        {
+            if (slot == publishedSlot)
+                continue;
+
+            if (sampleBufferSlots[static_cast<size_t>(slot)] == nullptr)
+                return slot;
+        }
+
+        return -1;
     }
 
     // ---------------------------------------------------------------------------
@@ -413,12 +532,13 @@ namespace sw
         double pos = voice.playbackPos;
         const double bsr = renderContext.bufferSampleRate;
         const double rate = voice.playbackRate * (bsr / currentSampleRate);
+        const bool useHighQualityInterpolation = renderContext.stretchHighQualityEnabled;
 #if SW_HAVE_RUBBERBAND
         const double currentPitchRatio = voice.pitchRatio;
 #endif
         const bool preserveLength = renderContext.preserveLengthEnabled && std::abs(rate - 1.0) > 0.0001;
 #if SW_HAVE_RUBBERBAND
-        const bool useRubberBandRt = preserveLength && voice.rubberBandInitialized;
+        const bool useRubberBandRt = preserveLength && useHighQualityInterpolation && voice.rubberBandInitialized;
 #else
         constexpr bool useRubberBandRt = false;
 #endif
@@ -521,9 +641,6 @@ namespace sw
             if (wrappedPos < 0.0 || wrappedPos >= static_cast<double>(srcLength))
                 return 0.0f;
 
-            const int idx0 = juce::jlimit(0, srcLength - 1, static_cast<int>(wrappedPos));
-            const int idx1 = juce::jmin(idx0 + 1, srcLength - 1);
-            const float frac = static_cast<float>(wrappedPos - static_cast<double>(idx0));
             const float *srcRead = nullptr;
             if (channel == 0)
                 srcRead = srcReadPtr0;
@@ -532,9 +649,10 @@ namespace sw
             else
                 srcRead = srcBuffer.getReadPointer(channel);
 
-            const float s0 = srcRead[idx0];
-            const float s1 = srcRead[idx1];
-            return s0 + frac * (s1 - s0);
+            if (useHighQualityInterpolation)
+                return readHermiteInterpolatedSample(srcRead, srcLength, wrappedPos);
+
+            return readLinearInterpolatedSample(srcRead, srcLength, wrappedPos);
         };
 
         if (voice.granularResetRequested)
@@ -685,210 +803,238 @@ namespace sw
         for (int ch = 0; ch < directMixChannels; ++ch)
             outputWritePtrs[static_cast<size_t>(ch)] = outputBuffer.getWritePointer(ch, startSample);
 
-        for (int i = 0; i < numSamples; ++i)
+        int renderedSamples = 0;
+        while (renderedSamples < numSamples)
         {
-            // Check if voice finished fading out
             if (!voice.active)
                 break;
 
-            // Loop wrapping
-            if (hasLoopRegion && pos >= loopEndExclusive)
+            if (hasLoopRegion)
             {
-                pos = static_cast<double>(loopStart) + std::fmod(pos - static_cast<double>(loopStart), loopLength);
+                while (pos >= loopEndExclusive)
+                    pos = static_cast<double>(loopStart) + std::fmod(pos - static_cast<double>(loopStart), loopLength);
             }
-
-            if (pos >= static_cast<double>(srcLength))
+            else if (isLoopOn && srcLength > 0)
             {
-                if (isLoopOn && srcLength > 0)
-                {
+                while (pos >= static_cast<double>(srcLength))
                     pos = std::fmod(pos, static_cast<double>(srcLength));
-                }
-                else
-                {
-                    // End of sample — deactivate this voice
-                    voice.forceOff();
-                    break;
-                }
+            }
+            else if (pos >= static_cast<double>(srcLength))
+            {
+                voice.forceOff();
+                break;
             }
 
-            const float gain = voice.advanceFade(fadeRate);
-            if (gain <= 0.0f)
+            const double boundaryExclusive = hasLoopRegion
+                                                 ? loopEndExclusive
+                                                 : static_cast<double>(srcLength);
+            const int spanSamples = computeContiguousSpan(pos,
+                                                          boundaryExclusive,
+                                                          rate,
+                                                          numSamples - renderedSamples);
+            if (spanSamples <= 0)
                 break;
 
             if (preserveLength)
             {
-                if (useRubberBandRt)
+                const int outputBase = renderedSamples;
+                for (int i = 0; i < spanSamples; ++i)
                 {
-#if SW_HAVE_RUBBERBAND
-                    if (voice.rubberBandStretcher != nullptr && voice.rubberBandBuffers != nullptr)
+                    const float gain = voice.advanceFade(fadeRate);
+                    if (gain <= 0.0f)
                     {
-                        if (std::abs(currentPitchRatio - voice.rubberBandLastPitchScale) > 1.0e-6)
-                        {
-                            voice.rubberBandStretcher->setPitchScale(currentPitchRatio);
-                            voice.rubberBandLastPitchScale = currentPitchRatio;
-                        }
-
-                        const bool provideStartPadSample = (voice.rubberBandPreferredStartPadRemaining > 0);
-
-                        for (int ch = 0; ch < Voice::kMaxChannels; ++ch)
-                        {
-                            float inSample = 0.0f;
-                            if (!provideStartPadSample)
-                            {
-                                const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                                inSample = readInterpolatedSample(srcCh, pos);
-                            }
-                            voice.rubberBandBuffers->input[static_cast<size_t>(ch)][static_cast<size_t>(voice.rubberBandInputFill)] = inSample;
-                        }
-
-                        if (provideStartPadSample)
-                            --voice.rubberBandPreferredStartPadRemaining;
-                        else
-                            pos += (bsr / currentSampleRate);
-
-                        ++voice.rubberBandInputFill;
-                        if (voice.rubberBandInputFill >= voice.rubberBandProcessBlockSize)
-                        {
-                            voice.processRubberBandIfReady();
-                        }
-                        else if (voice.rubberBandOutputFifoCount == 0 && (i & 0x0F) == 0)
-                        {
-                            voice.processRubberBandIfReady();
-                        }
-
-                        while (voice.rubberBandOutputFifoCount > 0 && voice.rubberBandStartDelayRemaining > 0)
-                        {
-                            voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
-                            --voice.rubberBandOutputFifoCount;
-                            --voice.rubberBandStartDelayRemaining;
-                        }
-
-                        float outSampleLeft = 0.0f;
-                        float outSampleRight = 0.0f;
-                        if (voice.rubberBandOutputFifoCount > 0)
-                        {
-                            outSampleLeft = voice.rubberBandBuffers->outputFifo[0][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
-                            outSampleRight = voice.rubberBandBuffers->outputFifo[1][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
-                            voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
-                            --voice.rubberBandOutputFifoCount;
-                            voice.rubberBandLastOutputLeft = outSampleLeft;
-                            voice.rubberBandLastOutputRight = outSampleRight;
-                        }
-                        else
-                        {
-                            outSampleLeft = voice.rubberBandLastOutputLeft;
-                            outSampleRight = voice.rubberBandLastOutputRight;
-                        }
-
-                        float rubberBandAttackGain = 1.0f;
-                        if (voice.rubberBandOnsetBlendRemaining > 0)
-                        {
-                            const int clampedRemaining = juce::jlimit(0,
-                                                                      Voice::kRubberBandOnsetBlendSamples,
-                                                                      voice.rubberBandOnsetBlendRemaining);
-                            rubberBandAttackGain = 1.0f - (static_cast<float>(clampedRemaining) /
-                                                           static_cast<float>(Voice::kRubberBandOnsetBlendSamples));
-                            --voice.rubberBandOnsetBlendRemaining;
-                        }
-
-                        outSampleLeft *= rubberBandAttackGain;
-                        outSampleRight *= rubberBandAttackGain;
-
-                        for (int ch = 0; ch < directMixChannels; ++ch)
-                        {
-                            const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
-                            outputWritePtrs[static_cast<size_t>(ch)][i] += sample * gain;
-                        }
-
-                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                        {
-                            const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
-                            outputBuffer.addSample(ch, startSample + i, sample * gain);
-                        }
-
-                        continue;
+                        renderedSamples += i;
+                        voice.playbackPos = pos;
+                        return;
                     }
+
+                    const int outputIndex = outputBase + i;
+
+                    if (useRubberBandRt)
+                    {
+#if SW_HAVE_RUBBERBAND
+                        if (voice.rubberBandStretcher != nullptr && voice.rubberBandBuffers != nullptr)
+                        {
+                            if (std::abs(currentPitchRatio - voice.rubberBandLastPitchScale) > 1.0e-6)
+                            {
+                                voice.rubberBandStretcher->setPitchScale(currentPitchRatio);
+                                voice.rubberBandLastPitchScale = currentPitchRatio;
+                            }
+
+                            const bool provideStartPadSample = (voice.rubberBandPreferredStartPadRemaining > 0);
+
+                            for (int ch = 0; ch < Voice::kMaxChannels; ++ch)
+                            {
+                                float inSample = 0.0f;
+                                if (!provideStartPadSample)
+                                {
+                                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                                    inSample = readInterpolatedSample(srcCh, pos);
+                                }
+                                voice.rubberBandBuffers->input[static_cast<size_t>(ch)][static_cast<size_t>(voice.rubberBandInputFill)] = inSample;
+                            }
+
+                            if (provideStartPadSample)
+                                --voice.rubberBandPreferredStartPadRemaining;
+                            else
+                                pos += (bsr / currentSampleRate);
+
+                            ++voice.rubberBandInputFill;
+                            if (voice.rubberBandInputFill >= voice.rubberBandProcessBlockSize)
+                            {
+                                voice.processRubberBandIfReady();
+                            }
+                            else if (voice.rubberBandOutputFifoCount == 0 && (outputIndex & 0x0F) == 0)
+                            {
+                                voice.processRubberBandIfReady();
+                            }
+
+                            while (voice.rubberBandOutputFifoCount > 0 && voice.rubberBandStartDelayRemaining > 0)
+                            {
+                                voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
+                                --voice.rubberBandOutputFifoCount;
+                                --voice.rubberBandStartDelayRemaining;
+                            }
+
+                            float outSampleLeft = 0.0f;
+                            float outSampleRight = 0.0f;
+                            if (voice.rubberBandOutputFifoCount > 0)
+                            {
+                                outSampleLeft = voice.rubberBandBuffers->outputFifo[0][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
+                                outSampleRight = voice.rubberBandBuffers->outputFifo[1][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
+                                voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
+                                --voice.rubberBandOutputFifoCount;
+                                voice.rubberBandLastOutputLeft = outSampleLeft;
+                                voice.rubberBandLastOutputRight = outSampleRight;
+                            }
+                            else
+                            {
+                                outSampleLeft = voice.rubberBandLastOutputLeft;
+                                outSampleRight = voice.rubberBandLastOutputRight;
+                            }
+
+                            float rubberBandAttackGain = 1.0f;
+                            if (voice.rubberBandOnsetBlendRemaining > 0)
+                            {
+                                const int clampedRemaining = juce::jlimit(0,
+                                                                          Voice::kRubberBandOnsetBlendSamples,
+                                                                          voice.rubberBandOnsetBlendRemaining);
+                                rubberBandAttackGain = 1.0f - (static_cast<float>(clampedRemaining) /
+                                                               static_cast<float>(Voice::kRubberBandOnsetBlendSamples));
+                                --voice.rubberBandOnsetBlendRemaining;
+                            }
+
+                            outSampleLeft *= rubberBandAttackGain;
+                            outSampleRight *= rubberBandAttackGain;
+
+                            for (int ch = 0; ch < directMixChannels; ++ch)
+                            {
+                                const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
+                                outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += sample * gain;
+                            }
+
+                            for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                            {
+                                const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
+                                outputBuffer.addSample(ch, startSample + outputIndex, sample * gain);
+                            }
+
+                            continue;
+                        }
 #endif
+                    }
+
+                    // Granular pitch-shift fallback
+                    if (voice.grainSamplesRemaining <= 0)
+                    {
+                        voice.grainReadPosA = pos;
+                        voice.grainReadPosB = pos + Voice::kGrainSpacingSamples;
+                        voice.grainSamplesRemaining = Voice::kGrainLengthSamples;
+                    }
+
+                    const float blend = 1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples));
+
+                    for (int ch = 0; ch < directMixChannels; ++ch)
+                    {
+                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                        const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
+                        const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                        outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += (sampleA + (sampleB - sampleA) * blend) * gain;
+                    }
+
+                    for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                    {
+                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                        const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
+                        const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                        outputBuffer.addSample(ch, startSample + outputIndex, (sampleA + (sampleB - sampleA) * blend) * gain);
+                    }
+
+                    voice.grainReadPosA += rate;
+                    voice.grainReadPosB += rate;
+                    --voice.grainSamplesRemaining;
+
+                    if (voice.grainSamplesRemaining <= 0)
+                    {
+                        voice.grainReadPosA = voice.grainReadPosB;
+                        voice.grainReadPosB = voice.grainReadPosA + Voice::kGrainSpacingSamples;
+                    }
+
+                    pos += 1.0;
                 }
 
-                // Granular pitch-shift fallback
-                if (voice.grainSamplesRemaining <= 0)
-                {
-                    voice.grainReadPosA = pos;
-                    voice.grainReadPosB = pos + Voice::kGrainSpacingSamples;
-                    voice.grainSamplesRemaining = Voice::kGrainLengthSamples;
-                }
-
-                const float blend = 1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples));
-
-                for (int ch = 0; ch < directMixChannels; ++ch)
-                {
-                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                    const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
-                    const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
-                    outputWritePtrs[static_cast<size_t>(ch)][i] += (sampleA + (sampleB - sampleA) * blend) * gain;
-                }
-
-                for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                {
-                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                    const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
-                    const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
-                    outputBuffer.addSample(ch, startSample + i, (sampleA + (sampleB - sampleA) * blend) * gain);
-                }
-
-                voice.grainReadPosA += rate;
-                voice.grainReadPosB += rate;
-                --voice.grainSamplesRemaining;
-
-                if (voice.grainSamplesRemaining <= 0)
-                {
-                    voice.grainReadPosA = voice.grainReadPosB;
-                    voice.grainReadPosB = voice.grainReadPosA + Voice::kGrainSpacingSamples;
-                }
-
-                pos += 1.0;
+                renderedSamples += spanSamples;
             }
             else
             {
-                // Standard resample-style playback with linear interpolation
-                int idx0 = static_cast<int>(pos);
-                int idx1 = std::min(idx0 + 1, srcLength - 1);
-                float frac = static_cast<float>(pos - static_cast<double>(idx0));
-
-                for (int ch = 0; ch < directMixChannels; ++ch)
+                for (int i = 0; i < spanSamples; ++i)
                 {
-                    int srcCh = (ch < numSrcChannels) ? ch : 0;
-                    const float *srcRead = nullptr;
-                    if (srcCh == 0)
-                        srcRead = srcReadPtr0;
-                    else if (srcCh == 1)
-                        srcRead = srcReadPtr1;
-                    else
-                        srcRead = srcBuffer.getReadPointer(srcCh);
+                    const float gain = voice.advanceFade(fadeRate);
+                    if (gain <= 0.0f)
+                        break;
 
-                    float s0 = srcRead[idx0];
-                    float s1 = srcRead[idx1];
-                    outputWritePtrs[static_cast<size_t>(ch)][i] += (s0 + frac * (s1 - s0)) * gain;
+                    const int outputIndex = renderedSamples + i;
+
+                    for (int ch = 0; ch < directMixChannels; ++ch)
+                    {
+                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                        const float *srcRead = (srcCh == 0) ? srcReadPtr0
+                                                            : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
+                        const float sample = useHighQualityInterpolation
+                                                 ? readHermiteInterpolatedSample(srcRead, srcLength, pos)
+                                                 : readLinearInterpolatedSample(srcRead, srcLength, pos);
+                        outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += sample * gain;
+                    }
+
+                    for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                    {
+                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                        const float *srcRead = (srcCh == 0) ? srcReadPtr0
+                                                            : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
+                        const float sample = useHighQualityInterpolation
+                                                 ? readHermiteInterpolatedSample(srcRead, srcLength, pos)
+                                                 : readLinearInterpolatedSample(srcRead, srcLength, pos);
+                        outputBuffer.addSample(ch, startSample + outputIndex, sample * gain);
+                    }
+
+                    pos += rate;
                 }
 
-                for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                {
-                    int srcCh = (ch < numSrcChannels) ? ch : 0;
-                    const float *srcRead = nullptr;
-                    if (srcCh == 0)
-                        srcRead = srcReadPtr0;
-                    else if (srcCh == 1)
-                        srcRead = srcReadPtr1;
-                    else
-                        srcRead = srcBuffer.getReadPointer(srcCh);
+                renderedSamples += spanSamples;
+            }
 
-                    float s0 = srcRead[idx0];
-                    float s1 = srcRead[idx1];
-                    outputBuffer.addSample(ch, startSample + i, (s0 + frac * (s1 - s0)) * gain);
-                }
-
-                pos += rate;
+            if (hasLoopRegion && pos >= loopEndExclusive)
+            {
+                pos = static_cast<double>(loopStart) + std::fmod(pos - static_cast<double>(loopStart), loopLength);
+            }
+            else if (isLoopOn && srcLength > 0 && pos >= static_cast<double>(srcLength))
+            {
+                pos = std::fmod(pos, static_cast<double>(srcLength));
+            }
+            else if (!isLoopOn && pos >= static_cast<double>(srcLength))
+            {
+                voice.forceOff();
+                break;
             }
         }
 
@@ -939,16 +1085,34 @@ namespace sw
         // Reclaim any previously retired buffers (deallocate on message thread).
         reclaimRetiredBuffers();
 
-        // Stop all voices via command FIFO
-        enqueueCommand({VoiceCommand::Type::AllNotesOff});
-        enqueueCommand({VoiceCommand::Type::Stop});
-
         playbackFinished.store(false, std::memory_order_relaxed);
         primaryVoiceActive.store(false, std::memory_order_relaxed);
-        loadedSampleLength.store(buffer != nullptr ? buffer->getNumSamples() : 0, std::memory_order_relaxed);
 
-        bufferSampleRate.store(fileSampleRate, std::memory_order_relaxed);
-        sampleBuffer.store(std::move(buffer), std::memory_order_release);
+        VoiceCommand cmd;
+        cmd.type = VoiceCommand::Type::SwapSampleBuffer;
+        cmd.sampleBufferSampleRate = fileSampleRate;
+
+        if (buffer != nullptr)
+        {
+            int slot = findAvailableSampleBufferSlot();
+            if (slot < 0)
+            {
+                reclaimRetiredBuffers();
+                slot = findAvailableSampleBufferSlot();
+            }
+
+            if (slot < 0)
+            {
+                jassertfalse;
+                return;
+            }
+
+            sampleBufferSlots[static_cast<size_t>(slot)] = std::move(buffer);
+            cmd.sampleSlot = slot;
+            cmd.sampleBufferLength = sampleBufferSlots[static_cast<size_t>(slot)]->getNumSamples();
+        }
+
+        enqueueCommand(cmd);
     }
 
     void VoiceManager::play()
@@ -1006,25 +1170,17 @@ namespace sw
 
     void VoiceManager::setStretchHighQualityEnabled(bool enabled)
     {
-        (void)enabled;
+        stretchHighQualityEnabled.store(enabled, std::memory_order_relaxed);
     }
 
     bool VoiceManager::isStretchHighQualityEnabled() const noexcept
     {
-#if SW_HAVE_RUBBERBAND
-        return true;
-#else
-        return false;
-#endif
+        return stretchHighQualityEnabled.load(std::memory_order_relaxed);
     }
 
     bool VoiceManager::isStretchHighQualityAvailable() const noexcept
     {
-#if SW_HAVE_RUBBERBAND
         return true;
-#else
-        return false;
-#endif
     }
 
     void VoiceManager::setLoopEnabled(bool enabled)

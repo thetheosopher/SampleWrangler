@@ -99,6 +99,7 @@ namespace sw
             int64_t configuredLoopEnd = -1;
             bool loopEnabled = false;
             bool preserveLengthEnabled = false;
+            bool stretchHighQualityEnabled = false;
             double bufferSampleRate = 44100.0;
         };
 
@@ -122,8 +123,10 @@ namespace sw
         /// concurrent producers via spinlock).
         void enqueueCommand(const VoiceCommand &cmd);
 
-        /// Reclaim retired shared_ptrs from the audio thread's retire ring.
-        /// Called from the message thread (e.g. in loadBuffer).
+        int findAvailableSampleBufferSlot() const noexcept;
+
+        /// Reclaim retired sample-buffer slots after the audio thread has
+        /// switched away from them. Called from the message thread.
         void reclaimRetiredBuffers();
 
         // Voice pool — all preallocated, zero runtime allocation.
@@ -133,15 +136,18 @@ namespace sw
         // Index of the "primary" voice for UI progress display.
         std::atomic<int> primaryVoiceIndex{0};
 
-        // Sample data — shared ownership. Audio thread loads; old pointers
-        // are placed in a retire ring to avoid RT deallocation.
-        std::atomic<std::shared_ptr<juce::AudioBuffer<float>>> sampleBuffer;
+        // Sample data is staged into message-thread-owned slots. The audio
+        // thread only consumes an atomically published raw pointer + slot id.
+        static constexpr int kSampleBufferSlotCount = 16;
+        std::array<std::shared_ptr<juce::AudioBuffer<float>>, kSampleBufferSlotCount> sampleBufferSlots;
+        std::atomic<juce::AudioBuffer<float> *> publishedSampleBuffer{nullptr};
+        std::atomic<int> publishedSampleSlot{-1};
         std::atomic<double> bufferSampleRate{44100.0};
 
-        // Retire ring: audio thread stores old shared_ptrs here;
-        // message thread reclaims them.
-        static constexpr int kRetireRingSize = 4;
-        std::array<std::shared_ptr<juce::AudioBuffer<float>>, kRetireRingSize> retireRing;
+        // Retire ring: audio thread stores old slot indices here;
+        // message thread reclaims those shared_ptr owners.
+        static constexpr int kRetireRingSize = kSampleBufferSlotCount;
+        std::array<int, kRetireRingSize> retireRing{};
         std::atomic<int> retireWritePos{0}; // written by audio thread
         std::atomic<int> retireReadPos{0};  // written by message thread
 
@@ -160,6 +166,7 @@ namespace sw
         std::atomic<int64_t> loopEndSample{-1};
         std::atomic<int> previewRootMidiNote{60};
         std::atomic<bool> preserveLengthEnabled{false};
+        std::atomic<bool> stretchHighQualityEnabled{false};
         std::atomic<int> loadedSampleLength{0};
 
         // Cached pitch for updateAllVoicePitch commands

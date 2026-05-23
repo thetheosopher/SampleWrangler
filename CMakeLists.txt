@@ -462,6 +462,7 @@ add_test(NAME SampleWrangler.CatalogDb COMMAND SampleWranglerCatalogDbTests)
 add_executable(SampleWranglerScannerAppleLoopTests
     Tests/ScannerAppleLoopTests.cpp
     Source/Pipeline/Scanner.cpp
+    Source/Pipeline/AcpPresetReader.cpp
     Source/Pipeline/JobQueue.cpp
     Source/Pipeline/RexManager.cpp
     Source/Catalog/CatalogDb.cpp
@@ -504,6 +505,8 @@ target_include_directories(SampleWranglerScannerAppleLoopTests PRIVATE
 target_link_libraries(SampleWranglerScannerAppleLoopTests PRIVATE
     sqlite3
     juce::juce_core
+    juce::juce_data_structures
+    juce::juce_audio_basics
     juce::juce_audio_formats
 )
 

@@ -83,20 +83,36 @@ namespace sw
             return {};
         }
 
+        bool isLikelyAudiocityPresetTree(const juce::ValueTree &tree)
+        {
+            return tree.isValid() && tree.getType().toString().equalsIgnoreCase("AudiocityPatch");
+        }
+
         bool readPresetTree(const juce::File &presetFile, juce::ValueTree &tree)
         {
+            const auto textProbe = presetFile.loadFileAsString().trimStart();
+            if (textProbe.startsWithChar('<'))
+            {
+                if (auto xml = juce::parseXML(textProbe))
+                {
+                    tree = juce::ValueTree::fromXml(*xml);
+                    if (isLikelyAudiocityPresetTree(tree))
+                        return true;
+                }
+            }
+
             juce::FileInputStream input(presetFile);
             if (input.openedOk())
             {
                 tree = juce::ValueTree::readFromStream(input);
-                if (tree.isValid())
+                if (isLikelyAudiocityPresetTree(tree))
                     return true;
             }
 
             if (auto xml = juce::parseXML(presetFile))
             {
                 tree = juce::ValueTree::fromXml(*xml);
-                if (tree.isValid())
+                if (isLikelyAudiocityPresetTree(tree))
                     return true;
             }
 

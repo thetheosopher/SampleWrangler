@@ -9,30 +9,41 @@ namespace sw
     namespace
     {
         constexpr double kRateEpsilon = 1.0e-9;
+        constexpr uint64_t kPhaseFractionBits = 32;
+        constexpr uint64_t kPhaseFractionMask = (uint64_t{1} << kPhaseFractionBits) - 1;
+        constexpr double kPhaseScale = static_cast<double>(uint64_t{1} << kPhaseFractionBits);
+        constexpr float kPhaseScaleInv = 1.0f / static_cast<float>(uint64_t{1} << kPhaseFractionBits);
 
-        float readLinearInterpolatedSample(const float *srcRead, int srcLength, double readPos) noexcept
+        using InterpolatedSampleAtIndexFn = float (*)(const float *srcRead, int srcLength, int idx0, float frac) noexcept;
+
+        float readLinearInterpolatedSampleAtIndex(const float *srcRead, int srcLength, int idx0, float frac) noexcept
         {
-            const int idx0 = juce::jlimit(0, srcLength - 1, static_cast<int>(readPos));
-            const int idx1 = juce::jmin(idx0 + 1, srcLength - 1);
-            const float frac = static_cast<float>(readPos - static_cast<double>(idx0));
-            const float s0 = srcRead[idx0];
+            const int clampedIdx0 = juce::jlimit(0, srcLength - 1, idx0);
+            const int idx1 = juce::jmin(clampedIdx0 + 1, srcLength - 1);
+            const float s0 = srcRead[clampedIdx0];
             const float s1 = srcRead[idx1];
             return s0 + frac * (s1 - s0);
         }
 
-        float readHermiteInterpolatedSample(const float *srcRead, int srcLength, double readPos) noexcept
+        float readLinearInterpolatedSample(const float *srcRead, int srcLength, double readPos) noexcept
+        {
+            const int idx0 = static_cast<int>(readPos);
+            const float frac = static_cast<float>(readPos - static_cast<double>(idx0));
+            return readLinearInterpolatedSampleAtIndex(srcRead, srcLength, idx0, frac);
+        }
+
+        float readHermiteInterpolatedSampleAtIndex(const float *srcRead, int srcLength, int idx0, float frac) noexcept
         {
             if (srcLength < 4)
-                return readLinearInterpolatedSample(srcRead, srcLength, readPos);
+                return readLinearInterpolatedSampleAtIndex(srcRead, srcLength, idx0, frac);
 
-            const int idx0 = juce::jlimit(0, srcLength - 1, static_cast<int>(readPos));
-            const int idxM1 = juce::jmax(0, idx0 - 1);
-            const int idx1 = juce::jmin(idx0 + 1, srcLength - 1);
-            const int idx2 = juce::jmin(idx0 + 2, srcLength - 1);
-            const float frac = static_cast<float>(readPos - static_cast<double>(idx0));
+            const int clampedIdx0 = juce::jlimit(0, srcLength - 1, idx0);
+            const int idxM1 = juce::jmax(0, clampedIdx0 - 1);
+            const int idx1 = juce::jmin(clampedIdx0 + 1, srcLength - 1);
+            const int idx2 = juce::jmin(clampedIdx0 + 2, srcLength - 1);
 
             const float xm1 = srcRead[idxM1];
-            const float x0 = srcRead[idx0];
+            const float x0 = srcRead[clampedIdx0];
             const float x1 = srcRead[idx1];
             const float x2 = srcRead[idx2];
 
@@ -41,6 +52,40 @@ namespace sw
             const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
             const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
             return ((c3 * frac + c2) * frac + c1) * frac + c0;
+        }
+
+        float readHermiteInterpolatedSample(const float *srcRead, int srcLength, double readPos) noexcept
+        {
+            const int idx0 = static_cast<int>(readPos);
+            const float frac = static_cast<float>(readPos - static_cast<double>(idx0));
+            return readHermiteInterpolatedSampleAtIndex(srcRead, srcLength, idx0, frac);
+        }
+
+        InterpolatedSampleAtIndexFn selectInterpolatedSampleReader(bool useHighQualityInterpolation) noexcept
+        {
+            return useHighQualityInterpolation ? &readHermiteInterpolatedSampleAtIndex
+                                               : &readLinearInterpolatedSampleAtIndex;
+        }
+
+        uint64_t readPositionToPhase(double readPos) noexcept
+        {
+            return static_cast<uint64_t>(juce::jmax(0.0, readPos) * kPhaseScale);
+        }
+
+        uint64_t readRateToPhaseIncrement(double readRate) noexcept
+        {
+            return static_cast<uint64_t>(std::llround(juce::jmax(0.0, readRate) * kPhaseScale));
+        }
+
+        float smoothCrossfadeBlend(float blend) noexcept
+        {
+            const float clampedBlend = juce::jlimit(0.0f, 1.0f, blend);
+            return clampedBlend * clampedBlend * (3.0f - 2.0f * clampedBlend);
+        }
+
+        double phaseToReadPosition(uint64_t phase) noexcept
+        {
+            return static_cast<double>(phase) / kPhaseScale;
         }
 
         int computeContiguousSpan(double readPos,
@@ -533,15 +578,9 @@ namespace sw
         const double bsr = renderContext.bufferSampleRate;
         const double rate = voice.playbackRate * (bsr / currentSampleRate);
         const bool useHighQualityInterpolation = renderContext.stretchHighQualityEnabled;
-#if SW_HAVE_RUBBERBAND
-        const double currentPitchRatio = voice.pitchRatio;
-#endif
+        const auto interpolatedSampleReader = selectInterpolatedSampleReader(useHighQualityInterpolation);
         const bool preserveLength = renderContext.preserveLengthEnabled && std::abs(rate - 1.0) > 0.0001;
-#if SW_HAVE_RUBBERBAND
-        const bool useRubberBandRt = preserveLength && useHighQualityInterpolation && voice.rubberBandInitialized;
-#else
-        constexpr bool useRubberBandRt = false;
-#endif
+        const bool useRubberBandRt = preserveLength && useHighQualityInterpolation && voice.isRubberBandReady();
 
         const float fadeRate = 1.0f / (Voice::kFadeTimeMs * 0.001f * static_cast<float>(currentSampleRate));
 
@@ -659,17 +698,15 @@ namespace sw
         {
             voice.granularResetRequested = false;
             voice.grainSamplesRemaining = 0;
-#if SW_HAVE_RUBBERBAND
             voice.resetRubberBand();
-#endif
         }
 
-#if SW_HAVE_RUBBERBAND
-        if (preserveLength && useRubberBandRt && voice.rubberBandStretcher != nullptr && voice.rubberBandBuffers != nullptr)
+        if (preserveLength && useRubberBandRt)
         {
             constexpr int kRenderChunkSize = 256;
             std::array<float, kRenderChunkSize> mixLeft{};
             std::array<float, kRenderChunkSize> mixRight{};
+            voice.setRubberBandPitchScale(voice.pitchRatio);
 
             int rendered = 0;
             while (rendered < numSamples && voice.active)
@@ -679,9 +716,9 @@ namespace sw
 
                 while (produced < chunkSamples && voice.active)
                 {
-                    while (voice.rubberBandOutputFifoCount <= 0 && voice.active)
+                    while (!voice.hasRubberBandOutput() && voice.active)
                     {
-                        const int needed = juce::jmax(1, voice.rubberBandProcessBlockSize - voice.rubberBandInputFill);
+                        const int needed = voice.getRubberBandInputDeficit();
                         bool fedAny = false;
 
                         for (int feed = 0; feed < needed; ++feed)
@@ -704,39 +741,31 @@ namespace sw
                                 }
                             }
 
-                            const bool provideStartPadSample = (voice.rubberBandPreferredStartPadRemaining > 0);
-                            for (int ch = 0; ch < Voice::kMaxChannels; ++ch)
+                            const bool provideStartPadSample = voice.shouldProvideRubberBandStartPadSample();
+                            float inputLeft = 0.0f;
+                            float inputRight = 0.0f;
+                            if (!provideStartPadSample)
                             {
-                                float inSample = 0.0f;
-                                if (!provideStartPadSample)
-                                {
-                                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                                    inSample = readInterpolatedSample(srcCh, pos);
-                                }
-
-                                voice.rubberBandBuffers->input[static_cast<size_t>(ch)][static_cast<size_t>(voice.rubberBandInputFill)] = inSample;
+                                inputLeft = readInterpolatedSample(0, pos);
+                                inputRight = readInterpolatedSample((numSrcChannels > 1) ? 1 : 0, pos);
                             }
 
+                            voice.pushRubberBandInput(inputLeft, inputRight);
+
                             if (provideStartPadSample)
-                                --voice.rubberBandPreferredStartPadRemaining;
+                                voice.consumeRubberBandStartPadSample();
                             else
                                 pos += (bsr / currentSampleRate);
 
-                            ++voice.rubberBandInputFill;
                             fedAny = true;
                         }
 
-                        if (voice.rubberBandInputFill >= voice.rubberBandProcessBlockSize || fedAny)
+                        if (fedAny)
                             voice.processRubberBandIfReady();
 
-                        while (voice.rubberBandOutputFifoCount > 0 && voice.rubberBandStartDelayRemaining > 0)
-                        {
-                            voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
-                            --voice.rubberBandOutputFifoCount;
-                            --voice.rubberBandStartDelayRemaining;
-                        }
+                        voice.skipRubberBandStartDelay();
 
-                        if (!fedAny && voice.rubberBandOutputFifoCount <= 0)
+                        if (!fedAny && !voice.hasRubberBandOutput())
                             break;
                     }
 
@@ -744,29 +773,11 @@ namespace sw
                     if (gain <= 0.0f)
                         break;
 
-                    float outSampleLeft = voice.rubberBandLastOutputLeft;
-                    float outSampleRight = voice.rubberBandLastOutputRight;
+                    float outSampleLeft = 0.0f;
+                    float outSampleRight = 0.0f;
+                    voice.popRubberBandOutputOrReuseLast(outSampleLeft, outSampleRight);
 
-                    if (voice.rubberBandOutputFifoCount > 0)
-                    {
-                        outSampleLeft = voice.rubberBandBuffers->outputFifo[0][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
-                        outSampleRight = voice.rubberBandBuffers->outputFifo[1][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
-                        voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
-                        --voice.rubberBandOutputFifoCount;
-                        voice.rubberBandLastOutputLeft = outSampleLeft;
-                        voice.rubberBandLastOutputRight = outSampleRight;
-                    }
-
-                    float rubberBandAttackGain = 1.0f;
-                    if (voice.rubberBandOnsetBlendRemaining > 0)
-                    {
-                        const int clampedRemaining = juce::jlimit(0,
-                                                                  Voice::kRubberBandOnsetBlendSamples,
-                                                                  voice.rubberBandOnsetBlendRemaining);
-                        rubberBandAttackGain = 1.0f - (static_cast<float>(clampedRemaining) /
-                                                       static_cast<float>(Voice::kRubberBandOnsetBlendSamples));
-                        --voice.rubberBandOnsetBlendRemaining;
-                    }
+                    const float rubberBandAttackGain = voice.consumeRubberBandAttackGain();
 
                     mixLeft[static_cast<size_t>(produced)] = outSampleLeft * rubberBandAttackGain * gain;
                     mixRight[static_cast<size_t>(produced)] = outSampleRight * rubberBandAttackGain * gain;
@@ -795,7 +806,6 @@ namespace sw
             voice.playbackPos = pos;
             return;
         }
-#endif
 
         constexpr int kMaxDirectMixChannels = 32;
         const int directMixChannels = juce::jmin(numOutChannels, kMaxDirectMixChannels);
@@ -850,100 +860,6 @@ namespace sw
 
                     const int outputIndex = outputBase + i;
 
-                    if (useRubberBandRt)
-                    {
-#if SW_HAVE_RUBBERBAND
-                        if (voice.rubberBandStretcher != nullptr && voice.rubberBandBuffers != nullptr)
-                        {
-                            if (std::abs(currentPitchRatio - voice.rubberBandLastPitchScale) > 1.0e-6)
-                            {
-                                voice.rubberBandStretcher->setPitchScale(currentPitchRatio);
-                                voice.rubberBandLastPitchScale = currentPitchRatio;
-                            }
-
-                            const bool provideStartPadSample = (voice.rubberBandPreferredStartPadRemaining > 0);
-
-                            for (int ch = 0; ch < Voice::kMaxChannels; ++ch)
-                            {
-                                float inSample = 0.0f;
-                                if (!provideStartPadSample)
-                                {
-                                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                                    inSample = readInterpolatedSample(srcCh, pos);
-                                }
-                                voice.rubberBandBuffers->input[static_cast<size_t>(ch)][static_cast<size_t>(voice.rubberBandInputFill)] = inSample;
-                            }
-
-                            if (provideStartPadSample)
-                                --voice.rubberBandPreferredStartPadRemaining;
-                            else
-                                pos += (bsr / currentSampleRate);
-
-                            ++voice.rubberBandInputFill;
-                            if (voice.rubberBandInputFill >= voice.rubberBandProcessBlockSize)
-                            {
-                                voice.processRubberBandIfReady();
-                            }
-                            else if (voice.rubberBandOutputFifoCount == 0 && (outputIndex & 0x0F) == 0)
-                            {
-                                voice.processRubberBandIfReady();
-                            }
-
-                            while (voice.rubberBandOutputFifoCount > 0 && voice.rubberBandStartDelayRemaining > 0)
-                            {
-                                voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
-                                --voice.rubberBandOutputFifoCount;
-                                --voice.rubberBandStartDelayRemaining;
-                            }
-
-                            float outSampleLeft = 0.0f;
-                            float outSampleRight = 0.0f;
-                            if (voice.rubberBandOutputFifoCount > 0)
-                            {
-                                outSampleLeft = voice.rubberBandBuffers->outputFifo[0][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
-                                outSampleRight = voice.rubberBandBuffers->outputFifo[1][static_cast<size_t>(voice.rubberBandOutputFifoRead)];
-                                voice.rubberBandOutputFifoRead = (voice.rubberBandOutputFifoRead + 1) % Voice::kRubberBandOutputFifoSize;
-                                --voice.rubberBandOutputFifoCount;
-                                voice.rubberBandLastOutputLeft = outSampleLeft;
-                                voice.rubberBandLastOutputRight = outSampleRight;
-                            }
-                            else
-                            {
-                                outSampleLeft = voice.rubberBandLastOutputLeft;
-                                outSampleRight = voice.rubberBandLastOutputRight;
-                            }
-
-                            float rubberBandAttackGain = 1.0f;
-                            if (voice.rubberBandOnsetBlendRemaining > 0)
-                            {
-                                const int clampedRemaining = juce::jlimit(0,
-                                                                          Voice::kRubberBandOnsetBlendSamples,
-                                                                          voice.rubberBandOnsetBlendRemaining);
-                                rubberBandAttackGain = 1.0f - (static_cast<float>(clampedRemaining) /
-                                                               static_cast<float>(Voice::kRubberBandOnsetBlendSamples));
-                                --voice.rubberBandOnsetBlendRemaining;
-                            }
-
-                            outSampleLeft *= rubberBandAttackGain;
-                            outSampleRight *= rubberBandAttackGain;
-
-                            for (int ch = 0; ch < directMixChannels; ++ch)
-                            {
-                                const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
-                                outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += sample * gain;
-                            }
-
-                            for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                            {
-                                const float sample = (ch == 0) ? outSampleLeft : outSampleRight;
-                                outputBuffer.addSample(ch, startSample + outputIndex, sample * gain);
-                            }
-
-                            continue;
-                        }
-#endif
-                    }
-
                     // Granular pitch-shift fallback
                     if (voice.grainSamplesRemaining <= 0)
                     {
@@ -952,22 +868,38 @@ namespace sw
                         voice.grainSamplesRemaining = Voice::kGrainLengthSamples;
                     }
 
-                    const float blend = 1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples));
+                    const float blend = smoothCrossfadeBlend(1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples)));
+                    const float gainA = 1.0f - blend;
+                    const float gainB = blend;
+                    const int cachedSrcChannels = juce::jmin(numSrcChannels, directMixChannels);
+                    std::array<float, kMaxDirectMixChannels> cachedMixedSamples{};
+
+                    for (int srcCh = 0; srcCh < cachedSrcChannels; ++srcCh)
+                    {
+                        const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
+                        const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                        cachedMixedSamples[static_cast<size_t>(srcCh)] = ((sampleA * gainA) + (sampleB * gainB)) * gain;
+                    }
+
+                    const auto getMixedGranularSample = [&](int outputChannel)
+                    {
+                        const int srcCh = (outputChannel < numSrcChannels) ? outputChannel : 0;
+                        if (srcCh < cachedSrcChannels)
+                            return cachedMixedSamples[static_cast<size_t>(srcCh)];
+
+                        const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
+                        const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                        return ((sampleA * gainA) + (sampleB * gainB)) * gain;
+                    };
 
                     for (int ch = 0; ch < directMixChannels; ++ch)
                     {
-                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                        const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
-                        const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
-                        outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += (sampleA + (sampleB - sampleA) * blend) * gain;
+                        outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += getMixedGranularSample(ch);
                     }
 
                     for (int ch = directMixChannels; ch < numOutChannels; ++ch)
                     {
-                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                        const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
-                        const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
-                        outputBuffer.addSample(ch, startSample + outputIndex, (sampleA + (sampleB - sampleA) * blend) * gain);
+                        outputBuffer.addSample(ch, startSample + outputIndex, getMixedGranularSample(ch));
                     }
 
                     voice.grainReadPosA += rate;
@@ -987,6 +919,65 @@ namespace sw
             }
             else
             {
+                const bool canUseSteadyStateFastPath = (voice.fadeState == Voice::FadeState::Active);
+                if (canUseSteadyStateFastPath)
+                {
+                    const int outputBase = renderedSamples;
+                    uint64_t phase = readPositionToPhase(pos);
+                    const uint64_t phaseIncrement = juce::jmax<uint64_t>(1, readRateToPhaseIncrement(rate));
+
+                    if (numSrcChannels <= 1)
+                    {
+                        for (int i = 0; i < spanSamples; ++i)
+                        {
+                            const int outputIndex = outputBase + i;
+                            const int idx0 = static_cast<int>(phase >> kPhaseFractionBits);
+                            const float frac = static_cast<float>(phase & kPhaseFractionMask) * kPhaseScaleInv;
+                            const float sample = interpolatedSampleReader(srcReadPtr0, srcLength, idx0, frac);
+
+                            for (int ch = 0; ch < directMixChannels; ++ch)
+                                outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += sample;
+
+                            for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                                outputBuffer.addSample(ch, startSample + outputIndex, sample);
+
+                            phase += phaseIncrement;
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < spanSamples; ++i)
+                        {
+                            const int outputIndex = outputBase + i;
+                            const int idx0 = static_cast<int>(phase >> kPhaseFractionBits);
+                            const float frac = static_cast<float>(phase & kPhaseFractionMask) * kPhaseScaleInv;
+                            const float sampleLeft = interpolatedSampleReader(srcReadPtr0, srcLength, idx0, frac);
+                            const float sampleRight = interpolatedSampleReader(srcReadPtr1, srcLength, idx0, frac);
+
+                            if (directMixChannels > 0)
+                                outputWritePtrs[0][outputIndex] += sampleLeft;
+
+                            if (directMixChannels > 1)
+                                outputWritePtrs[1][outputIndex] += sampleRight;
+
+                            for (int ch = 2; ch < directMixChannels; ++ch)
+                                outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += sampleLeft;
+
+                            for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                            {
+                                const float sample = (ch == 1) ? sampleRight : sampleLeft;
+                                outputBuffer.addSample(ch, startSample + outputIndex, sample);
+                            }
+
+                            phase += phaseIncrement;
+                        }
+                    }
+
+                    pos = phaseToReadPosition(phase);
+                    renderedSamples += spanSamples;
+                    continue;
+                }
+
                 for (int i = 0; i < spanSamples; ++i)
                 {
                     const float gain = voice.advanceFade(fadeRate);

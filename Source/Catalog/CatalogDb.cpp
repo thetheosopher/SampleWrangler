@@ -66,6 +66,17 @@ namespace sw
             if (sqlite3_column_type(stmt, 22) != SQLITE_NULL)
                 r.sliceCount = sqlite3_column_int(stmt, 22);
             r.contentHash = readOptionalTextColumn(stmt, 23);
+            r.presetName = readOptionalTextColumn(stmt, 24);
+            if (sqlite3_column_type(stmt, 25) != SQLITE_NULL)
+                r.zoneCount = sqlite3_column_int(stmt, 25);
+            if (sqlite3_column_type(stmt, 26) != SQLITE_NULL)
+                r.keyLow = sqlite3_column_int(stmt, 26);
+            if (sqlite3_column_type(stmt, 27) != SQLITE_NULL)
+                r.keyHigh = sqlite3_column_int(stmt, 27);
+            if (sqlite3_column_type(stmt, 28) != SQLITE_NULL)
+                r.velocityLow = sqlite3_column_int(stmt, 28);
+            if (sqlite3_column_type(stmt, 29) != SQLITE_NULL)
+                r.velocityHigh = sqlite3_column_int(stmt, 29);
             return r;
         }
 
@@ -262,8 +273,9 @@ namespace sw
                            size_bytes, modified_time, duration_sec, total_samples,
                            sample_rate, channels, bit_depth, bitrate_kbps, codec,
                            bpm, key, loop_type, acid_root_note, acid_beats,
-                           loop_start_sample, loop_end_sample, index_only, slice_count, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           loop_start_sample, loop_end_sample, index_only, slice_count, content_hash,
+                           preset_name, zone_count, key_low, key_high, velocity_low, velocity_high)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(root_id, relative_path) DO UPDATE SET
             filename      = excluded.filename,
             extension     = excluded.extension,
@@ -285,7 +297,13 @@ namespace sw
                 loop_end_sample   = excluded.loop_end_sample,
             index_only    = excluded.index_only,
             slice_count   = excluded.slice_count,
-            content_hash  = excluded.content_hash
+            content_hash  = excluded.content_hash,
+            preset_name   = excluded.preset_name,
+            zone_count    = excluded.zone_count,
+            key_low       = excluded.key_low,
+            key_high      = excluded.key_high,
+            velocity_low  = excluded.velocity_low,
+            velocity_high = excluded.velocity_high
     )SQL";
 
         sqlite3_stmt *stmt = nullptr;
@@ -381,6 +399,36 @@ namespace sw
         else
             sqlite3_bind_null(stmt, 23);
 
+        if (rec.presetName)
+            sqlite3_bind_text(stmt, 24, rec.presetName->c_str(), -1, SQLITE_TRANSIENT);
+        else
+            sqlite3_bind_null(stmt, 24);
+
+        if (rec.zoneCount)
+            sqlite3_bind_int(stmt, 25, *rec.zoneCount);
+        else
+            sqlite3_bind_null(stmt, 25);
+
+        if (rec.keyLow)
+            sqlite3_bind_int(stmt, 26, *rec.keyLow);
+        else
+            sqlite3_bind_null(stmt, 26);
+
+        if (rec.keyHigh)
+            sqlite3_bind_int(stmt, 27, *rec.keyHigh);
+        else
+            sqlite3_bind_null(stmt, 27);
+
+        if (rec.velocityLow)
+            sqlite3_bind_int(stmt, 28, *rec.velocityLow);
+        else
+            sqlite3_bind_null(stmt, 28);
+
+        if (rec.velocityHigh)
+            sqlite3_bind_int(stmt, 29, *rec.velocityHigh);
+        else
+            sqlite3_bind_null(stmt, 29);
+
         bool ok = sqlite3_step(stmt) == SQLITE_DONE;
         sqlite3_finalize(stmt);
         return ok;
@@ -433,7 +481,8 @@ namespace sw
              f.size_bytes, f.modified_time, f.duration_sec, f.total_samples,
              f.sample_rate, f.channels, f.bit_depth, f.bitrate_kbps, f.codec,
                f.bpm, f.key, f.loop_type, f.acid_root_note, f.acid_beats,
-             f.loop_start_sample, f.loop_end_sample, f.index_only, f.slice_count, f.content_hash
+               f.loop_start_sample, f.loop_end_sample, f.index_only, f.slice_count, f.content_hash,
+               f.preset_name, f.zone_count, f.key_low, f.key_high, f.velocity_low, f.velocity_high
         FROM files f
         JOIN files_fts fts ON fts.rowid = f.id
         WHERE files_fts MATCH ?
@@ -464,7 +513,8 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-             loop_start_sample, loop_end_sample, index_only, slice_count, content_hash
+               loop_start_sample, loop_end_sample, index_only, slice_count, content_hash,
+               preset_name, zone_count, key_low, key_high, velocity_low, velocity_high
         FROM files
         ORDER BY id DESC
         LIMIT ?
@@ -493,7 +543,8 @@ namespace sw
              f.size_bytes, f.modified_time, f.duration_sec, f.total_samples,
              f.sample_rate, f.channels, f.bit_depth, f.bitrate_kbps, f.codec,
                f.bpm, f.key, f.loop_type, f.acid_root_note, f.acid_beats,
-             f.loop_start_sample, f.loop_end_sample, f.index_only, f.slice_count, f.content_hash
+               f.loop_start_sample, f.loop_end_sample, f.index_only, f.slice_count, f.content_hash,
+               f.preset_name, f.zone_count, f.key_low, f.key_high, f.velocity_low, f.velocity_high
         FROM files f
         JOIN files_fts fts ON fts.rowid = f.id
         WHERE f.root_id = ? AND files_fts MATCH ?
@@ -526,7 +577,8 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-             loop_start_sample, loop_end_sample, index_only, slice_count, content_hash
+               loop_start_sample, loop_end_sample, index_only, slice_count, content_hash,
+               preset_name, zone_count, key_low, key_high, velocity_low, velocity_high
         FROM files
         WHERE root_id = ?
         ORDER BY id DESC
@@ -558,7 +610,8 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-               loop_start_sample, loop_end_sample, index_only, slice_count, content_hash
+             loop_start_sample, loop_end_sample, index_only, slice_count, content_hash,
+             preset_name, zone_count, key_low, key_high, velocity_low, velocity_high
         FROM files
         WHERE content_hash IN (
             SELECT content_hash
@@ -692,7 +745,8 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-             loop_start_sample, loop_end_sample, index_only, slice_count, content_hash
+               loop_start_sample, loop_end_sample, index_only, slice_count, content_hash,
+               preset_name, zone_count, key_low, key_high, velocity_low, velocity_high
         FROM files WHERE id = ?
     )SQL";
 
@@ -723,7 +777,8 @@ namespace sw
              size_bytes, modified_time, duration_sec, total_samples,
              sample_rate, channels, bit_depth, bitrate_kbps, codec,
                bpm, key, loop_type, acid_root_note, acid_beats,
-             loop_start_sample, loop_end_sample, index_only, slice_count, content_hash
+               loop_start_sample, loop_end_sample, index_only, slice_count, content_hash,
+               preset_name, zone_count, key_low, key_high, velocity_low, velocity_high
         FROM files
         WHERE root_id = ? AND relative_path = ?
         LIMIT 1
@@ -759,7 +814,8 @@ namespace sw
              f.size_bytes, f.modified_time, f.duration_sec, f.total_samples,
              f.sample_rate, f.channels, f.bit_depth, f.bitrate_kbps, f.codec,
                f.bpm, f.key, f.loop_type, f.acid_root_note, f.acid_beats,
-               f.loop_start_sample, f.loop_end_sample, f.index_only, f.slice_count, f.content_hash
+             f.loop_start_sample, f.loop_end_sample, f.index_only, f.slice_count, f.content_hash,
+             f.preset_name, f.zone_count, f.key_low, f.key_high, f.velocity_low, f.velocity_high
         FROM files f
         JOIN file_user_data d ON d.file_id = f.id
         WHERE d.is_favorite <> 0

@@ -19,6 +19,13 @@ namespace sw
                                private juce::ListBoxModel
     {
     public:
+        enum class ViewMode
+        {
+            Recent,
+            Favorites,
+            Duplicates
+        };
+
         ResultsPanel();
         ~ResultsPanel() override = default;
 
@@ -26,6 +33,13 @@ namespace sw
         void resized() override;
 
         void setResults(std::vector<FileRecord> newResults);
+        void setSearchQuery(const std::string &query);
+        void setViewMode(ViewMode mode);
+        ViewMode getViewMode() const noexcept;
+        void setSavedSearches(std::vector<SavedSearchRecord> newSavedSearches,
+                              std::optional<int64_t> selectedSavedSearchId);
+        void setSelectedFileMetadata(std::optional<FileUserDataRecord> userData,
+                                     std::vector<std::string> tags);
         void selectFirstRowIfNoneSelected();
         bool selectFile(int64_t rootId, const std::string &relativePath);
         bool selectRow(int row);
@@ -35,10 +49,16 @@ namespace sw
         void setDarkMode(bool enabled);
 
         std::function<void(const std::string &query)> onSearchQueryChanged;
+        std::function<void(ViewMode mode)> onViewModeChanged;
+        std::function<void()> onSaveSearchRequested;
+        std::function<void(std::optional<int64_t> savedSearchId)> onSavedSearchSelected;
+        std::function<void(int64_t savedSearchId)> onDeleteSavedSearchRequested;
+        std::function<void(bool isFavorite)> onSelectedFileFavoriteChanged;
+        std::function<void(std::optional<int> rating)> onSelectedFileRatingChanged;
+        std::function<void(const std::vector<std::string> &tags)> onSelectedFileTagsChanged;
         std::function<void(const FileRecord &file)> onFileSelected;
         std::function<void(const FileRecord &file)> onFileActivated;
         std::function<std::optional<juce::String>(const FileRecord &file)> onResolveAbsolutePathForFile;
-        std::function<std::optional<std::string>(const FileRecord &file)> onResolveWaveformCachePathForFile;
         std::function<std::optional<std::vector<float>>(const FileRecord &file)> onResolveWaveformCachePeaksForFile;
 
     private:
@@ -49,6 +69,8 @@ namespace sw
         };
 
         void applySort();
+        void updateMetadataControlState();
+        void commitTagsFromEditor();
         const std::vector<float> *loadWaveformPeaksForFile(const FileRecord &file);
         void paintWaveformPreview(juce::Graphics &g, juce::Rectangle<int> bounds, const FileRecord &item);
 
@@ -65,14 +87,23 @@ namespace sw
                                                   bool &canMoveFiles) override;
 
         juce::TextEditor searchBox;
+        juce::ComboBox viewSelector;
         juce::ComboBox sortSelector;
+        juce::ComboBox savedSearchSelector;
+        juce::TextButton saveSearchButton{"Save Search"};
+        juce::TextButton deleteSavedSearchButton{"Delete Search"};
+        juce::ToggleButton favoriteToggle{"Favorite"};
+        juce::ComboBox ratingSelector;
+        juce::TextEditor tagsEditor;
         juce::ListBox resultsList;
         std::vector<FileRecord> results;
+        std::vector<SavedSearchRecord> savedSearches;
         std::unordered_map<int64_t, std::vector<float>> waveformPeaksByFileId;
         std::unordered_set<int64_t> waveformCacheMisses;
-        std::string waveformCacheDirectory;
         SortMode sortMode = SortMode::Name;
+        ViewMode viewMode = ViewMode::Recent;
         bool darkModeEnabled = false;
+        bool suppressControlCallbacks = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ResultsPanel)
     };

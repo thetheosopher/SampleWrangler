@@ -1,6 +1,6 @@
 #include "MainComponent.h"
 #include "Pipeline/AcpPresetReader.h"
-#include "Pipeline/WaveformCache.h"
+#include "Pipeline/WaveformPeak.h"
 #include "Util/Logging.h"
 #include "Util/Paths.h"
 
@@ -73,6 +73,25 @@ namespace sw
             if (value < 1024.0 * 1024.0 * 1024.0)
                 return juce::String(value / (1024.0 * 1024.0), 1) + " MB";
             return juce::String(value / (1024.0 * 1024.0 * 1024.0), 1) + " GB";
+        }
+
+        bool matchesSearchText(const FileRecord &file, const std::string &query)
+        {
+            if (query.empty())
+                return true;
+
+            const juce::String needle(query);
+            return juce::String(file.filename).containsIgnoreCase(needle) ||
+                   juce::String(file.relativePath).containsIgnoreCase(needle);
+        }
+
+        std::pair<int64_t, int64_t> buildStatsForResults(const std::vector<FileRecord> &results)
+        {
+            int64_t totalBytes = 0;
+            for (const auto &file : results)
+                totalBytes += juce::jmax<int64_t>(0, file.sizeBytes);
+
+            return {static_cast<int64_t>(results.size()), totalBytes};
         }
     }
 
@@ -845,6 +864,83 @@ namespace sw
             juce::String &nameResult;
         };
 
+        class SaveSearchDialogContent final : public juce::Component
+        {
+        public:
+            SaveSearchDialogContent(const juce::String &initialName,
+                                    juce::String &nameOut)
+                : nameResult(nameOut)
+            {
+                nameEditor.setMultiLine(false);
+                nameEditor.setScrollbarsShown(false);
+                nameEditor.setText(initialName, false);
+                nameEditor.onReturnKey = [this]
+                {
+                    submitAndClose();
+                };
+                addAndMakeVisible(nameEditor);
+
+                saveButton.setButtonText("Save");
+                saveButton.onClick = [this]
+                {
+                    submitAndClose();
+                };
+                addAndMakeVisible(saveButton);
+
+                cancelButton.setButtonText("Cancel");
+                cancelButton.onClick = [this]
+                {
+                    if (auto *window = findParentComponentOfClass<juce::DialogWindow>())
+                        window->exitModalState(0);
+                };
+                addAndMakeVisible(cancelButton);
+
+                nameEditor.grabKeyboardFocus();
+                nameEditor.selectAll();
+            }
+
+            void paint(juce::Graphics &g) override
+            {
+                g.fillAll(juce::Colour(0xff22272e));
+
+                g.setColour(juce::Colours::white);
+                g.setFont(14.0f);
+                g.drawText("Saved search name", 12, 16, getWidth() - 24, 22, juce::Justification::centredLeft, false);
+            }
+
+            void resized() override
+            {
+                nameEditor.setBounds(12, 44, getWidth() - 24, 28);
+
+                constexpr int actionWidth = 102;
+                cancelButton.setBounds(getWidth() - 12 - actionWidth, 94, actionWidth, 30);
+                saveButton.setBounds(cancelButton.getX() - 8 - actionWidth, 94, actionWidth, 30);
+            }
+
+        private:
+            void submitAndClose()
+            {
+                const auto trimmed = nameEditor.getText().trim();
+                if (trimmed.isEmpty())
+                {
+                    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                           "Save Search",
+                                                           "Saved search name cannot be blank.");
+                    nameEditor.grabKeyboardFocus();
+                    return;
+                }
+
+                nameResult = trimmed;
+                if (auto *window = findParentComponentOfClass<juce::DialogWindow>())
+                    window->exitModalState(1);
+            }
+
+            juce::TextEditor nameEditor;
+            juce::TextButton saveButton;
+            juce::TextButton cancelButton;
+            juce::String &nameResult;
+        };
+
         std::unique_ptr<juce::Drawable> createThemeIcon(const juce::Colour colour, bool showSun)
         {
             constexpr int iconSizePx = 96;
@@ -1132,6 +1228,11 @@ namespace sw
         browserPanel.onRootSelected = [this](std::optional<int64_t> rootId)
         {
             selectedRootFilterId = rootId;
+            if (!applyingSavedSearchSelection && selectedSavedSearchId.has_value())
+            {
+                selectedSavedSearchId.reset();
+                refreshSavedSearches();
+            }
             updateToolbarScanState(scanInProgress);
             refreshResults(currentSearchQuery);
         };
@@ -1249,7 +1350,140 @@ namespace sw
 
         resultsPanel.onSearchQueryChanged = [this](const std::string &query)
         {
+            if (!applyingSavedSearchSelection && selectedSavedSearchId.has_value())
+            {
+                selectedSavedSearchId.reset();
+                refreshSavedSearches();
+            }
             refreshResults(query);
+        };
+
+        resultsPanel.onViewModeChanged = [this](ResultsPanel::ViewMode mode)
+        {
+            currentResultsViewMode = mode;
+            if (!applyingSavedSearchSelection && selectedSavedSearchId.has_value())
+            {
+                selectedSavedSearchId.reset();
+                refreshSavedSearches();
+            }
+            refreshResults(currentSearchQuery);
+        };
+
+        resultsPanel.onSaveSearchRequested = [this]()
+        {
+            if (currentResultsViewMode == ResultsPanel::ViewMode::Duplicates)
+                return;
+
+            const auto roots = catalogDb.allRoots();
+            juce::String suggestedName;
+
+            if (!currentSearchQuery.empty())
+                suggestedName = juce::String(currentSearchQuery);
+            else if (currentResultsViewMode == ResultsPanel::ViewMode::Favorites)
+                suggestedName = "Favorites";
+            else
+                suggestedName = "Recent Library";
+
+            if (selectedRootFilterId.has_value())
+            {
+                const auto rootIt = std::find_if(roots.begin(), roots.end(), [this](const RootRecord &root)
+                                                 { return root.id == *selectedRootFilterId; });
+                if (rootIt != roots.end())
+                    suggestedName += " [" + juce::String(rootIt->label) + "]";
+            }
+
+            const auto queryText = currentSearchQuery;
+            const auto rootId = selectedRootFilterId;
+            const bool favoritesOnly = currentResultsViewMode == ResultsPanel::ViewMode::Favorites;
+            auto newName = std::make_shared<juce::String>(suggestedName);
+            auto dialogContent = std::make_unique<SaveSearchDialogContent>(*newName, *newName);
+
+            juce::DialogWindow::LaunchOptions options;
+            options.content.setOwned(dialogContent.release());
+            options.dialogTitle = "Save Search";
+            options.dialogBackgroundColour = juce::Colour(0xff22272e);
+            options.escapeKeyTriggersCloseButton = true;
+            options.useNativeTitleBar = true;
+            options.resizable = false;
+            options.componentToCentreAround = this;
+
+            juce::Component::SafePointer<MainComponent> safeThis(this);
+            auto *window = options.launchAsync();
+            window->setSize(420, 140);
+            window->enterModalState(true,
+                                    juce::ModalCallbackFunction::create([safeThis, newName, queryText, rootId, favoritesOnly](int result)
+                                                                        {
+                                                                            if (safeThis == nullptr || result != 1)
+                                                                                return;
+
+                                                                            const auto trimmedName = newName->trim();
+                                                                            if (trimmedName.isEmpty())
+                                                                                return;
+
+                                                                            SavedSearchRecord savedSearch;
+                                                                            savedSearch.name = trimmedName.toStdString();
+                                                                            savedSearch.queryText = queryText;
+                                                                            savedSearch.rootId = rootId;
+                                                                            savedSearch.favoritesOnly = favoritesOnly;
+
+                                                                            if (!safeThis->catalogDb.upsertSavedSearch(savedSearch))
+                                                                            {
+                                                                                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                                                                                       "Save Search Failed",
+                                                                                                                       "Unable to save the current search preset.");
+                                                                                return;
+                                                                            }
+
+                                                                            safeThis->refreshSavedSearches();
+                                                                            const auto it = std::find_if(safeThis->savedSearches.begin(), safeThis->savedSearches.end(), [savedName = savedSearch.name](const SavedSearchRecord &record)
+                                                                                                         { return record.name == savedName; });
+                                                                            if (it != safeThis->savedSearches.end())
+                                                                            {
+                                                                                safeThis->selectedSavedSearchId = it->id;
+                                                                                safeThis->refreshSavedSearches(safeThis->selectedSavedSearchId);
+                                                                            }
+
+                                                                            safeThis->showToolbarToast("Saved search: " + trimmedName, 120); }),
+                                    true);
+        };
+
+        resultsPanel.onSavedSearchSelected = [this](std::optional<int64_t> savedSearchId)
+        {
+            applySavedSearch(savedSearchId);
+        };
+
+        resultsPanel.onDeleteSavedSearchRequested = [this](int64_t savedSearchId)
+        {
+            if (!catalogDb.removeSavedSearch(savedSearchId))
+            {
+                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                       "Delete Saved Search Failed",
+                                                       "Unable to delete the selected saved search.");
+                return;
+            }
+
+            if (selectedSavedSearchId.has_value() && *selectedSavedSearchId == savedSearchId)
+                selectedSavedSearchId.reset();
+
+            refreshSavedSearches();
+            showToolbarToast("Saved search removed", 120);
+        };
+
+        resultsPanel.onSelectedFileFavoriteChanged = [this](bool isFavorite)
+        {
+            persistSelectedFileUserData(isFavorite,
+                                        currentSelectedFileUserData.has_value() ? currentSelectedFileUserData->rating : std::nullopt);
+        };
+
+        resultsPanel.onSelectedFileRatingChanged = [this](std::optional<int> rating)
+        {
+            persistSelectedFileUserData(currentSelectedFileUserData.has_value() && currentSelectedFileUserData->isFavorite,
+                                        rating);
+        };
+
+        resultsPanel.onSelectedFileTagsChanged = [this](const std::vector<std::string> &tags)
+        {
+            persistSelectedFileTags(tags);
         };
 
         resultsPanel.onFileSelected = [this](const FileRecord &file)
@@ -1271,21 +1505,12 @@ namespace sw
             return juce::String(resolveAbsolutePath(rootPath, file.relativePath));
         };
 
-        resultsPanel.onResolveWaveformCachePathForFile = [this](const FileRecord &file) -> std::optional<std::string>
-        {
-            const auto cacheKey = WaveformCache::buildCacheKey(file.rootId, file.relativePath, file.sizeBytes, file.modifiedTime);
-            if (const auto cacheEntry = catalogDb.cacheEntryByKey(cacheKey); cacheEntry.has_value())
-                return cacheEntry->cachePath;
-
-            return std::nullopt;
-        };
-
         resultsPanel.onResolveWaveformCachePeaksForFile = [this](const FileRecord &file) -> std::optional<std::vector<float>>
         {
             if (!waveCacheBlobDb.isOpen())
                 return std::nullopt;
 
-            const auto cacheKey = WaveformCache::buildCacheKey(file.rootId, file.relativePath, file.sizeBytes, file.modifiedTime);
+            const auto cacheKey = buildWaveformCacheKey(file.rootId, file.relativePath, file.sizeBytes, file.modifiedTime);
             return waveCacheBlobDb.peaksByKey(cacheKey);
         };
 
@@ -1429,6 +1654,8 @@ namespace sw
 
         refreshRoots();
         refreshResults();
+        refreshSavedSearches();
+        resultsPanel.setSelectedFileMetadata(std::nullopt, {});
         restoreScanSummaryStatus();
         updateToolbarScanState(false);
         startTimerHz(kUiTimerHz);
@@ -1438,6 +1665,8 @@ namespace sw
 
     MainComponent::~MainComponent()
     {
+        rootWatchEntries.clear();
+
         addRootToolbarButton.setLookAndFeel(nullptr);
         openSourceInExplorerToolbarButton.setLookAndFeel(nullptr);
         remapSourceToolbarButton.setLookAndFeel(nullptr);
@@ -1598,10 +1827,10 @@ namespace sw
         {
             const auto &displays = juce::Desktop::getInstance().getDisplays();
 
-            if (const auto *display = displays.getDisplayForPoint(screenPos))
-                area = display->userArea;
+            if (const auto *display = displays.getDisplayForPoint(screenPos.toFloat()))
+                area = display->userBounds.getLargestIntegerWithin();
             else if (const auto *primaryDisplay = displays.getPrimaryDisplay())
-                area = primaryDisplay->userArea;
+                area = primaryDisplay->userBounds.getLargestIntegerWithin();
             else
                 area = juce::Rectangle<int>(0, 0, 1920, 1080);
         }
@@ -1724,6 +1953,7 @@ namespace sw
 
         browserPanel.setRoots(roots);
         browserPanel.setSelectedRootId(selectedRootFilterId);
+        rebuildRootWatchers(roots);
         updateToolbarScanState(scanInProgress);
     }
 
@@ -1731,39 +1961,220 @@ namespace sw
     {
         currentSearchQuery = query;
 
+        std::vector<FileRecord> results;
         std::pair<int64_t, int64_t> stats{0, 0};
         const auto statsQuery = query.empty() ? std::string{} : (query + "*");
 
-        if (!selectedRootFilterId.has_value())
+        if (currentResultsViewMode == ResultsPanel::ViewMode::Recent)
         {
-            if (query.empty())
+            if (!selectedRootFilterId.has_value())
             {
-                resultsPanel.setResults(catalogDb.listRecentFiles(-1));
-                stats = catalogDb.fileStatsAll();
+                if (query.empty())
+                {
+                    results = catalogDb.listRecentFiles(-1);
+                    stats = catalogDb.fileStatsAll();
+                }
+                else
+                {
+                    results = catalogDb.searchFiles(statsQuery, -1);
+                    stats = catalogDb.fileStatsSearch(statsQuery);
+                }
             }
             else
             {
-                resultsPanel.setResults(catalogDb.searchFiles(statsQuery, -1));
-                stats = catalogDb.fileStatsSearch(statsQuery);
+                const int64_t rootId = *selectedRootFilterId;
+                if (query.empty())
+                {
+                    results = catalogDb.listRecentFilesByRoot(rootId, -1);
+                    stats = catalogDb.fileStatsByRoot(rootId);
+                }
+                else
+                {
+                    results = catalogDb.searchFilesByRoot(rootId, statsQuery, -1);
+                    stats = catalogDb.fileStatsSearchByRoot(rootId, statsQuery);
+                }
             }
         }
         else
         {
-            const int64_t rootId = *selectedRootFilterId;
-            if (query.empty())
+            results = currentResultsViewMode == ResultsPanel::ViewMode::Favorites
+                          ? catalogDb.listFavoriteFiles(-1)
+                          : catalogDb.listDuplicateFiles(-1);
+
+            if (selectedRootFilterId.has_value())
             {
-                resultsPanel.setResults(catalogDb.listRecentFilesByRoot(rootId, -1));
-                stats = catalogDb.fileStatsByRoot(rootId);
+                const auto rootId = *selectedRootFilterId;
+                results.erase(std::remove_if(results.begin(), results.end(), [rootId](const FileRecord &file)
+                                             { return file.rootId != rootId; }),
+                              results.end());
             }
-            else
+
+            if (!query.empty())
             {
-                resultsPanel.setResults(catalogDb.searchFilesByRoot(rootId, statsQuery, -1));
-                stats = catalogDb.fileStatsSearchByRoot(rootId, statsQuery);
+                results.erase(std::remove_if(results.begin(), results.end(), [query](const FileRecord &file)
+                                             { return !matchesSearchText(file, query); }),
+                              results.end());
             }
+
+            stats = buildStatsForResults(results);
         }
+
+        resultsPanel.setResults(std::move(results));
 
         fileStatsStatusText = makeFileStatsStatusText(stats.first, stats.second);
         repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
+    }
+
+    void MainComponent::refreshSavedSearches(std::optional<int64_t> preferredSavedSearchId)
+    {
+        savedSearches = catalogDb.listSavedSearches();
+
+        if (preferredSavedSearchId.has_value())
+            selectedSavedSearchId = preferredSavedSearchId;
+
+        if (selectedSavedSearchId.has_value())
+        {
+            const auto it = std::find_if(savedSearches.begin(), savedSearches.end(), [this](const SavedSearchRecord &record)
+                                         { return record.id == *selectedSavedSearchId; });
+            if (it == savedSearches.end())
+                selectedSavedSearchId.reset();
+        }
+
+        resultsPanel.setSavedSearches(savedSearches, selectedSavedSearchId);
+    }
+
+    void MainComponent::rebuildRootWatchers(const std::vector<RootRecord> &roots)
+    {
+        std::vector<RootWatchEntry> newEntries;
+        newEntries.reserve(roots.size());
+
+        for (const auto &root : roots)
+        {
+            RootWatchEntry entry;
+            entry.rootId = root.id;
+            entry.rootPath = root.path;
+            entry.rootLabel = juce::String(root.label);
+            entry.watcher = std::make_unique<DirectoryWatcherWin>(root.path,
+                                                                  [this, rootId = root.id]()
+                                                                  {
+                                                                      std::lock_guard<std::mutex> lock(pendingRootWatchRescanMutex);
+                                                                      if (std::find(pendingRootWatchRescanIds.begin(), pendingRootWatchRescanIds.end(), rootId) == pendingRootWatchRescanIds.end())
+                                                                          pendingRootWatchRescanIds.push_back(rootId);
+                                                                  });
+            entry.watcher->start();
+            newEntries.push_back(std::move(entry));
+        }
+
+        rootWatchEntries = std::move(newEntries);
+    }
+
+    void MainComponent::processPendingRootWatchRescans()
+    {
+        if (scanInProgress)
+            return;
+
+        int64_t pendingRootId = 0;
+        {
+            std::lock_guard<std::mutex> lock(pendingRootWatchRescanMutex);
+            if (pendingRootWatchRescanIds.empty())
+                return;
+
+            pendingRootId = pendingRootWatchRescanIds.front();
+            pendingRootWatchRescanIds.erase(pendingRootWatchRescanIds.begin());
+        }
+
+        const auto it = std::find_if(rootWatchEntries.begin(), rootWatchEntries.end(), [pendingRootId](const RootWatchEntry &entry)
+                                     { return entry.rootId == pendingRootId; });
+        if (it == rootWatchEntries.end())
+            return;
+
+        showToolbarToast("Source changed, rescanning: " + it->rootLabel, 90);
+        startRootScan(it->rootId, it->rootPath, it->rootLabel);
+    }
+
+    void MainComponent::loadSelectedFileMetadata()
+    {
+        if (!currentSelectedFile.has_value())
+        {
+            currentSelectedFileUserData.reset();
+            currentSelectedFileTags.clear();
+            resultsPanel.setSelectedFileMetadata(std::nullopt, {});
+            return;
+        }
+
+        currentSelectedFileUserData = catalogDb.fileUserDataByFileId(currentSelectedFile->id);
+        currentSelectedFileTags = catalogDb.tagsForFile(currentSelectedFile->id);
+        resultsPanel.setSelectedFileMetadata(currentSelectedFileUserData, currentSelectedFileTags);
+    }
+
+    void MainComponent::persistSelectedFileUserData(bool isFavorite, std::optional<int> rating)
+    {
+        if (!currentSelectedFile.has_value())
+            return;
+
+        FileUserDataRecord record;
+        record.fileId = currentSelectedFile->id;
+        record.isFavorite = isFavorite;
+        record.rating = rating;
+
+        if (!catalogDb.setFileUserData(record))
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                   "Metadata Update Failed",
+                                                   "Unable to update favorite/rating metadata for the selected file.");
+            loadSelectedFileMetadata();
+            return;
+        }
+
+        currentSelectedFileUserData = record;
+        resultsPanel.setSelectedFileMetadata(currentSelectedFileUserData, currentSelectedFileTags);
+
+        if (currentResultsViewMode == ResultsPanel::ViewMode::Favorites)
+            refreshResults(currentSearchQuery);
+    }
+
+    void MainComponent::persistSelectedFileTags(const std::vector<std::string> &tags)
+    {
+        if (!currentSelectedFile.has_value())
+            return;
+
+        if (!catalogDb.replaceFileTags(currentSelectedFile->id, tags))
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                                   "Tag Update Failed",
+                                                   "Unable to update tags for the selected file.");
+            loadSelectedFileMetadata();
+            return;
+        }
+
+        currentSelectedFileTags = catalogDb.tagsForFile(currentSelectedFile->id);
+        resultsPanel.setSelectedFileMetadata(currentSelectedFileUserData, currentSelectedFileTags);
+    }
+
+    void MainComponent::applySavedSearch(std::optional<int64_t> savedSearchId)
+    {
+        selectedSavedSearchId = savedSearchId;
+        refreshSavedSearches(selectedSavedSearchId);
+
+        if (!savedSearchId.has_value())
+            return;
+
+        const auto it = std::find_if(savedSearches.begin(), savedSearches.end(), [savedSearchId](const SavedSearchRecord &record)
+                                     { return record.id == *savedSearchId; });
+        if (it == savedSearches.end())
+            return;
+
+        applyingSavedSearchSelection = true;
+        selectedRootFilterId = it->rootId;
+        browserPanel.setSelectedRootId(selectedRootFilterId);
+        updateToolbarScanState(scanInProgress);
+
+        currentResultsViewMode = it->favoritesOnly ? ResultsPanel::ViewMode::Favorites : ResultsPanel::ViewMode::Recent;
+        resultsPanel.setViewMode(currentResultsViewMode);
+        resultsPanel.setSearchQuery(it->queryText);
+        applyingSavedSearchSelection = false;
+
+        refreshResults(it->queryText);
     }
 
     void MainComponent::refreshOutputDeviceList()
@@ -2256,6 +2667,7 @@ namespace sw
     {
         persistLastSelectedFile(file);
         currentSelectedFile = file;
+        loadSelectedFileMetadata();
         const uint64_t requestId = previewLoadRequestCounter.fetch_add(1, std::memory_order_acq_rel) + 1;
         const juce::String previewType = file.extension.empty() ? juce::String("file") : juce::String(file.extension).toUpperCase() + " file";
 
@@ -2617,6 +3029,8 @@ namespace sw
 
     void MainComponent::timerCallback()
     {
+        processPendingRootWatchRescans();
+
         ++midiDeviceRefreshCounter;
         if (midiDeviceRefreshCounter >= kMidiDeviceRefreshIntervalTicks)
         {

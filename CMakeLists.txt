@@ -127,6 +127,7 @@ set(PIPELINE_SOURCES
 set(AUDIO_SOURCES
     Source/Audio/AudioEngine.cpp
     Source/Audio/AudioEngine.h
+    Source/Audio/Voice.cpp
     Source/Audio/Voice.h
     Source/Audio/VoiceManager.cpp
     Source/Audio/VoiceManager.h
@@ -139,6 +140,8 @@ set(UTIL_SOURCES
     Source/Util/Paths.h
     Source/Util/Hashing.cpp
     Source/Util/Hashing.h
+    Source/Util/DirectoryWatcherWin.cpp
+    Source/Util/DirectoryWatcherWin.h
     Source/Util/Logging.h
 )
 
@@ -441,7 +444,7 @@ add_custom_target(SampleWranglerReleaseArtifacts
 # ---------------------------------------------------------------------------
 # Tests (lightweight non-audio modules)
 # ---------------------------------------------------------------------------
-enable_testing()
+include(CTest)
 
 add_executable(SampleWranglerCatalogDbTests
     Tests/CatalogDbTests.cpp
@@ -465,6 +468,7 @@ add_executable(SampleWranglerScannerAppleLoopTests
     Source/Pipeline/AcpPresetReader.cpp
     Source/Pipeline/JobQueue.cpp
     Source/Pipeline/RexManager.cpp
+    Source/Pipeline/WaveformPeak.cpp
     Source/Catalog/CatalogDb.cpp
     Source/Catalog/WaveCacheBlobDb.cpp
     Source/Catalog/CatalogSchema.cpp
@@ -474,6 +478,7 @@ add_executable(SampleWranglerScannerAppleLoopTests
 add_executable(SampleWranglerWaveformPeakTests
     Tests/WaveformPeakTests.cpp
     Source/Pipeline/WaveformPeak.cpp
+    Source/Util/Hashing.cpp
 )
 
 add_executable(SampleWranglerAcpPresetReaderTests

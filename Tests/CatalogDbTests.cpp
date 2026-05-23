@@ -34,6 +34,12 @@ namespace
         file.channels = 2;
         file.bitDepth = 16;
         file.contentHash = "hash-a";
+        file.presetName = "Warm Pad";
+        file.zoneCount = 3;
+        file.keyLow = 24;
+        file.keyHigh = 96;
+        file.velocityLow = 1;
+        file.velocityHigh = 127;
 
         if (!db.upsertFile(file))
             return false;
@@ -50,7 +56,13 @@ namespace
             return false;
 
         return byId->sampleRate.has_value() && *byId->sampleRate == 44100 &&
-               byId->contentHash.has_value() && *byId->contentHash == "hash-a";
+               byId->contentHash.has_value() && *byId->contentHash == "hash-a" &&
+               byId->presetName.has_value() && *byId->presetName == "Warm Pad" &&
+               byId->zoneCount.has_value() && *byId->zoneCount == 3 &&
+               byId->keyLow.has_value() && *byId->keyLow == 24 &&
+               byId->keyHigh.has_value() && *byId->keyHigh == 96 &&
+               byId->velocityLow.has_value() && *byId->velocityLow == 1 &&
+               byId->velocityHigh.has_value() && *byId->velocityHigh == 127;
     }
 
     bool testDuplicateFileLookup(sw::CatalogDb &db)

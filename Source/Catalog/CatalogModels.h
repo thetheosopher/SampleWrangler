@@ -45,8 +45,14 @@ namespace sw
         std::optional<int64_t> loopEndSample;
         std::optional<int> sliceCount;          // REX/RX2 slice count
         std::optional<std::string> contentHash; // sampled content fingerprint for duplicate detection
+        std::optional<std::string> presetName;  // indexed-preset display name when present
+        std::optional<int> zoneCount;           // sampler zone/region count for indexed presets
+        std::optional<int> keyLow;              // lowest covered MIDI key for indexed presets
+        std::optional<int> keyHigh;             // highest covered MIDI key for indexed presets
+        std::optional<int> velocityLow;         // lowest covered MIDI velocity for indexed presets
+        std::optional<int> velocityHigh;        // highest covered MIDI velocity for indexed presets
 
-        /// True if this format is index-only (REX, NKI, SFZ) and cannot be auditioned.
+        /// True if this format is index-only (for example REX without the SDK, SFZ, or DecentSampler) and cannot be auditioned.
         bool indexOnly = false;
     };
 

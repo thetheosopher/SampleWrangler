@@ -33,13 +33,14 @@ Build the most compelling desktop sample librarian possible while complementing 
 ## Current Validation State
 
 - `SampleWrangler` builds successfully with CMake Tools.
+- The current sampler-engine follow-up build is clean after moving Rubber Band state and helpers out of `Source/Audio/Voice.h` into `Source/Audio/Voice.cpp` and tightening the preserve-length render path.
 - `SampleWranglerAcpPresetReaderTests` builds successfully.
-- `SampleWranglerCatalogDbTests` builds successfully and covers `content_hash`, favorites/ratings/tags, duplicate lookup, and saved searches.
-- `SampleWranglerScannerAppleLoopTests` builds successfully.
+- `SampleWranglerCatalogDbTests` builds successfully and now also round-trip the indexed preset summary fields (`preset_name`, `zone_count`, `key_low/high`, `velocity_low/high`).
+- `SampleWranglerScannerAppleLoopTests` builds successfully and now covers Apple Loop AIFF metadata plus indexed SFZ, Bitwig `.multisample`, Korg `.korgmultisample`, SoundFont `.sf2`, DecentSampler `.dspreset`, TAL `.talsmpl`, and TX16Wx `.txprog` preset ingestion.
 - `SampleWranglerWaveformPeakTests` passes in CTest.
 - CTest passes all four current tests (`CatalogDb`, `ScannerAppleLoop`, `WaveformPeak`, `AcpPresetReader`).
-- Remaining build warnings are pre-existing JUCE display deprecation warnings in `Source/App/MainComponent.cpp`.
-- CMake Tools still emits missing `DartConfiguration.tcl` warnings during test execution, but the tests themselves pass.
+- The JUCE display deprecation warnings in `Source/App/MainComponent.cpp` are resolved.
+- The CMake/CTest `DartConfiguration.tcl` warning is resolved by using `include(CTest)`.
 
 ## Full Roadmap
 
@@ -55,24 +56,27 @@ Status: Complete
 
 ### Sprint B: Catalog and Library Intelligence Foundation
 
-Status: In progress
+Status: Complete
 
 - Introduce `PRAGMA user_version` schema migrations. Done.
 - Add `content_hash` or near-duplicate hash for duplicate detection and move resilience. Storage, scanner ingestion, and duplicate-query foundation are done.
-- Add favorites, ratings, tags, and saved searches. Database foundation is done; UI/query integration is still pending.
-- Consolidate waveform cache persistence strategy if the file-based and blob-based systems remain redundant.
-- Add source-folder live watching on Windows.
+- Add favorites, ratings, tags, and saved searches. Database foundation and results/browser UI integration are done.
+- Consolidate waveform cache persistence strategy if the file-based and blob-based systems remain redundant. Runtime reads now use blob-backed peaks only.
+- Add source-folder live watching on Windows. Done via per-root watcher callbacks that queue rescans when the app is idle.
 
 ### Sprint C: Format Breadth to Match Audiocity
 
-Status: Not started
+Status: In progress
 
 Highest-value additions:
 
-- SFZ minimal reader/indexer
-- DecentSampler `.dspreset`
-- Bitwig `.multisample`
-- SF2
+- SFZ minimal reader/indexer. Landed: `.sfz` files are cataloged as index-only presets, resolve their first referenced sample when available, respect `default_path`, and persist waveform overview peaks for list previews.
+- DecentSampler `.dspreset`. Landed with the same indexed-preset treatment as SFZ.
+- Bitwig `.multisample`. Landed with `multisample.xml` parsing, in-archive sample probing, and blob waveform peak persistence.
+- Korg `.korgmultisample`. Landed with zip/XML manifest parsing, embedded sample probing, and preset-zone summary metadata.
+- TAL `.talsmpl`. Landed as an indexed preset format that resolves its first referenced sample and extracts basic key/audio metadata.
+- TX16Wx `.txprog`. Landed as an indexed preset format that resolves its first referenced sample and extracts basic key/audio metadata.
+- SF2. Landed as an index-only SoundFont probe that extracts the first preset name, representative sample metadata, key/velocity coverage, loop information, and a lightweight waveform overview from the embedded `smpl` PCM data.
 
 Later candidates:
 
@@ -80,8 +84,6 @@ Later candidates:
 - Reason NN-XT `.sxt`
 - Ableton `.adv` / `.adg`
 - MPC `.xpm`
-- TAL `.talsmpl`
-- TX16Wx `.txprog`
 - Korg multisample formats
 - Additional Audiocity-compatible preset and instrument containers
 
@@ -134,28 +136,42 @@ Status: Partially started through `.acp` preview support
 ## Known Technical Follow-Ups
 
 - The direct playback path is improved, but there is still room for deeper sampler-core work:
-  - Consider fixed-point phase accumulation in the long term.
+  - Direct non-stretch playback now has a fixed-phase steady-state fast path for the common active-voice case, reducing per-sample branching in `VoiceManager::renderVoice`.
+  - The non-Rubber-Band granular fallback now uses a smoother shaped grain crossfade instead of a raw linear blend.
+  - Rubber Band state and helper machinery now live behind a `Voice.cpp` implementation object instead of inflating `Voice.h`.
+  - The active Rubber Band RT render path now updates pitch scale through the real chunked preserve-length path.
+  - The granular preserve-length fallback now caches mixed source samples per frame before fanning them out to output channels, avoiding repeated interpolation reads for mono/stereo previews.
   - Consider further SIMD/vectorized mixing for steady-state spans.
-  - Revisit the granular fallback quality if Rubber Band is unavailable.
-- `Voice.h` remains heavy and still contains Rubber Band machinery that could move into a `.cpp` implementation object later.
+  - Consider pushing fixed-phase accumulation further into the remaining non-steady-state paths if profiling shows it is worth the extra complexity.
+- Add a dedicated offline render-test harness for `VoiceManager` so future sampler-engine work is not validated by app builds alone.
 - The `MainComponent` class is still large and could eventually be split into controller/state pieces.
 
 ## Suggested Next Session Order
 
-1. Continue Sprint B by wiring favorites, ratings, tags, and saved searches into the browser/results UI.
-2. Expose duplicate-file browsing/workflows using the new `content_hash` foundation.
-3. Add source-folder live watching on Windows.
-4. Begin Sprint C with SFZ and DecentSampler because they provide the best format-value/effort ratio.
-5. Add Audiocity handoff actions once the catalog can browse both raw samples and `.acp` presets reliably.
+1. Keep Sprint C paused for now and continue sampler-core work by profiling the remaining render paths for additional steady-state SIMD/vector opportunities.
+2. Revisit the non-Rubber-Band preserve-length fallback after listening tests and profiling, especially around grain sizing, spacing, and any further fixed-phase opportunities.
+3. Add a narrow offline render-test harness for `VoiceManager` so sampler-engine changes can be validated without relying only on builds and manual listening.
+4. Resume Sprint C only after the sampler engine slice is stable enough to support more ambitious preview workflows.
+5. Expose richer preset-specific metadata in the UI beyond the new summary row once format breadth work resumes.
 
-## Sprint B Progress Notes
+## Sprint B Completion Notes
 
 - Catalog schema evolution now uses `PRAGMA user_version` migrations instead of only ad hoc `ALTER TABLE` checks.
 - The `files` table stores `content_hash` and indexes it.
 - Scanner ingestion computes a sampled content fingerprint from file size plus the first/last 64 KB.
 - `CatalogDb::listDuplicateFiles()` is available for future duplicate-browser UI work.
-- Favorites, ratings, tags, and saved searches now persist in dedicated catalog tables so rescans do not overwrite user-authored metadata.
-- Browser/search UI for those metadata features and live watching are still pending.
+- Favorites, ratings, tags, and saved searches now persist in dedicated catalog tables and are wired into the results UI.
+- Results browsing now supports recent/favorites/duplicates views plus saved-search recall and per-file metadata editing.
+- Source roots now rebuild Windows directory watchers and queue automatic rescans when the library changes on disk.
+- Results/runtime waveform reads now treat `WaveCacheBlobDb` as authoritative instead of falling back to legacy `.peak` files.
+
+## Sprint C Progress Notes
+
+- `.sfz`, `.dspreset`, `.multisample`, `.korgmultisample`, `.sf2`, `.talsmpl`, and `.txprog` files now scan into the catalog as index-only preset assets.
+- The scanner extracts the first referenced sample when available to populate useful metadata (`sampleRate`, `channels`, `durationSec`, `codec`, `key`) for those preset files, including embedded zip samples for Bitwig and Korg multisample containers plus lightweight PCM probing for `.sf2` SoundFonts.
+- Indexed preset files now persist a richer sampler summary into the catalog (`preset_name`, `zone_count`, `key_low/high`, `velocity_low/high`) and surface that summary in the results metadata row.
+- Indexed sampler preset resolution is more tolerant of real-world layouts via SFZ `default_path` support and broader relative `Samples/` path fallback handling.
+- Indexed sampler presets now persist blob-backed waveform peaks so the results list can still render a waveform thumbnail even before preset playback exists.
 
 ## Files Touched in Sprint A
 
@@ -163,6 +179,7 @@ Status: Partially started through `.acp` preview support
 - `Source/Pipeline/AcpPresetReader.cpp`
 - `Source/Pipeline/Scanner.cpp`
 - `Source/App/MainComponent.cpp`
+- `Source/Audio/Voice.cpp`
 - `Source/Audio/Voice.h`
 - `Source/Audio/VoiceManager.h`
 - `Source/Audio/VoiceManager.cpp`

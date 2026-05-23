@@ -8,7 +8,7 @@ namespace sw
 
     namespace
     {
-        constexpr int kCurrentSchemaVersion = 4;
+        constexpr int kCurrentSchemaVersion = 5;
 
         bool execSql(sqlite3 *db, const char *sql)
         {
@@ -104,6 +104,12 @@ namespace sw
             index_only        INTEGER NOT NULL DEFAULT 0,
             slice_count       INTEGER,
             content_hash      TEXT,
+            preset_name       TEXT,
+            zone_count        INTEGER,
+            key_low           INTEGER,
+            key_high          INTEGER,
+            velocity_low      INTEGER,
+            velocity_high     INTEGER,
             UNIQUE(root_id, relative_path)
         );
     )SQL"))
@@ -295,6 +301,24 @@ namespace sw
         );
     )SQL");
         }
+
+        bool applyMigration5(sqlite3 *db)
+        {
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN preset_name TEXT;"))
+                return false;
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN zone_count INTEGER;"))
+                return false;
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN key_low INTEGER;"))
+                return false;
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN key_high INTEGER;"))
+                return false;
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN velocity_low INTEGER;"))
+                return false;
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN velocity_high INTEGER;"))
+                return false;
+
+            return true;
+        }
     }
 
     bool CatalogSchema::exec(sqlite3 *db, const char *sql)
@@ -321,6 +345,9 @@ namespace sw
                 break;
             case 4:
                 ok = applyMigration4(db);
+                break;
+            case 5:
+                ok = applyMigration5(db);
                 break;
             default:
                 ok = false;

@@ -30,7 +30,7 @@ namespace sw
         /// Set of extensions that are playable in MVP.
         static bool isPlayableExtension(const std::string &ext);
 
-        /// Set of extensions that are index-only (REX, NKI, SFZ).
+        /// Set of extensions that are index-only (for example REX without the SDK, SFZ, SoundFont, and other sampler presets).
         static bool isIndexOnlyExtension(const std::string &ext);
 
         void setWaveCacheBlobDb(WaveCacheBlobDb *blobDb) noexcept;

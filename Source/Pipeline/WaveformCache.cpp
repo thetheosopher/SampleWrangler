@@ -21,8 +21,7 @@ namespace sw
     std::string WaveformCache::buildCacheKey(int64_t rootId, const std::string &relPath,
                                              int64_t sizeBytes, int64_t mtime)
     {
-        std::string input = std::to_string(rootId) + "|" + relPath + "|" + std::to_string(sizeBytes) + "|" + std::to_string(mtime);
-        return hashString(input);
+        return buildWaveformCacheKey(rootId, relPath, sizeBytes, mtime);
     }
 
     void WaveformCache::requestPeaks(int64_t fileId, PeaksReadyCallback onReady)

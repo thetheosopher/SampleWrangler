@@ -12,10 +12,12 @@
 #include "Pipeline/RexManager.h"
 #include "Audio/AudioEngine.h"
 #include "Audio/MidiInputRouter.h"
+#include "Util/DirectoryWatcherWin.h"
 
 #include <chrono>
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -38,6 +40,9 @@ namespace sw
     private:
         void refreshRoots();
         void refreshResults(const std::string &query = "");
+        void refreshSavedSearches(std::optional<int64_t> preferredSavedSearchId = std::nullopt);
+        void rebuildRootWatchers(const std::vector<RootRecord> &roots);
+        void processPendingRootWatchRescans();
         void refreshOutputDeviceTypeList();
         void refreshOutputDeviceList();
         void refreshMidiInputDeviceList(bool forceRefresh = false);
@@ -78,6 +83,10 @@ namespace sw
         void resetLayout();
         void handleAddRootClicked();
         void handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert);
+        void loadSelectedFileMetadata();
+        void persistSelectedFileUserData(bool isFavorite, std::optional<int> rating);
+        void persistSelectedFileTags(const std::vector<std::string> &tags);
+        void applySavedSearch(std::optional<int64_t> savedSearchId);
         void setPreviewLoadingState(bool isLoading, uint64_t requestId);
         void applyEffectiveLoopPlaybackMode();
         void advanceAutoplaySelectionAndPlay();
@@ -195,10 +204,16 @@ namespace sw
         bool scanInProgress = false;
         std::optional<int64_t> selectedRootFilterId;
         std::optional<FileRecord> currentSelectedFile;
+        std::optional<FileUserDataRecord> currentSelectedFileUserData;
+        std::vector<std::string> currentSelectedFileTags;
         std::atomic<uint64_t> previewLoadRequestCounter{0};
         bool previewLoading = false;
         uint64_t previewLoadingRequestId = 0;
         std::string currentSearchQuery;
+        ResultsPanel::ViewMode currentResultsViewMode = ResultsPanel::ViewMode::Recent;
+        std::vector<SavedSearchRecord> savedSearches;
+        std::optional<int64_t> selectedSavedSearchId;
+        bool applyingSavedSearchSelection = false;
         juce::String selectedMidiInputIdentifier;
         juce::StringArray lastKnownMidiInputIdentifiers;
         int midiDeviceRefreshCounter = 0;
@@ -216,6 +231,18 @@ namespace sw
         std::chrono::steady_clock::time_point scanStartTime{};
         std::vector<float> oscilloscopeFrameScratch;
         std::vector<float> midiPlaybackHeadsScratch;
+        std::mutex pendingRootWatchRescanMutex;
+        std::vector<int64_t> pendingRootWatchRescanIds;
+
+        struct RootWatchEntry
+        {
+            int64_t rootId = 0;
+            std::string rootPath;
+            juce::String rootLabel;
+            std::unique_ptr<DirectoryWatcherWin> watcher;
+        };
+
+        std::vector<RootWatchEntry> rootWatchEntries;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
     };

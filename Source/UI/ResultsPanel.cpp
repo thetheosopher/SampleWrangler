@@ -1,16 +1,67 @@
 #include "ResultsPanel.h"
-#include "Pipeline/WaveformCache.h"
-#include "Util/Paths.h"
 #include <algorithm>
 #include <cmath>
-#include <filesystem>
-#include <fstream>
 
 namespace
 {
     constexpr int kSortByNameId = 1;
     constexpr int kSortByPathId = 2;
+    constexpr int kViewRecentId = 1;
+    constexpr int kViewFavoritesId = 2;
+    constexpr int kViewDuplicatesId = 3;
     constexpr int kWaveformColumnWidth = 120;
+
+    int selectorIdForViewMode(sw::ResultsPanel::ViewMode mode)
+    {
+        switch (mode)
+        {
+        case sw::ResultsPanel::ViewMode::Favorites:
+            return kViewFavoritesId;
+        case sw::ResultsPanel::ViewMode::Duplicates:
+            return kViewDuplicatesId;
+        case sw::ResultsPanel::ViewMode::Recent:
+        default:
+            return kViewRecentId;
+        }
+    }
+
+    sw::ResultsPanel::ViewMode viewModeForSelectorId(int id)
+    {
+        switch (id)
+        {
+        case kViewFavoritesId:
+            return sw::ResultsPanel::ViewMode::Favorites;
+        case kViewDuplicatesId:
+            return sw::ResultsPanel::ViewMode::Duplicates;
+        case kViewRecentId:
+        default:
+            return sw::ResultsPanel::ViewMode::Recent;
+        }
+    }
+
+    std::vector<std::string> splitTagsFromEditor(const juce::String &text)
+    {
+        juce::StringArray tokens;
+        tokens.addTokens(text, ",", {});
+        tokens.trim();
+        tokens.removeEmptyStrings();
+
+        std::vector<std::string> result;
+        result.reserve(static_cast<size_t>(tokens.size()));
+        for (const auto &token : tokens)
+            result.push_back(token.toStdString());
+
+        return result;
+    }
+
+    juce::String joinTagsForEditor(const std::vector<std::string> &tags)
+    {
+        juce::StringArray tokens;
+        for (const auto &tag : tags)
+            tokens.add(tag);
+
+        return tokens.joinIntoString(", ");
+    }
 
     bool isAcidizedLoop(const sw::FileRecord &item)
     {
@@ -42,6 +93,32 @@ namespace
 
         const int octave = (note / 12) - 1;
         return juce::String(kNames[note % 12]) + juce::String(octave);
+    }
+
+    juce::String formatMidiRange(const std::optional<int> &low, const std::optional<int> &high)
+    {
+        if (!low.has_value() && !high.has_value())
+            return "--";
+
+        const int resolvedLow = low.value_or(*high);
+        const int resolvedHigh = high.value_or(*low);
+        if (resolvedLow == resolvedHigh)
+            return midiNoteToName(resolvedLow);
+
+        return midiNoteToName(resolvedLow) + "-" + midiNoteToName(resolvedHigh);
+    }
+
+    juce::String formatIntegerRange(const std::optional<int> &low, const std::optional<int> &high)
+    {
+        if (!low.has_value() && !high.has_value())
+            return "--";
+
+        const int resolvedLow = low.value_or(*high);
+        const int resolvedHigh = high.value_or(*low);
+        if (resolvedLow == resolvedHigh)
+            return juce::String(resolvedLow);
+
+        return juce::String(resolvedLow) + "-" + juce::String(resolvedHigh);
     }
 
     struct MetadataToken
@@ -87,6 +164,18 @@ namespace
         appendMetadataPair(tokens, "Duration: ", formatDuration(item.durationSec));
         appendMetadataPair(tokens, "Samples: ", totalSamples);
         appendMetadataPair(tokens, "Codec/Enc: ", codec);
+
+        if (item.presetName.has_value())
+            appendMetadataPair(tokens, "Preset: ", juce::String(*item.presetName));
+
+        if (item.zoneCount.has_value())
+            appendMetadataPair(tokens, "Zones: ", juce::String(*item.zoneCount));
+
+        if (item.keyLow.has_value() || item.keyHigh.has_value())
+            appendMetadataPair(tokens, "Keys: ", formatMidiRange(item.keyLow, item.keyHigh));
+
+        if (item.velocityLow.has_value() || item.velocityHigh.has_value())
+            appendMetadataPair(tokens, "Vel: ", formatIntegerRange(item.velocityLow, item.velocityHigh));
 
         if (isAcidizedLoop(item) || isAppleLoop(item))
         {
@@ -168,8 +257,6 @@ namespace sw
 
     ResultsPanel::ResultsPanel()
     {
-        waveformCacheDirectory = defaultCacheDirectory();
-
         searchBox.setTextToShowWhenEmpty("Search samples...", juce::Colours::grey);
         searchBox.onTextChange = [this]
         {
@@ -177,6 +264,22 @@ namespace sw
                 onSearchQueryChanged(searchBox.getText().toStdString());
         };
         addAndMakeVisible(searchBox);
+
+        viewSelector.addItem("Recent", kViewRecentId);
+        viewSelector.addItem("Favorites", kViewFavoritesId);
+        viewSelector.addItem("Duplicates", kViewDuplicatesId);
+        viewSelector.setSelectedId(kViewRecentId, juce::dontSendNotification);
+        viewSelector.onChange = [this]
+        {
+            if (suppressControlCallbacks)
+                return;
+
+            viewMode = viewModeForSelectorId(viewSelector.getSelectedId());
+            updateMetadataControlState();
+            if (onViewModeChanged)
+                onViewModeChanged(viewMode);
+        };
+        addAndMakeVisible(viewSelector);
 
         sortSelector.addItem("Name", kSortByNameId);
         sortSelector.addItem("Path", kSortByPathId);
@@ -204,11 +307,93 @@ namespace sw
         };
         addAndMakeVisible(sortSelector);
 
+        savedSearchSelector.setTextWhenNothingSelected("Saved searches");
+        savedSearchSelector.onChange = [this]
+        {
+            if (suppressControlCallbacks)
+                return;
+
+            updateMetadataControlState();
+
+            const int index = savedSearchSelector.getSelectedItemIndex();
+            if (index < 0 || index >= static_cast<int>(savedSearches.size()))
+            {
+                if (onSavedSearchSelected)
+                    onSavedSearchSelected(std::nullopt);
+                return;
+            }
+
+            if (onSavedSearchSelected)
+                onSavedSearchSelected(savedSearches[static_cast<size_t>(index)].id);
+        };
+        addAndMakeVisible(savedSearchSelector);
+
+        saveSearchButton.onClick = [this]
+        {
+            if (onSaveSearchRequested)
+                onSaveSearchRequested();
+        };
+        addAndMakeVisible(saveSearchButton);
+
+        deleteSavedSearchButton.onClick = [this]
+        {
+            const int index = savedSearchSelector.getSelectedItemIndex();
+            if (index < 0 || index >= static_cast<int>(savedSearches.size()))
+                return;
+
+            if (onDeleteSavedSearchRequested)
+                onDeleteSavedSearchRequested(savedSearches[static_cast<size_t>(index)].id);
+        };
+        addAndMakeVisible(deleteSavedSearchButton);
+
+        favoriteToggle.onClick = [this]
+        {
+            if (suppressControlCallbacks)
+                return;
+
+            if (onSelectedFileFavoriteChanged)
+                onSelectedFileFavoriteChanged(favoriteToggle.getToggleState());
+        };
+        addAndMakeVisible(favoriteToggle);
+
+        ratingSelector.addItem("No rating", 1);
+        ratingSelector.addItem("1 star", 2);
+        ratingSelector.addItem("2 stars", 3);
+        ratingSelector.addItem("3 stars", 4);
+        ratingSelector.addItem("4 stars", 5);
+        ratingSelector.addItem("5 stars", 6);
+        ratingSelector.setSelectedId(1, juce::dontSendNotification);
+        ratingSelector.onChange = [this]
+        {
+            if (suppressControlCallbacks)
+                return;
+
+            const int selectedId = ratingSelector.getSelectedId();
+            const std::optional<int> rating = (selectedId <= 1) ? std::nullopt : std::optional<int>(selectedId - 1);
+            if (onSelectedFileRatingChanged)
+                onSelectedFileRatingChanged(rating);
+        };
+        addAndMakeVisible(ratingSelector);
+
+        tagsEditor.setMultiLine(false);
+        tagsEditor.setReturnKeyStartsNewLine(false);
+        tagsEditor.setTextToShowWhenEmpty("Tags (comma-separated)", juce::Colours::grey);
+        tagsEditor.onReturnKey = [this]
+        {
+            commitTagsFromEditor();
+        };
+        tagsEditor.onFocusLost = [this]
+        {
+            commitTagsFromEditor();
+        };
+        addAndMakeVisible(tagsEditor);
+
         resultsList.setModel(this);
         resultsList.setRowHeight(40);
         addAndMakeVisible(resultsList);
 
         setDarkMode(true);
+        updateMetadataControlState();
     }
 
     void ResultsPanel::paint(juce::Graphics &g)
@@ -220,11 +405,33 @@ namespace sw
     {
         auto area = getLocalBounds().reduced(4);
         auto topRow = area.removeFromTop(28);
-        constexpr int selectorWidth = 110;
+        auto metadataRow = area.removeFromTop(28);
+        constexpr int viewWidth = 110;
+        constexpr int selectorWidth = 96;
+        constexpr int savedSearchWidth = 170;
+        constexpr int buttonWidth = 104;
+        constexpr int favoriteWidth = 88;
+        constexpr int ratingWidth = 96;
         constexpr int controlGap = 6;
+
+        deleteSavedSearchButton.setBounds(topRow.removeFromRight(buttonWidth));
+        topRow.removeFromRight(controlGap);
+        saveSearchButton.setBounds(topRow.removeFromRight(buttonWidth));
+        topRow.removeFromRight(controlGap);
+        savedSearchSelector.setBounds(topRow.removeFromRight(savedSearchWidth));
+        topRow.removeFromRight(controlGap);
         sortSelector.setBounds(topRow.removeFromRight(selectorWidth));
         topRow.removeFromRight(controlGap);
+        viewSelector.setBounds(topRow.removeFromRight(viewWidth));
+        topRow.removeFromRight(controlGap);
         searchBox.setBounds(topRow);
+
+        ratingSelector.setBounds(metadataRow.removeFromRight(ratingWidth));
+        metadataRow.removeFromRight(controlGap);
+        favoriteToggle.setBounds(metadataRow.removeFromRight(favoriteWidth));
+        metadataRow.removeFromRight(controlGap);
+        tagsEditor.setBounds(metadataRow);
+
         area.removeFromTop(4);
         resultsList.setBounds(area);
     }
@@ -239,7 +446,69 @@ namespace sw
         applySort();
 
         resultsList.updateContent();
+        updateMetadataControlState();
         repaint();
+    }
+
+    void ResultsPanel::setSearchQuery(const std::string &query)
+    {
+        suppressControlCallbacks = true;
+        searchBox.setText(query, juce::dontSendNotification);
+        suppressControlCallbacks = false;
+    }
+
+    void ResultsPanel::setViewMode(ViewMode mode)
+    {
+        viewMode = mode;
+        suppressControlCallbacks = true;
+        viewSelector.setSelectedId(selectorIdForViewMode(mode), juce::dontSendNotification);
+        suppressControlCallbacks = false;
+        updateMetadataControlState();
+    }
+
+    ResultsPanel::ViewMode ResultsPanel::getViewMode() const noexcept
+    {
+        return viewMode;
+    }
+
+    void ResultsPanel::setSavedSearches(std::vector<SavedSearchRecord> newSavedSearches,
+                                        std::optional<int64_t> selectedSavedSearchId)
+    {
+        savedSearches = std::move(newSavedSearches);
+
+        suppressControlCallbacks = true;
+        savedSearchSelector.clear(juce::dontSendNotification);
+        for (size_t i = 0; i < savedSearches.size(); ++i)
+            savedSearchSelector.addItem(savedSearches[i].name, static_cast<int>(i) + 1);
+
+        int selectedIndex = -1;
+        if (selectedSavedSearchId.has_value())
+        {
+            for (int i = 0; i < static_cast<int>(savedSearches.size()); ++i)
+            {
+                if (savedSearches[static_cast<size_t>(i)].id == *selectedSavedSearchId)
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+        }
+
+        savedSearchSelector.setSelectedItemIndex(selectedIndex, juce::dontSendNotification);
+        suppressControlCallbacks = false;
+        updateMetadataControlState();
+    }
+
+    void ResultsPanel::setSelectedFileMetadata(std::optional<FileUserDataRecord> userData,
+                                               std::vector<std::string> tags)
+    {
+        suppressControlCallbacks = true;
+        favoriteToggle.setToggleState(userData.has_value() && userData->isFavorite, juce::dontSendNotification);
+        ratingSelector.setSelectedId(userData.has_value() && userData->rating.has_value() ? (*userData->rating + 1) : 1,
+                                     juce::dontSendNotification);
+        tagsEditor.setText(joinTagsForEditor(tags), juce::dontSendNotification);
+        suppressControlCallbacks = false;
+        updateMetadataControlState();
     }
 
     void ResultsPanel::applySort()
@@ -284,48 +553,8 @@ namespace sw
             }
         }
 
-        std::string cachePath;
-        if (onResolveWaveformCachePathForFile != nullptr)
-        {
-            if (const auto resolved = onResolveWaveformCachePathForFile(file); resolved.has_value() && !resolved->empty())
-                cachePath = *resolved;
-        }
-
-        if (cachePath.empty())
-        {
-            const auto cacheKey = WaveformCache::buildCacheKey(file.rootId, file.relativePath, file.sizeBytes, file.modifiedTime);
-            cachePath = (std::filesystem::path(waveformCacheDirectory) / (cacheKey + ".peak")).string();
-        }
-
-        std::ifstream input(cachePath, std::ios::binary);
-
-        if (!input)
-        {
-            waveformCacheMisses.insert(file.id);
-            return nullptr;
-        }
-
-        uint32_t peakCount = 0;
-        input.read(reinterpret_cast<char *>(&peakCount), sizeof(peakCount));
-
-        if (!input || peakCount == 0 || peakCount > 100000)
-        {
-            waveformCacheMisses.insert(file.id);
-            return nullptr;
-        }
-
-        auto &peaks = waveformPeaksByFileId[file.id];
-        peaks.resize(static_cast<size_t>(peakCount));
-        input.read(reinterpret_cast<char *>(peaks.data()), static_cast<std::streamsize>(peaks.size() * sizeof(float)));
-
-        if (!input.good() && !input.eof())
-        {
-            waveformPeaksByFileId.erase(file.id);
-            waveformCacheMisses.insert(file.id);
-            return nullptr;
-        }
-
-        return &waveformPeaksByFileId[file.id];
+        waveformCacheMisses.insert(file.id);
+        return nullptr;
     }
 
     void ResultsPanel::paintWaveformPreview(juce::Graphics &g, juce::Rectangle<int> bounds, const FileRecord &item)
@@ -446,9 +675,56 @@ namespace sw
         sortSelector.setColour(juce::ComboBox::outlineColourId, outline);
         sortSelector.setColour(juce::ComboBox::arrowColourId, textColour);
 
+        viewSelector.setColour(juce::ComboBox::textColourId, textColour);
+        viewSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
+        viewSelector.setColour(juce::ComboBox::outlineColourId, outline);
+        viewSelector.setColour(juce::ComboBox::arrowColourId, textColour);
+
+        savedSearchSelector.setColour(juce::ComboBox::textColourId, textColour);
+        savedSearchSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
+        savedSearchSelector.setColour(juce::ComboBox::outlineColourId, outline);
+        savedSearchSelector.setColour(juce::ComboBox::arrowColourId, textColour);
+
+        tagsEditor.setColour(juce::TextEditor::textColourId, textColour);
+        tagsEditor.setColour(juce::TextEditor::backgroundColourId, editorBg);
+        tagsEditor.setColour(juce::TextEditor::outlineColourId, outline);
+        tagsEditor.setColour(juce::TextEditor::focusedOutlineColourId, darkModeEnabled ? juce::Colour(0xff6b9bc8) : juce::Colour(0xff2f6fa8));
+        tagsEditor.setTextToShowWhenEmpty("Tags (comma-separated)", placeholder);
+
+        ratingSelector.setColour(juce::ComboBox::textColourId, textColour);
+        ratingSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
+        ratingSelector.setColour(juce::ComboBox::outlineColourId, outline);
+        ratingSelector.setColour(juce::ComboBox::arrowColourId, textColour);
+
+        saveSearchButton.setColour(juce::TextButton::buttonColourId, darkModeEnabled ? juce::Colour(0xff314154) : juce::Colour(0xffd7e3f0));
+        saveSearchButton.setColour(juce::TextButton::textColourOffId, textColour);
+        deleteSavedSearchButton.setColour(juce::TextButton::buttonColourId, darkModeEnabled ? juce::Colour(0xff4d2b2b) : juce::Colour(0xfff2d7d7));
+        deleteSavedSearchButton.setColour(juce::TextButton::textColourOffId, textColour);
+
+        favoriteToggle.setColour(juce::ToggleButton::textColourId, textColour);
+
         resultsList.setColour(juce::ListBox::backgroundColourId, darkModeEnabled ? juce::Colour(0xff1e1e1e) : juce::Colour(0xfffafafa));
 
         repaint();
+    }
+
+    void ResultsPanel::updateMetadataControlState()
+    {
+        const bool hasSelectedFile = getSelectedRow() >= 0;
+        favoriteToggle.setEnabled(hasSelectedFile);
+        ratingSelector.setEnabled(hasSelectedFile);
+        tagsEditor.setEnabled(hasSelectedFile);
+        saveSearchButton.setEnabled(viewMode != ViewMode::Duplicates);
+        deleteSavedSearchButton.setEnabled(savedSearchSelector.getSelectedItemIndex() >= 0);
+    }
+
+    void ResultsPanel::commitTagsFromEditor()
+    {
+        if (suppressControlCallbacks || !tagsEditor.isEnabled())
+            return;
+
+        if (onSelectedFileTagsChanged)
+            onSelectedFileTagsChanged(splitTagsFromEditor(tagsEditor.getText()));
     }
 
     int ResultsPanel::getNumRows()
@@ -553,7 +829,12 @@ namespace sw
     {
         const auto *selectedFile = getResultAt(lastRowSelected);
         if (selectedFile == nullptr)
+        {
+            setSelectedFileMetadata(std::nullopt, {});
             return;
+        }
+
+        updateMetadataControlState();
 
         if (onFileSelected)
             onFileSelected(*selectedFile);

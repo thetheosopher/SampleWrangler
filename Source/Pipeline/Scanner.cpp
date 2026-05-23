@@ -1,4 +1,5 @@
 #include "Scanner.h"
+#include "AcpPresetReader.h"
 #include "RexManager.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <filesystem>
@@ -475,7 +476,7 @@ namespace sw
 
     bool Scanner::isPlayableExtension(const std::string &ext)
     {
-        if (ext == "wav" || ext == "aif" || ext == "aiff" || ext == "flac" || ext == "mp3")
+        if (ext == "wav" || ext == "aif" || ext == "aiff" || ext == "flac" || ext == "mp3" || ext == "ogg" || ext == "acp")
             return true;
 
         // REX/RX2 files are playable when the REX SDK is available;
@@ -652,7 +653,80 @@ namespace sw
 
                         std::vector<float> overviewPeaks;
 
-                        if (candidate.playable && isRexExtension(candidate.extension))
+                        if (candidate.playable && candidate.extension == "acp")
+                        {
+                            rec.codec = "Audiocity Preset";
+                            rec.bitrateKbps = std::nullopt;
+
+                            const juce::File presetFile(candidate.absolutePath.string());
+                            if (auto preset = AcpPresetReader::readPreset(presetFile))
+                            {
+                                rec.acidRootNote = preset->rootMidiNote;
+                                rec.loopStartSample = preset->loopStartSample;
+                                rec.loopEndSample = preset->loopEndSample;
+                                rec.bpm = preset->bpm;
+
+                                const bool hasExplicitLoopRegion = preset->loopStartSample.has_value() &&
+                                                                   preset->loopEndSample.has_value() &&
+                                                                   *preset->loopEndSample > *preset->loopStartSample;
+                                rec.loopType = (preset->loopPlayback || hasExplicitLoopRegion)
+                                                   ? std::optional<std::string>{"audiocity-preset-loop"}
+                                                   : std::optional<std::string>{"audiocity-preset"};
+
+                                if (preset->sampleRate > 0.0)
+                                    rec.sampleRate = static_cast<int>(std::round(preset->sampleRate));
+
+                                if (preset->channels > 0)
+                                    rec.channels = preset->channels;
+
+                                rec.totalSamples = preset->totalSamples;
+                                rec.durationSec = preset->durationSec;
+
+                                if (preset->embeddedSampleBuffer != nullptr && preset->embeddedSampleBuffer->getNumSamples() > 0)
+                                {
+                                    rec.channels = preset->embeddedSampleBuffer->getNumChannels();
+                                    rec.totalSamples = static_cast<int64_t>(preset->embeddedSampleBuffer->getNumSamples());
+                                    rec.bitDepth = 32;
+                                    if (rec.sampleRate.has_value() && *rec.sampleRate > 0)
+                                        rec.durationSec = static_cast<double>(*rec.totalSamples) / static_cast<double>(*rec.sampleRate);
+
+                                    if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen())
+                                        overviewPeaks = buildOverviewPeaks(*preset->embeddedSampleBuffer, 256);
+                                }
+                                else
+                                {
+                                    const auto referencedSample = AcpPresetReader::resolveReferencedSampleFile(presetFile, preset->externalSamplePath);
+                                    if (referencedSample.existsAsFile())
+                                    {
+                                        if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(referencedSample)))
+                                        {
+                                            rec.totalSamples = static_cast<int64_t>(reader->lengthInSamples);
+                                            rec.sampleRate = static_cast<int>(reader->sampleRate);
+                                            rec.channels = static_cast<int>(reader->numChannels);
+                                            rec.bitDepth = reader->bitsPerSample;
+                                            if (reader->sampleRate > 0.0)
+                                                rec.durationSec = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
+
+                                            if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen())
+                                                overviewPeaks = buildOverviewPeaks(*reader, 256);
+                                        }
+                                        else
+                                        {
+                                            rec.indexOnly = true;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        rec.indexOnly = true;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                rec.indexOnly = true;
+                            }
+                        }
+                        else if (candidate.playable && isRexExtension(candidate.extension))
                         {
                             // --- REX / RX2: use the REX SDK for metadata ---
                             const auto absStr = candidate.absolutePath.string();

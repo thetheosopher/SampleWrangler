@@ -112,6 +112,8 @@ set(PIPELINE_SOURCES
     Source/Pipeline/JobQueue.h
     Source/Pipeline/Scanner.cpp
     Source/Pipeline/Scanner.h
+    Source/Pipeline/AcpPresetReader.cpp
+    Source/Pipeline/AcpPresetReader.h
     Source/Pipeline/Analyzer.cpp
     Source/Pipeline/Analyzer.h
     Source/Pipeline/WaveformCache.cpp
@@ -472,11 +474,26 @@ add_executable(SampleWranglerWaveformPeakTests
     Source/Pipeline/WaveformPeak.cpp
 )
 
+add_executable(SampleWranglerAcpPresetReaderTests
+    Tests/AcpPresetReaderTests.cpp
+    Source/Pipeline/AcpPresetReader.cpp
+)
+
 target_include_directories(SampleWranglerWaveformPeakTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
 )
 
 target_link_libraries(SampleWranglerWaveformPeakTests PRIVATE
+    juce::juce_audio_basics
+)
+
+target_include_directories(SampleWranglerAcpPresetReaderTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source
+)
+
+target_link_libraries(SampleWranglerAcpPresetReaderTests PRIVATE
+    juce::juce_core
+    juce::juce_data_structures
     juce::juce_audio_basics
 )
 
@@ -517,7 +534,12 @@ if(MSVC)
         /NODEFAULTLIB:MSVCRT
         /NODEFAULTLIB:MSVCRTD
     )
+    target_link_options(SampleWranglerAcpPresetReaderTests PRIVATE
+        /NODEFAULTLIB:MSVCRT
+        /NODEFAULTLIB:MSVCRTD
+    )
 endif()
 
 add_test(NAME SampleWrangler.ScannerAppleLoop COMMAND SampleWranglerScannerAppleLoopTests)
 add_test(NAME SampleWrangler.WaveformPeak COMMAND SampleWranglerWaveformPeakTests)
+add_test(NAME SampleWrangler.AcpPresetReader COMMAND SampleWranglerAcpPresetReaderTests)

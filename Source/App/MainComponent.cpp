@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Pipeline/AcpPresetReader.h"
 #include "Pipeline/WaveformCache.h"
 #include "Util/Logging.h"
 #include "Util/Paths.h"
@@ -17,12 +18,21 @@ namespace sw
 
     namespace
     {
-        bool hasEmbeddedLoopMetadata(const FileRecord &file)
+        bool hasStoredPreviewLoopMetadata(const FileRecord &file)
         {
             if (!file.loopType.has_value())
                 return false;
 
-            return *file.loopType == "acidized" || *file.loopType == "apple-loop";
+            return *file.loopType == "acidized" || *file.loopType == "apple-loop" || *file.loopType == "audiocity-preset-loop";
+        }
+
+        bool hasStoredPreviewRootMidiNote(const FileRecord &file)
+        {
+            if (!file.loopType.has_value() || !file.acidRootNote.has_value())
+                return false;
+
+            return *file.loopType == "acidized" || *file.loopType == "apple-loop" ||
+                   *file.loopType == "audiocity-preset" || *file.loopType == "audiocity-preset-loop";
         }
 
         constexpr int kToolbarHeight = 48;
@@ -991,7 +1001,6 @@ namespace sw
             }
         };
         addAndMakeVisible(midiInputCombo);
-
         leftRightSplitter.onDragged = [this](int deltaPixels)
         {
             auto content = getLocalBounds();
@@ -2250,12 +2259,12 @@ namespace sw
         const uint64_t requestId = previewLoadRequestCounter.fetch_add(1, std::memory_order_acq_rel) + 1;
         const juce::String previewType = file.extension.empty() ? juce::String("file") : juce::String(file.extension).toUpperCase() + " file";
 
-        const bool hasLoopMetadata = hasEmbeddedLoopMetadata(file);
+        const bool hasLoopMetadata = hasStoredPreviewLoopMetadata(file);
         const bool hasValidEmbeddedLoopRegion = hasLoopMetadata && file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
                                                 *file.loopEndSample > *file.loopStartSample;
         const bool hasSampleLength = file.totalSamples.has_value() && *file.totalSamples > 1;
 
-        audioEngine.setPreviewRootMidiNote(hasLoopMetadata && file.acidRootNote.has_value() ? *file.acidRootNote : 60);
+        audioEngine.setPreviewRootMidiNote(hasStoredPreviewRootMidiNote(file) ? *file.acidRootNote : 60);
 
         if (hasLoopMetadata && hasValidEmbeddedLoopRegion)
         {
@@ -2338,6 +2347,37 @@ namespace sw
                                                         safeThis->showToolbarToast(message); });
                 };
 
+                auto buildPreviewPeaks = [](const juce::AudioBuffer<float> &previewBuffer, int numChannels)
+                {
+                    constexpr int targetPeakCount = 1600;
+                    const int numSamples = previewBuffer.getNumSamples();
+                    const int peakCount = std::max(1, std::min(targetPeakCount, numSamples));
+                    const int samplesPerPeak = std::max(1, numSamples / peakCount);
+
+                    auto peaks = std::make_shared<std::vector<std::vector<float>>>();
+                    peaks->resize(static_cast<size_t>(numChannels));
+                    for (auto &channelPeaks : *peaks)
+                        channelPeaks.resize(static_cast<size_t>(peakCount), 0.0f);
+
+                    for (int p = 0; p < peakCount; ++p)
+                    {
+                        const int start = p * samplesPerPeak;
+                        const int end = std::min(numSamples, start + samplesPerPeak);
+
+                        for (int ch = 0; ch < numChannels; ++ch)
+                        {
+                            float maxAbs = 0.0f;
+                            const auto *channelData = previewBuffer.getReadPointer(ch);
+                            for (int s = start; s < end; ++s)
+                                maxAbs = std::max(maxAbs, std::abs(channelData[s]));
+
+                            (*peaks)[static_cast<size_t>(ch)][static_cast<size_t>(p)] = maxAbs;
+                        }
+                    }
+
+                    return peaks;
+                };
+
                 if (cancelGeneration.load(std::memory_order_relaxed) != jobGeneration)
                 {
                     finishLoadingOnMessageThread();
@@ -2356,6 +2396,58 @@ namespace sw
                     return;
                 }
 
+                juce::File sourceFile(absolutePath);
+
+                if (fileExtension == "acp")
+                {
+                    auto preset = AcpPresetReader::readPreset(sourceFile);
+                    if (!preset.has_value())
+                    {
+                        failLoadingWithToastOnMessageThread("Unable to load preview for " + previewType + ": Audiocity preset is unreadable or unsupported.");
+                        return;
+                    }
+
+                    if (preset->embeddedSampleBuffer != nullptr && preset->embeddedSampleBuffer->getNumSamples() > 0)
+                    {
+                        const auto previewBuffer = preset->embeddedSampleBuffer;
+                        const int numChannels = std::max(1, previewBuffer->getNumChannels());
+                        auto peaks = buildPreviewPeaks(*previewBuffer, numChannels);
+                        const double sampleRate = preset->sampleRate > 0.0 ? preset->sampleRate : 44100.0;
+
+                        juce::MessageManager::callAsync([safeThis, previewBuffer, peaks, sampleRate, playWhenReady, absolutePath, requestId]
+                                                        {
+                            if (safeThis == nullptr)
+                                return;
+
+                            if (safeThis->previewLoadRequestCounter.load(std::memory_order_acquire) != requestId)
+                            {
+                                safeThis->setPreviewLoadingState(false, requestId);
+                                return;
+                            }
+
+                            safeThis->audioEngine.loadPreviewBuffer(previewBuffer, sampleRate);
+                            safeThis->updateWindowTitleForLoadedFile(absolutePath);
+                            safeThis->waveformPanel.setPeaks(*peaks);
+                            safeThis->waveformPanel.setPlayheadNormalized(0.0f);
+                            safeThis->updateWaveformLoopOverlay();
+                            safeThis->setPreviewLoadingState(false, requestId);
+                            if (playWhenReady)
+                            {
+                                safeThis->suppressAutoAdvanceAfterManualStop = false;
+                                safeThis->audioEngine.play();
+                            } });
+
+                        return;
+                    }
+
+                    sourceFile = AcpPresetReader::resolveReferencedSampleFile(sourceFile, preset->externalSamplePath);
+                    if (!sourceFile.existsAsFile())
+                    {
+                        failLoadingWithToastOnMessageThread("Unable to load preview for " + previewType + ": no embedded audio or readable external sample was found.");
+                        return;
+                    }
+                }
+
 #if SW_HAVE_REX
                 // --- REX / RX2 decode path ---
                 if (isRexExtension(fileExtension) && RexManager::isAvailable())
@@ -2369,33 +2461,9 @@ namespace sw
                     }
 
                     const int numChannels = rexBuffer->getNumChannels();
-                    const int numSamples = rexBuffer->getNumSamples();
                     auto previewBuffer = std::make_shared<juce::AudioBuffer<float>>(std::move(*rexBuffer));
 
-                    constexpr int targetPeakCount = 1600;
-                    const int peakCount = std::max(1, std::min(targetPeakCount, numSamples));
-                    const int samplesPerPeak = std::max(1, numSamples / peakCount);
-
-                    auto peaks = std::make_shared<std::vector<std::vector<float>>>();
-                    peaks->resize(static_cast<size_t>(numChannels));
-                    for (auto &channelPeaks : *peaks)
-                        channelPeaks.resize(static_cast<size_t>(peakCount), 0.0f);
-
-                    for (int p = 0; p < peakCount; ++p)
-                    {
-                        const int start = p * samplesPerPeak;
-                        const int end = std::min(numSamples, start + samplesPerPeak);
-
-                        for (int ch = 0; ch < numChannels; ++ch)
-                        {
-                            float maxAbs = 0.0f;
-                            const auto *channelData = previewBuffer->getReadPointer(ch);
-                            for (int s = start; s < end; ++s)
-                                maxAbs = std::max(maxAbs, std::abs(channelData[s]));
-
-                            (*peaks)[static_cast<size_t>(ch)][static_cast<size_t>(p)] = maxAbs;
-                        }
-                    }
+                    auto peaks = buildPreviewPeaks(*previewBuffer, numChannels);
 
                     const double sampleRate = rexSampleRate;
 
@@ -2434,7 +2502,6 @@ namespace sw
                     formatsRegistered = true;
                 }
 
-                juce::File sourceFile(absolutePath);
                 if (!sourceFile.existsAsFile())
                 {
                     failLoadingWithToastOnMessageThread("Unable to load preview for " + previewType + ": file is unavailable.");
@@ -2470,30 +2537,7 @@ namespace sw
                     return;
                 }
 
-                constexpr int targetPeakCount = 1600;
-                const int peakCount = std::max(1, std::min(targetPeakCount, numSamples));
-                const int samplesPerPeak = std::max(1, numSamples / peakCount);
-
-                auto peaks = std::make_shared<std::vector<std::vector<float>>>();
-                peaks->resize(static_cast<size_t>(numChannels));
-                for (auto &channelPeaks : *peaks)
-                    channelPeaks.resize(static_cast<size_t>(peakCount), 0.0f);
-
-                for (int p = 0; p < peakCount; ++p)
-                {
-                    const int start = p * samplesPerPeak;
-                    const int end = std::min(numSamples, start + samplesPerPeak);
-
-                    for (int ch = 0; ch < numChannels; ++ch)
-                    {
-                        float maxAbs = 0.0f;
-                        const auto *channelData = previewBuffer->getReadPointer(ch);
-                        for (int s = start; s < end; ++s)
-                            maxAbs = std::max(maxAbs, std::abs(channelData[s]));
-
-                        (*peaks)[static_cast<size_t>(ch)][static_cast<size_t>(p)] = maxAbs;
-                    }
-                }
+                auto peaks = buildPreviewPeaks(*previewBuffer, numChannels);
 
                 const double sampleRate = reader->sampleRate;
 
@@ -2545,7 +2589,7 @@ namespace sw
         }
 
         const auto &file = *currentSelectedFile;
-        if (hasEmbeddedLoopMetadata(file) &&
+        if (hasStoredPreviewLoopMetadata(file) &&
             file.totalSamples.has_value() && *file.totalSamples > 1 &&
             file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
             *file.loopEndSample > *file.loopStartSample)
@@ -2561,7 +2605,7 @@ namespace sw
             }
         }
 
-        if (hasEmbeddedLoopMetadata(file) &&
+        if (hasStoredPreviewLoopMetadata(file) &&
             file.totalSamples.has_value() && *file.totalSamples > 1)
         {
             waveformPanel.setLoopRegionNormalized(0.0f, 1.0f);

@@ -33,6 +33,7 @@ namespace
         file.sampleRate = 44100;
         file.channels = 2;
         file.bitDepth = 16;
+        file.contentHash = "hash-a";
 
         if (!db.upsertFile(file))
             return false;
@@ -48,7 +49,105 @@ namespace
         if (!byId.has_value())
             return false;
 
-        return byId->sampleRate.has_value() && *byId->sampleRate == 44100;
+        return byId->sampleRate.has_value() && *byId->sampleRate == 44100 &&
+               byId->contentHash.has_value() && *byId->contentHash == "hash-a";
+    }
+
+    bool testDuplicateFileLookup(sw::CatalogDb &db)
+    {
+        const auto roots = db.allRoots();
+        if (roots.empty())
+            return false;
+
+        sw::FileRecord duplicateA;
+        duplicateA.rootId = roots.front().id;
+        duplicateA.relativePath = "Drums/Snare01.wav";
+        duplicateA.filename = "Snare01.wav";
+        duplicateA.extension = "wav";
+        duplicateA.sizeBytes = 2048;
+        duplicateA.modifiedTime = 1700000100;
+        duplicateA.contentHash = "duplicate-hash";
+
+        sw::FileRecord duplicateB = duplicateA;
+        duplicateB.relativePath = "Drums/Snare01-copy.wav";
+        duplicateB.filename = "Snare01-copy.wav";
+        duplicateB.modifiedTime = 1700000200;
+
+        sw::FileRecord unique = duplicateA;
+        unique.relativePath = "Drums/Unique.wav";
+        unique.filename = "Unique.wav";
+        unique.modifiedTime = 1700000300;
+        unique.contentHash = "unique-hash";
+
+        if (!db.upsertFile(duplicateA) || !db.upsertFile(duplicateB) || !db.upsertFile(unique))
+            return false;
+
+        const auto duplicates = db.listDuplicateFiles();
+        if (duplicates.size() != 2)
+            return false;
+
+        return duplicates[0].contentHash.has_value() && *duplicates[0].contentHash == "duplicate-hash" &&
+               duplicates[1].contentHash.has_value() && *duplicates[1].contentHash == "duplicate-hash";
+    }
+
+    bool testFileUserMetadataAndSavedSearches(sw::CatalogDb &db)
+    {
+        const auto roots = db.allRoots();
+        if (roots.empty())
+            return false;
+
+        const auto file = db.fileByRootAndRelativePath(roots.front().id, "Drums/Kick01.wav");
+        if (!file.has_value())
+            return false;
+
+        sw::FileUserDataRecord userData;
+        userData.fileId = file->id;
+        userData.isFavorite = true;
+        userData.rating = 5;
+
+        if (!db.setFileUserData(userData))
+            return false;
+
+        const auto fetchedUserData = db.fileUserDataByFileId(file->id);
+        if (!fetchedUserData.has_value() || !fetchedUserData->isFavorite || !fetchedUserData->rating.has_value() || *fetchedUserData->rating != 5)
+            return false;
+
+        if (!db.replaceFileTags(file->id, {" Drum ", "One Shot", "drum"}))
+            return false;
+
+        const auto fileTags = db.tagsForFile(file->id);
+        if (fileTags.size() != 2 || fileTags[0] != "drum" || fileTags[1] != "one shot")
+            return false;
+
+        const auto allTags = db.allTags();
+        if (allTags.size() != 2)
+            return false;
+
+        const auto favoriteFiles = db.listFavoriteFiles();
+        if (favoriteFiles.size() != 1 || favoriteFiles.front().id != file->id)
+            return false;
+
+        sw::SavedSearchRecord savedSearch;
+        savedSearch.name = "Favorite Kicks";
+        savedSearch.queryText = "Kick";
+        savedSearch.rootId = roots.front().id;
+        savedSearch.favoritesOnly = true;
+
+        if (!db.upsertSavedSearch(savedSearch))
+            return false;
+
+        auto savedSearches = db.listSavedSearches();
+        if (savedSearches.size() != 1)
+            return false;
+
+        if (savedSearches.front().name != "Favorite Kicks" || !savedSearches.front().favoritesOnly)
+            return false;
+
+        if (!db.removeSavedSearch(savedSearches.front().id))
+            return false;
+
+        savedSearches = db.listSavedSearches();
+        return savedSearches.empty();
     }
 
     bool testSettings(sw::CatalogDb &db)
@@ -110,6 +209,18 @@ int main()
     if (!testSettings(db))
     {
         std::cerr << "testSettings failed.\n";
+        return 1;
+    }
+
+    if (!testDuplicateFileLookup(db))
+    {
+        std::cerr << "testDuplicateFileLookup failed.\n";
+        return 1;
+    }
+
+    if (!testFileUserMetadataAndSavedSearches(db))
+    {
+        std::cerr << "testFileUserMetadataAndSavedSearches failed.\n";
         return 1;
     }
 

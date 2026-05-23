@@ -43,10 +43,29 @@ namespace sw
         std::optional<int> acidBeats;
         std::optional<int64_t> loopStartSample;
         std::optional<int64_t> loopEndSample;
-        std::optional<int> sliceCount; // REX/RX2 slice count
+        std::optional<int> sliceCount;          // REX/RX2 slice count
+        std::optional<std::string> contentHash; // sampled content fingerprint for duplicate detection
 
         /// True if this format is index-only (REX, NKI, SFZ) and cannot be auditioned.
         bool indexOnly = false;
+    };
+
+    /// User-authored metadata that should survive rescans.
+    struct FileUserDataRecord
+    {
+        int64_t fileId = 0;
+        bool isFavorite = false;
+        std::optional<int> rating; // 1-5 when set
+    };
+
+    /// Persisted search preset for quick recall.
+    struct SavedSearchRecord
+    {
+        int64_t id = 0;
+        std::string name;
+        std::string queryText;
+        std::optional<int64_t> rootId;
+        bool favoritesOnly = false;
     };
 
     /// Preview-settings snapshot stored per preview session or globally.

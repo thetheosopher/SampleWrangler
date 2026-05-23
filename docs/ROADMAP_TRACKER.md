@@ -34,8 +34,12 @@ Build the most compelling desktop sample librarian possible while complementing 
 
 - `SampleWrangler` builds successfully with CMake Tools.
 - `SampleWranglerAcpPresetReaderTests` builds successfully.
+- `SampleWranglerCatalogDbTests` builds successfully and covers `content_hash`, favorites/ratings/tags, duplicate lookup, and saved searches.
+- `SampleWranglerScannerAppleLoopTests` builds successfully.
+- `SampleWranglerWaveformPeakTests` passes in CTest.
+- CTest passes all four current tests (`CatalogDb`, `ScannerAppleLoop`, `WaveformPeak`, `AcpPresetReader`).
 - Remaining build warnings are pre-existing JUCE display deprecation warnings in `Source/App/MainComponent.cpp`.
-- CMake Tools test execution previously returned a generic extension-level failure when invoked without explicit test selection; re-run with the discovered test list if needed.
+- CMake Tools still emits missing `DartConfiguration.tcl` warnings during test execution, but the tests themselves pass.
 
 ## Full Roadmap
 
@@ -51,11 +55,11 @@ Status: Complete
 
 ### Sprint B: Catalog and Library Intelligence Foundation
 
-Status: Not started
+Status: In progress
 
-- Introduce `PRAGMA user_version` schema migrations.
-- Add `content_hash` or near-duplicate hash for duplicate detection and move resilience.
-- Add favorites, ratings, tags, and saved searches.
+- Introduce `PRAGMA user_version` schema migrations. Done.
+- Add `content_hash` or near-duplicate hash for duplicate detection and move resilience. Storage, scanner ingestion, and duplicate-query foundation are done.
+- Add favorites, ratings, tags, and saved searches. Database foundation is done; UI/query integration is still pending.
 - Consolidate waveform cache persistence strategy if the file-based and blob-based systems remain redundant.
 - Add source-folder live watching on Windows.
 
@@ -138,11 +142,20 @@ Status: Partially started through `.acp` preview support
 
 ## Suggested Next Session Order
 
-1. Run the explicit CMake test list and add focused tests around the new audio-engine changes if the harness allows it.
-2. Start Sprint B with schema migrations and duplicate/hash support.
-3. Add tags/favorites/saved searches so the catalog becomes meaningfully more usable.
+1. Continue Sprint B by wiring favorites, ratings, tags, and saved searches into the browser/results UI.
+2. Expose duplicate-file browsing/workflows using the new `content_hash` foundation.
+3. Add source-folder live watching on Windows.
 4. Begin Sprint C with SFZ and DecentSampler because they provide the best format-value/effort ratio.
 5. Add Audiocity handoff actions once the catalog can browse both raw samples and `.acp` presets reliably.
+
+## Sprint B Progress Notes
+
+- Catalog schema evolution now uses `PRAGMA user_version` migrations instead of only ad hoc `ALTER TABLE` checks.
+- The `files` table stores `content_hash` and indexes it.
+- Scanner ingestion computes a sampled content fingerprint from file size plus the first/last 64 KB.
+- `CatalogDb::listDuplicateFiles()` is available for future duplicate-browser UI work.
+- Favorites, ratings, tags, and saved searches now persist in dedicated catalog tables so rescans do not overwrite user-authored metadata.
+- Browser/search UI for those metadata features and live watching are still pending.
 
 ## Files Touched in Sprint A
 

@@ -48,12 +48,22 @@ namespace sw
         std::vector<FileRecord> listRecentFiles(int limit = 200);
         std::vector<FileRecord> searchFilesByRoot(int64_t rootId, const std::string &query, int limit = 200);
         std::vector<FileRecord> listRecentFilesByRoot(int64_t rootId, int limit = 200);
+        std::vector<FileRecord> listDuplicateFiles(int limit = 200);
         std::pair<int64_t, int64_t> fileStatsAll();
         std::pair<int64_t, int64_t> fileStatsByRoot(int64_t rootId);
         std::pair<int64_t, int64_t> fileStatsSearch(const std::string &query);
         std::pair<int64_t, int64_t> fileStatsSearchByRoot(int64_t rootId, const std::string &query);
         std::optional<FileRecord> fileById(int64_t fileId);
         std::optional<FileRecord> fileByRootAndRelativePath(int64_t rootId, const std::string &relativePath);
+        std::vector<FileRecord> listFavoriteFiles(int limit = 200);
+        bool setFileUserData(const FileUserDataRecord &userData);
+        std::optional<FileUserDataRecord> fileUserDataByFileId(int64_t fileId);
+        bool replaceFileTags(int64_t fileId, const std::vector<std::string> &tags);
+        std::vector<std::string> tagsForFile(int64_t fileId);
+        std::vector<std::string> allTags(int limit = 200);
+        bool upsertSavedSearch(const SavedSearchRecord &savedSearch);
+        std::vector<SavedSearchRecord> listSavedSearches();
+        bool removeSavedSearch(int64_t savedSearchId);
 
         // ----- App settings -----
         bool setAppSetting(const std::string &key, const std::string &value);

@@ -1,6 +1,7 @@
 #include "Scanner.h"
 #include "AcpPresetReader.h"
 #include "RexManager.h"
+#include "Util/Hashing.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <filesystem>
 #include <algorithm>
@@ -29,24 +30,58 @@ namespace sw
                                       int64_t sizeBytes,
                                       int64_t modifiedTime)
         {
-            const std::string input = std::to_string(rootId) + "|" +
-                                      relativePath + "|" +
-                                      std::to_string(sizeBytes) + "|" +
-                                      std::to_string(modifiedTime);
+            return hashString(std::to_string(rootId) + "|" +
+                              relativePath + "|" +
+                              std::to_string(sizeBytes) + "|" +
+                              std::to_string(modifiedTime));
+        }
 
-            constexpr uint64_t fnvOffset = 14695981039346656037ULL;
-            constexpr uint64_t fnvPrime = 1099511628211ULL;
+        std::optional<std::string> buildContentHash(const std::filesystem::path &path, int64_t sizeBytes)
+        {
+            constexpr std::streamsize kSampleBytes = 64 * 1024;
 
-            uint64_t hash = fnvOffset;
-            for (char c : input)
+            std::ifstream in(path, std::ios::binary);
+            if (!in)
+                return std::nullopt;
+
+            std::string fingerprint;
+            fingerprint.reserve(static_cast<size_t>(std::min<int64_t>(sizeBytes, static_cast<int64_t>(kSampleBytes * 2))) + 64);
+            fingerprint.append(std::to_string(sizeBytes));
+            fingerprint.push_back('|');
+
+            std::vector<char> buffer(static_cast<size_t>(kSampleBytes));
+            const auto appendChunk = [&](std::streamoff offset, std::streamsize requestedBytes)
             {
-                hash ^= static_cast<uint64_t>(static_cast<unsigned char>(c));
-                hash *= fnvPrime;
+                in.clear();
+                in.seekg(offset, std::ios::beg);
+                if (!in.good())
+                    return false;
+
+                in.read(buffer.data(), requestedBytes);
+                const auto bytesRead = in.gcount();
+                if (bytesRead <= 0)
+                    return false;
+
+                fingerprint.append(buffer.data(), static_cast<size_t>(bytesRead));
+                fingerprint.push_back('|');
+                return true;
+            };
+
+            if (sizeBytes <= static_cast<int64_t>(kSampleBytes * 2))
+            {
+                if (!appendChunk(0, static_cast<std::streamsize>(sizeBytes)))
+                    return std::nullopt;
+            }
+            else
+            {
+                if (!appendChunk(0, kSampleBytes))
+                    return std::nullopt;
+
+                if (!appendChunk(static_cast<std::streamoff>(sizeBytes - kSampleBytes), kSampleBytes))
+                    return std::nullopt;
             }
 
-            char out[17]{};
-            std::snprintf(out, sizeof(out), "%016llx", static_cast<unsigned long long>(hash));
-            return std::string(out);
+            return hashString(fingerprint);
         }
 
         std::vector<float> buildOverviewPeaks(juce::AudioFormatReader &reader, int targetPeakCount)
@@ -650,6 +685,9 @@ namespace sw
                             std::chrono::duration_cast<std::chrono::seconds>(
                                 ftime.time_since_epoch())
                                 .count());
+
+                        if (!fileEc)
+                            rec.contentHash = buildContentHash(candidate.absolutePath, rec.sizeBytes);
 
                         std::vector<float> overviewPeaks;
 

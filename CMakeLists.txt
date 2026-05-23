@@ -468,6 +468,7 @@ add_executable(SampleWranglerScannerAppleLoopTests
     Source/Catalog/CatalogDb.cpp
     Source/Catalog/WaveCacheBlobDb.cpp
     Source/Catalog/CatalogSchema.cpp
+    Source/Util/Hashing.cpp
 )
 
 add_executable(SampleWranglerWaveformPeakTests

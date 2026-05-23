@@ -7,9 +7,9 @@
     },
     "configurePresets": [
         {
-            "name": "vs2022-debug",
-            "displayName": "VS 2022 Debug",
-            "generator": "Visual Studio 17 2022",
+            "name": "vs2026-debug",
+            "displayName": "VS 2026 Debug",
+            "generator": "Visual Studio 18 2026",
             "architecture": {
                 "value": "x64",
                 "strategy": "set"
@@ -22,9 +22,9 @@
             }
         },
         {
-            "name": "vs2022-release",
-            "displayName": "VS 2022 Release",
-            "generator": "Visual Studio 17 2022",
+            "name": "vs2026-release",
+            "displayName": "VS 2026 Release",
+            "generator": "Visual Studio 18 2026",
             "architecture": {
                 "value": "x64",
                 "strategy": "set"
@@ -37,9 +37,9 @@
             }
         },
         {
-            "name": "vs2022-debug-nohq",
-            "displayName": "VS 2022 Debug (No HQ Stretch)",
-            "generator": "Visual Studio 17 2022",
+            "name": "vs2026-debug-nohq",
+            "displayName": "VS 2026 Debug (No HQ Stretch)",
+            "generator": "Visual Studio 18 2026",
             "architecture": {
                 "value": "x64",
                 "strategy": "set"
@@ -51,9 +51,9 @@
             }
         },
         {
-            "name": "vs2022-release-nohq",
-            "displayName": "VS 2022 Release (No HQ Stretch)",
-            "generator": "Visual Studio 17 2022",
+            "name": "vs2026-release-nohq",
+            "displayName": "VS 2026 Release (No HQ Stretch)",
+            "generator": "Visual Studio 18 2026",
             "architecture": {
                 "value": "x64",
                 "strategy": "set"
@@ -67,47 +67,47 @@
     ],
     "buildPresets": [
         {
-            "name": "vs2022-debug",
-            "configurePreset": "vs2022-debug",
+            "name": "vs2026-debug",
+            "configurePreset": "vs2026-debug",
             "configuration": "Debug"
         },
         {
-            "name": "vs2022-release",
-            "configurePreset": "vs2022-release",
+            "name": "vs2026-release",
+            "configurePreset": "vs2026-release",
             "configuration": "Release"
         },
         {
-            "name": "vs2022-debug-nohq",
-            "configurePreset": "vs2022-debug-nohq",
+            "name": "vs2026-debug-nohq",
+            "configurePreset": "vs2026-debug-nohq",
             "configuration": "Debug"
         },
         {
-            "name": "vs2022-release-nohq",
-            "configurePreset": "vs2022-release-nohq",
+            "name": "vs2026-release-nohq",
+            "configurePreset": "vs2026-release-nohq",
             "configuration": "Release"
         },
         {
-            "name": "vs2022-release-portable-zip",
-            "displayName": "VS 2022 Release Portable ZIP",
-            "configurePreset": "vs2022-release",
+            "name": "vs2026-release-portable-zip",
+            "displayName": "VS 2026 Release Portable ZIP",
+            "configurePreset": "vs2026-release",
             "configuration": "Release",
             "targets": [
                 "SampleWranglerPortableZip"
             ]
         },
         {
-            "name": "vs2022-release-inno-setup",
-            "displayName": "VS 2022 Release Inno Setup Installer",
-            "configurePreset": "vs2022-release",
+            "name": "vs2026-release-inno-setup",
+            "displayName": "VS 2026 Release Inno Setup Installer",
+            "configurePreset": "vs2026-release",
             "configuration": "Release",
             "targets": [
                 "SampleWranglerInnoSetup"
             ]
         },
         {
-            "name": "vs2022-release-artifacts",
-            "displayName": "VS 2022 Release Artifacts (Inno+ZIP)",
-            "configurePreset": "vs2022-release",
+            "name": "vs2026-release-artifacts",
+            "displayName": "VS 2026 Release Artifacts (Inno+ZIP)",
+            "configurePreset": "vs2026-release",
             "configuration": "Release",
             "targets": [
                 "SampleWranglerReleaseArtifacts"

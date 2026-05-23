@@ -2,8 +2,8 @@
 
 ## Prerequisites
 
-- **Visual Studio 2022** (Build Tools or full IDE) with the **Desktop C++** workload (MSVC toolchain)
-- **CMake 3.15+** (ships with VS 2022, or install separately)
+- **Visual Studio 2026** (Build Tools or full IDE) with the **Desktop C++** workload (MSVC toolchain)
+- **CMake 3.15+** (ships with VS 2026, or install separately)
 - **Git**
 - **VS Code** + recommended extensions (see `.vscode/extensions.json`)
 
@@ -22,22 +22,22 @@ Note: Windows builds are configured to statically link the MSVC C runtime (`/MT`
 ### Debug
 
 ```bash
-cmake --preset vs2022-debug
-cmake --build --preset vs2022-debug
+cmake --preset vs2026-debug
+cmake --build --preset vs2026-debug
 ```
 
 ### Release
 
 ```bash
-cmake --preset vs2022-release
-cmake --build --preset vs2022-release
+cmake --preset vs2026-release
+cmake --build --preset vs2026-release
 ```
 
 ### Release artifacts (installer + portable ZIP)
 
 ```bash
-cmake --preset vs2022-release
-cmake --build --preset vs2022-release-artifacts
+cmake --preset vs2026-release
+cmake --build --preset vs2026-release-artifacts
 ```
 
 This creates an Inno Setup 6 installer and a portable ZIP in one run.
@@ -46,7 +46,7 @@ If Inno Setup 6 is not auto-detected, set `SW_INNO_SETUP_COMPILER` to the full p
 Package artifacts are written under:
 
 ```text
-build/vs2022-release/packages/
+build/vs2026-release/packages/
 ```
 
 ### Installer options (Inno Setup)
@@ -62,15 +62,15 @@ Both shortcut options are optional installer tasks.
 ### Portable ZIP only
 
 ```bash
-cmake --preset vs2022-release
-cmake --build --preset vs2022-release-portable-zip
+cmake --preset vs2026-release
+cmake --build --preset vs2026-release-portable-zip
 ```
 
 ### Installer only
 
 ```bash
-cmake --preset vs2022-release
-cmake --build --preset vs2022-release-inno-setup
+cmake --preset vs2026-release
+cmake --build --preset vs2026-release-inno-setup
 ```
 
 ### Preset cache recovery (VS instance changed)
@@ -78,37 +78,37 @@ cmake --build --preset vs2022-release-inno-setup
 If you see an error like "could not find specified instance of Visual Studio", the build cache is pinned to an old VS installation. Reset it with:
 
 ```bash
-rm -r build/vs2022-debug
-cmake --preset vs2022-debug
-cmake --build --preset vs2022-debug
+rm -r build/vs2026-debug
+cmake --preset vs2026-debug
+cmake --build --preset vs2026-debug
 ```
 
 PowerShell equivalent:
 
 ```powershell
-Remove-Item -Recurse -Force "build/vs2022-debug"
-cmake --preset vs2022-debug
-cmake --build --preset vs2022-debug
+Remove-Item -Recurse -Force "build/vs2026-debug"
+cmake --preset vs2026-debug
+cmake --build --preset vs2026-debug
 ```
 
 The executable is written to:
 
 ```text
-build/vs2022-debug/SampleWrangler_artefacts/Debug/SampleWrangler.exe      (Debug)
-build/vs2022-release/SampleWrangler_artefacts/Release/SampleWrangler.exe  (Release)
+build/vs2026-debug/SampleWrangler_artefacts/Debug/SampleWrangler.exe      (Debug)
+build/vs2026-release/SampleWrangler_artefacts/Release/SampleWrangler.exe  (Release)
 ```
 
 The packaged release artifacts are written to:
 
 ```text
-build/vs2022-release/packages/SampleWrangler-1.0.0-win64-setup.exe
-build/vs2022-release/packages/SampleWrangler-1.0.0-win64-portable.zip
+build/vs2026-release/packages/SampleWrangler-1.0.0-win64-setup.exe
+build/vs2026-release/packages/SampleWrangler-1.0.0-win64-portable.zip
 ```
 
 ## Run
 
 ```bash
-.\build\vs2022-debug\SampleWrangler_artefacts\Debug\SampleWrangler.exe
+.\build\vs2026-debug\SampleWrangler_artefacts\Debug\SampleWrangler.exe
 ```
 
 Or press **F5** in VS Code (the launch config is pre-configured).
@@ -124,7 +124,7 @@ Stretch HQ uses **Rubber Band Library v4** (GPL), included as a git submodule in
 
 ### Setup
 
-The standard presets (`vs2022-debug` and `vs2022-release`) build Rubber Band from source automatically. If you cloned this repo without `--recursive`, initialize the submodule:
+The standard presets (`vs2026-debug` and `vs2026-release`) build Rubber Band from source automatically. If you cloned this repo without `--recursive`, initialize the submodule:
 
 ```powershell
 git submodule update --init third_party/rubberband
@@ -133,8 +133,8 @@ git submodule update --init third_party/rubberband
 Then configure and build:
 
 ```powershell
-cmake --preset vs2022-debug
-cmake --build --preset vs2022-debug
+cmake --preset vs2026-debug
+cmake --build --preset vs2026-debug
 ```
 
 Rubber Band is built as a static library from the single-file source (`single/RubberBandSingle.cpp`) and linked into SampleWrangler.
@@ -145,15 +145,15 @@ Release artifacts are also statically linked to the MSVC runtime; the REX SDK DL
 If you prefer to build without Rubber Band (granular stretch only), use the `-nohq` presets:
 
 ```bash
-cmake --preset vs2022-debug-nohq
-cmake --build --preset vs2022-debug-nohq
+cmake --preset vs2026-debug-nohq
+cmake --build --preset vs2026-debug-nohq
 ```
 
 or release:
 
 ```bash
-cmake --preset vs2022-release-nohq
-cmake --build --preset vs2022-release-nohq
+cmake --preset vs2026-release-nohq
+cmake --build --preset vs2026-release-nohq
 ```
 
 These disable Rubber Band at configure time.

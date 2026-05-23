@@ -23,8 +23,8 @@ Use this checklist before creating a shareable source archive.
   - `JUCE/`
   - `REXSDK_Win_1.9.2/`
 - Optional release artifacts (if you want to distribute installers with the archive):
-  - `build/vs2022-release/packages/SampleWrangler-*-win64-setup.exe`
-  - `build/vs2022-release/packages/SampleWrangler-*-win64-portable.zip`
+  - `build/vs2026-release/packages/SampleWrangler-*-win64-setup.exe`
+  - `build/vs2026-release/packages/SampleWrangler-*-win64-portable.zip`
 
 ## Exclude From Archive
 

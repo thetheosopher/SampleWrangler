@@ -104,7 +104,7 @@ If you find SampleWrangler useful and want to support continued development, you
 | Requirement   | Version                                |
 | ------------- | -------------------------------------- |
 | Windows       | 10+                                    |
-| Visual Studio | 2022 with Desktop C++ workload         |
+| Visual Studio | 2026 with Desktop C++ workload         |
 | CMake         | 3.15+                                  |
 | Git           | Any recent version                     |
 
@@ -125,22 +125,22 @@ git submodule update --init --recursive
 Configure and build:
 
 ```bash
-cmake --preset vs2022-debug
-cmake --build --preset vs2022-debug
+cmake --preset vs2026-debug
+cmake --build --preset vs2026-debug
 ```
 
 Run the application:
 
 ```bash
-.\build\vs2022-debug\SampleWrangler_artefacts\Debug\SampleWrangler.exe
+.\build\vs2026-debug\SampleWrangler_artefacts\Debug\SampleWrangler.exe
 ```
 
 For a release build:
 
 ```bash
-cmake --preset vs2022-release
-cmake --build --preset vs2022-release
-.\build\vs2022-release\SampleWrangler_artefacts\Release\SampleWrangler.exe
+cmake --preset vs2026-release
+cmake --build --preset vs2026-release
+.\build\vs2026-release\SampleWrangler_artefacts\Release\SampleWrangler.exe
 ```
 
 ---
@@ -149,12 +149,12 @@ cmake --build --preset vs2022-release
 
 | Preset                 | Configuration | Rubber Band HQ Stretch |
 | ---------------------- | :-----------: | :--------------------: |
-| `vs2022-debug`         |     Debug     |         Enabled        |
-| `vs2022-release`       |    Release    |         Enabled        |
-| `vs2022-debug-nohq`    |     Debug     |        Disabled        |
-| `vs2022-release-nohq`  |    Release    |        Disabled        |
+| `vs2026-debug`         |     Debug     |         Enabled        |
+| `vs2026-release`       |    Release    |         Enabled        |
+| `vs2026-debug-nohq`    |     Debug     |        Disabled        |
+| `vs2026-release-nohq`  |    Release    |        Disabled        |
 
-All presets target **x64** with the Visual Studio 17 2022 generator. The MSVC runtime is statically linked (`/MT` / `/MTd`).
+All presets target **x64** with the Visual Studio 18 2026 generator. The MSVC runtime is statically linked (`/MT` / `/MTd`).
 
 Rubber Band Library v4 (GPL) is included as a git submodule in `third_party/rubberband`. If you cloned without `--recursive`, initialize it with:
 
@@ -171,14 +171,14 @@ Use the `-nohq` presets to build without Rubber Band (granular stretch only).
 To create both release artifacts:
 
 ```bash
-cmake --preset vs2022-release
-cmake --build --preset vs2022-release-artifacts
+cmake --preset vs2026-release
+cmake --build --preset vs2026-release-artifacts
 ```
 
 This produces:
 
-- `build/vs2022-release/packages/SampleWrangler-1.0.0-win64-setup.exe`
-- `build/vs2022-release/packages/SampleWrangler-1.0.0-win64-portable.zip`
+- `build/vs2026-release/packages/SampleWrangler-1.0.0-win64-setup.exe`
+- `build/vs2026-release/packages/SampleWrangler-1.0.0-win64-portable.zip`
 
 The app executable, installer, and portable artifact are versioned as `1.0.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
 
@@ -187,8 +187,8 @@ The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php) an
 If Inno Setup 6 is not auto-detected, set `SW_INNO_SETUP_COMPILER` to the full path of `ISCC.exe` when configuring. If you only want the portable ZIP, build:
 
 ```bash
-cmake --preset vs2022-release
-cmake --build --preset vs2022-release-portable-zip
+cmake --preset vs2026-release
+cmake --build --preset vs2026-release-portable-zip
 ```
 
 Release artifacts are statically linked where possible. The only unavoidable external runtime dependency currently shipped beside the executable is the REX SDK DLL when REX support is enabled.
@@ -208,7 +208,7 @@ The repository includes lightweight native tests for non-audio modules:
 After building, run with CTest:
 
 ```bash
-ctest --test-dir build/vs2022-debug -C Debug
+ctest --test-dir build/vs2026-debug -C Debug
 ```
 
 ---
@@ -262,7 +262,7 @@ This project is licensed under the [MIT License](LICENSE.txt).
 
 > **Third-party licenses:** JUCE is dual-licensed (GPLv3 / commercial). Rubber Band Library is GPL unless commercially licensed. See each submodule for details.
 
-- CMake presets for Visual Studio 2022
+- CMake presets for Visual Studio 2026
 - Rubber Band v4 for optional high-quality stretch
 - Propellerhead REX SDK integration for REX and RX2 support
 

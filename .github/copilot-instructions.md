@@ -28,7 +28,7 @@ When writing audio callback code:
 ## Build/Run (Windows)
 Use CMake Presets (CMakePresets.json).
 Typical workflow:
-- Configure preset (e.g., `vs2022-debug`)
+- Configure preset (e.g., `vs2026-debug`)
 - Build preset
 - Run the built executable from the preset build output folder
 

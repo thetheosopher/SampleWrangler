@@ -34,11 +34,12 @@ Build the most compelling desktop sample librarian possible while complementing 
 
 - `SampleWrangler` builds successfully with CMake Tools.
 - The current sampler-engine follow-up build is clean after moving Rubber Band state and helpers out of `Source/Audio/Voice.h` into `Source/Audio/Voice.cpp` and tightening the preserve-length render path.
+- `SampleWranglerVoiceManagerRenderTests` now builds successfully and gives the sampler engine an offline render harness that exercises primary playback completion, looping, scrub resets, preserve-length duration behavior, source-sample-rate handling, fresh-start HQ preserve-length playback, and deterministic live HQ-toggle deferral to the next note through the public `VoiceManager` API.
 - `SampleWranglerAcpPresetReaderTests` builds successfully.
 - `SampleWranglerCatalogDbTests` builds successfully and now also round-trip the indexed preset summary fields (`preset_name`, `zone_count`, `key_low/high`, `velocity_low/high`).
 - `SampleWranglerScannerAppleLoopTests` builds successfully and now covers Apple Loop AIFF metadata plus indexed SFZ, Bitwig `.multisample`, Korg `.korgmultisample`, SoundFont `.sf2`, DecentSampler `.dspreset`, TAL `.talsmpl`, and TX16Wx `.txprog` preset ingestion.
 - `SampleWranglerWaveformPeakTests` passes in CTest.
-- CTest passes all four current tests (`CatalogDb`, `ScannerAppleLoop`, `WaveformPeak`, `AcpPresetReader`).
+- CTest now passes all five current tests (`CatalogDb`, `ScannerAppleLoop`, `WaveformPeak`, `AcpPresetReader`, `VoiceManagerRender`).
 - The JUCE display deprecation warnings in `Source/App/MainComponent.cpp` are resolved.
 - The CMake/CTest `DartConfiguration.tcl` warning is resolved by using `include(CTest)`.
 
@@ -140,17 +141,23 @@ Status: Partially started through `.acp` preview support
   - The non-Rubber-Band granular fallback now uses a smoother shaped grain crossfade instead of a raw linear blend.
   - Rubber Band state and helper machinery now live behind a `Voice.cpp` implementation object instead of inflating `Voice.h`.
   - The active Rubber Band RT render path now updates pitch scale through the real chunked preserve-length path.
+  - The non-Rubber-Band preserve-length fallback now advances its source anchor using the natural source-rate step (`bufferSampleRate / currentSampleRate`) instead of assuming a 1:1 file/output rate.
+  - Preserve-length HQ mode is now latched per note, so changing the HQ setting during active playback defers the render-mode change to the next note instead of attempting to hot-switch between granular and Rubber Band paths mid-stream.
   - The granular preserve-length fallback now caches mixed source samples per frame before fanning them out to output channels, avoiding repeated interpolation reads for mono/stereo previews.
+  - The granular preserve-length fallback now also uses mono/stereo-specific output fanout in the common 1- and 2-channel cases, removing another per-sample channel-mapping layer from that hot path.
+  - The faded non-preserve direct path now caches interpolated source samples per frame before distributing them to output channels, removing another repeated-read path during attack/release playback.
+  - When Rubber Band RT cannot produce startup output before a short clip is exhausted, the current note now degrades to the granular preserve-length path instead of failing silently.
   - Consider further SIMD/vectorized mixing for steady-state spans.
   - Consider pushing fixed-phase accumulation further into the remaining non-steady-state paths if profiling shows it is worth the extra complexity.
-- Add a dedicated offline render-test harness for `VoiceManager` so future sampler-engine work is not validated by app builds alone.
+- If true in-flight HQ/Rubber Band switching is ever required, design it explicitly as a crossfade or note re-arm flow; the current contract is deterministic deferral to the next note.
+- Extend the offline `VoiceManager` render tests further with preserve-length loop edge cases, short-clip HQ latency behavior, and any future true in-flight mode-switch design if that becomes a product goal.
 - The `MainComponent` class is still large and could eventually be split into controller/state pieces.
 
 ## Suggested Next Session Order
 
 1. Keep Sprint C paused for now and continue sampler-core work by profiling the remaining render paths for additional steady-state SIMD/vector opportunities.
 2. Revisit the non-Rubber-Band preserve-length fallback after listening tests and profiling, especially around grain sizing, spacing, and any further fixed-phase opportunities.
-3. Add a narrow offline render-test harness for `VoiceManager` so sampler-engine changes can be validated without relying only on builds and manual listening.
+3. Extend the offline `VoiceManager` harness with preserve-length loop edge cases and any remaining short-clip HQ latency assertions before attempting more invasive render-path changes.
 4. Resume Sprint C only after the sampler engine slice is stable enough to support more ambitious preview workflows.
 5. Expose richer preset-specific metadata in the UI beyond the new summary row once format breadth work resumes.
 
@@ -184,6 +191,7 @@ Status: Partially started through `.acp` preview support
 - `Source/Audio/VoiceManager.h`
 - `Source/Audio/VoiceManager.cpp`
 - `Source/UI/PreviewPanel.cpp`
+- `Tests/VoiceManagerRenderTests.cpp`
 - `Tests/AcpPresetReaderTests.cpp`
 - `CMakeLists.txt`
 - `docs/SPRINT_A_TRACKER.md`

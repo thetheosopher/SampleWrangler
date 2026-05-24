@@ -576,11 +576,33 @@ namespace sw
 
         double pos = voice.playbackPos;
         const double bsr = renderContext.bufferSampleRate;
+        const double sourceAdvancePerOutputSample = bsr / currentSampleRate;
         const double rate = voice.playbackRate * (bsr / currentSampleRate);
-        const bool useHighQualityInterpolation = renderContext.stretchHighQualityEnabled;
-        const auto interpolatedSampleReader = selectInterpolatedSampleReader(useHighQualityInterpolation);
         const bool preserveLength = renderContext.preserveLengthEnabled && std::abs(rate - 1.0) > 0.0001;
-        const bool useRubberBandRt = preserveLength && useHighQualityInterpolation && voice.isRubberBandReady();
+        if (preserveLength)
+        {
+            if (!voice.preserveLengthModeLatched)
+            {
+                voice.preserveLengthModeLatched = true;
+                voice.preserveLengthHighQualityLatched = renderContext.stretchHighQualityEnabled;
+                voice.lastPreserveLengthUsedRubberBandRt = false;
+                voice.rubberBandRtFailedForCurrentNote = false;
+                voice.granularResetRequested = true;
+            }
+        }
+        else if (voice.preserveLengthModeLatched)
+        {
+            voice.preserveLengthModeLatched = false;
+            voice.preserveLengthHighQualityLatched = false;
+            voice.lastPreserveLengthUsedRubberBandRt = false;
+            voice.rubberBandRtFailedForCurrentNote = false;
+        }
+
+        const bool useHighQualityInterpolation = preserveLength
+                                                     ? voice.preserveLengthHighQualityLatched
+                                                     : renderContext.stretchHighQualityEnabled;
+        const auto interpolatedSampleReader = selectInterpolatedSampleReader(useHighQualityInterpolation);
+        const bool useRubberBandRt = preserveLength && useHighQualityInterpolation && voice.isRubberBandReady() && !voice.rubberBandRtFailedForCurrentNote;
 
         const float fadeRate = 1.0f / (Voice::kFadeTimeMs * 0.001f * static_cast<float>(currentSampleRate));
 
@@ -694,6 +716,12 @@ namespace sw
             return readLinearInterpolatedSample(srcRead, srcLength, wrappedPos);
         };
 
+        if (voice.lastPreserveLengthUsedRubberBandRt != useRubberBandRt)
+        {
+            voice.lastPreserveLengthUsedRubberBandRt = useRubberBandRt;
+            voice.granularResetRequested = true;
+        }
+
         if (voice.granularResetRequested)
         {
             voice.granularResetRequested = false;
@@ -707,6 +735,8 @@ namespace sw
             std::array<float, kRenderChunkSize> mixLeft{};
             std::array<float, kRenderChunkSize> mixRight{};
             voice.setRubberBandPitchScale(voice.pitchRatio);
+            bool rubberBandSourceExhausted = false;
+            const double rubberBandStartPos = pos;
 
             int rendered = 0;
             while (rendered < numSamples && voice.active)
@@ -736,7 +766,7 @@ namespace sw
                                 }
                                 else
                                 {
-                                    voice.forceOff();
+                                    rubberBandSourceExhausted = true;
                                     break;
                                 }
                             }
@@ -755,7 +785,7 @@ namespace sw
                             if (provideStartPadSample)
                                 voice.consumeRubberBandStartPadSample();
                             else
-                                pos += (bsr / currentSampleRate);
+                                pos += sourceAdvancePerOutputSample;
 
                             fedAny = true;
                         }
@@ -765,9 +795,12 @@ namespace sw
 
                         voice.skipRubberBandStartDelay();
 
-                        if (!fedAny && !voice.hasRubberBandOutput())
+                        if ((!fedAny || rubberBandSourceExhausted) && !voice.hasRubberBandOutput())
                             break;
                     }
+
+                    if (rubberBandSourceExhausted && !voice.hasRubberBandOutput())
+                        break;
 
                     const float gain = voice.advanceFade(fadeRate);
                     if (gain <= 0.0f)
@@ -803,8 +836,21 @@ namespace sw
                 rendered += produced;
             }
 
-            voice.playbackPos = pos;
-            return;
+            if (rendered <= 0 && rubberBandSourceExhausted)
+            {
+                voice.rubberBandRtFailedForCurrentNote = true;
+                voice.lastPreserveLengthUsedRubberBandRt = false;
+                voice.grainSamplesRemaining = 0;
+                pos = rubberBandStartPos;
+            }
+            else
+            {
+                if (rubberBandSourceExhausted && !voice.hasRubberBandOutput())
+                    voice.forceOff();
+
+                voice.playbackPos = pos;
+                return;
+            }
         }
 
         constexpr int kMaxDirectMixChannels = 32;
@@ -840,7 +886,7 @@ namespace sw
                                                  : static_cast<double>(srcLength);
             const int spanSamples = computeContiguousSpan(pos,
                                                           boundaryExclusive,
-                                                          rate,
+                                                          preserveLength ? sourceAdvancePerOutputSample : rate,
                                                           numSamples - renderedSamples);
             if (spanSamples <= 0)
                 break;
@@ -871,35 +917,71 @@ namespace sw
                     const float blend = smoothCrossfadeBlend(1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples)));
                     const float gainA = 1.0f - blend;
                     const float gainB = blend;
-                    const int cachedSrcChannels = juce::jmin(numSrcChannels, directMixChannels);
-                    std::array<float, kMaxDirectMixChannels> cachedMixedSamples{};
-
-                    for (int srcCh = 0; srcCh < cachedSrcChannels; ++srcCh)
+                    if (numSrcChannels <= 1)
                     {
-                        const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
-                        const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
-                        cachedMixedSamples[static_cast<size_t>(srcCh)] = ((sampleA * gainA) + (sampleB * gainB)) * gain;
+                        const float sampleA = readInterpolatedSample(0, voice.grainReadPosA);
+                        const float sampleB = readInterpolatedSample(0, voice.grainReadPosB);
+                        const float mixedSample = ((sampleA * gainA) + (sampleB * gainB)) * gain;
+
+                        for (int ch = 0; ch < directMixChannels; ++ch)
+                            outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += mixedSample;
+
+                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                            outputBuffer.addSample(ch, startSample + outputIndex, mixedSample);
                     }
-
-                    const auto getMixedGranularSample = [&](int outputChannel)
+                    else if (numSrcChannels == 2)
                     {
-                        const int srcCh = (outputChannel < numSrcChannels) ? outputChannel : 0;
-                        if (srcCh < cachedSrcChannels)
-                            return cachedMixedSamples[static_cast<size_t>(srcCh)];
+                        const float sampleALeft = readInterpolatedSample(0, voice.grainReadPosA);
+                        const float sampleBLeft = readInterpolatedSample(0, voice.grainReadPosB);
+                        const float mixedLeft = ((sampleALeft * gainA) + (sampleBLeft * gainB)) * gain;
 
-                        const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
-                        const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
-                        return ((sampleA * gainA) + (sampleB * gainB)) * gain;
-                    };
+                        const float sampleARight = readInterpolatedSample(1, voice.grainReadPosA);
+                        const float sampleBRight = readInterpolatedSample(1, voice.grainReadPosB);
+                        const float mixedRight = ((sampleARight * gainA) + (sampleBRight * gainB)) * gain;
 
-                    for (int ch = 0; ch < directMixChannels; ++ch)
-                    {
-                        outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += getMixedGranularSample(ch);
+                        if (directMixChannels > 0)
+                            outputWritePtrs[0][outputIndex] += mixedLeft;
+
+                        if (directMixChannels > 1)
+                            outputWritePtrs[1][outputIndex] += mixedRight;
+
+                        for (int ch = 2; ch < directMixChannels; ++ch)
+                            outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += mixedLeft;
+
+                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                        {
+                            const float sample = (ch == 1) ? mixedRight : mixedLeft;
+                            outputBuffer.addSample(ch, startSample + outputIndex, sample);
+                        }
                     }
-
-                    for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                    else
                     {
-                        outputBuffer.addSample(ch, startSample + outputIndex, getMixedGranularSample(ch));
+                        const int cachedSrcChannels = juce::jmin(numSrcChannels, directMixChannels);
+                        std::array<float, kMaxDirectMixChannels> cachedMixedSamples{};
+
+                        for (int srcCh = 0; srcCh < cachedSrcChannels; ++srcCh)
+                        {
+                            const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
+                            const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                            cachedMixedSamples[static_cast<size_t>(srcCh)] = ((sampleA * gainA) + (sampleB * gainB)) * gain;
+                        }
+
+                        const auto getMixedGranularSample = [&](int outputChannel)
+                        {
+                            const int srcCh = (outputChannel < numSrcChannels) ? outputChannel : 0;
+                            if (srcCh < cachedSrcChannels)
+                                return cachedMixedSamples[static_cast<size_t>(srcCh)];
+
+                            const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
+                            const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                            return ((sampleA * gainA) + (sampleB * gainB)) * gain;
+                        };
+
+                        for (int ch = 0; ch < directMixChannels; ++ch)
+                            outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += getMixedGranularSample(ch);
+
+                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                            outputBuffer.addSample(ch, startSample + outputIndex, getMixedGranularSample(ch));
                     }
 
                     voice.grainReadPosA += rate;
@@ -912,7 +994,7 @@ namespace sw
                         voice.grainReadPosB = voice.grainReadPosA + Voice::kGrainSpacingSamples;
                     }
 
-                    pos += 1.0;
+                    pos += sourceAdvancePerOutputSample;
                 }
 
                 renderedSamples += spanSamples;
@@ -985,28 +1067,34 @@ namespace sw
                         break;
 
                     const int outputIndex = renderedSamples + i;
+                    const int idx0 = static_cast<int>(pos);
+                    const float frac = static_cast<float>(pos - static_cast<double>(idx0));
+                    const int cachedSrcChannels = juce::jmin(numSrcChannels, directMixChannels);
+                    std::array<float, kMaxDirectMixChannels> cachedScaledSamples{};
+
+                    for (int srcCh = 0; srcCh < cachedSrcChannels; ++srcCh)
+                    {
+                        const float *srcRead = (srcCh == 0) ? srcReadPtr0
+                                                            : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
+                        cachedScaledSamples[static_cast<size_t>(srcCh)] = interpolatedSampleReader(srcRead, srcLength, idx0, frac) * gain;
+                    }
+
+                    const auto getScaledSample = [&](int outputChannel)
+                    {
+                        const int srcCh = (outputChannel < numSrcChannels) ? outputChannel : 0;
+                        if (srcCh < cachedSrcChannels)
+                            return cachedScaledSamples[static_cast<size_t>(srcCh)];
+
+                        const float *srcRead = (srcCh == 0) ? srcReadPtr0
+                                                            : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
+                        return interpolatedSampleReader(srcRead, srcLength, idx0, frac) * gain;
+                    };
 
                     for (int ch = 0; ch < directMixChannels; ++ch)
-                    {
-                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                        const float *srcRead = (srcCh == 0) ? srcReadPtr0
-                                                            : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
-                        const float sample = useHighQualityInterpolation
-                                                 ? readHermiteInterpolatedSample(srcRead, srcLength, pos)
-                                                 : readLinearInterpolatedSample(srcRead, srcLength, pos);
-                        outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += sample * gain;
-                    }
+                        outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += getScaledSample(ch);
 
                     for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                    {
-                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
-                        const float *srcRead = (srcCh == 0) ? srcReadPtr0
-                                                            : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
-                        const float sample = useHighQualityInterpolation
-                                                 ? readHermiteInterpolatedSample(srcRead, srcLength, pos)
-                                                 : readLinearInterpolatedSample(srcRead, srcLength, pos);
-                        outputBuffer.addSample(ch, startSample + outputIndex, sample * gain);
-                    }
+                        outputBuffer.addSample(ch, startSample + outputIndex, getScaledSample(ch));
 
                     pos += rate;
                 }

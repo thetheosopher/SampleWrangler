@@ -486,6 +486,12 @@ add_executable(SampleWranglerAcpPresetReaderTests
     Source/Pipeline/AcpPresetReader.cpp
 )
 
+add_executable(SampleWranglerVoiceManagerRenderTests
+    Tests/VoiceManagerRenderTests.cpp
+    Source/Audio/Voice.cpp
+    Source/Audio/VoiceManager.cpp
+)
+
 target_include_directories(SampleWranglerWaveformPeakTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
 )
@@ -498,10 +504,22 @@ target_include_directories(SampleWranglerAcpPresetReaderTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
 )
 
+target_include_directories(SampleWranglerVoiceManagerRenderTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    ${CMAKE_CURRENT_BINARY_DIR}/SampleWrangler_artefacts/JuceLibraryCode
+)
+
+add_dependencies(SampleWranglerVoiceManagerRenderTests SampleWrangler)
+
 target_link_libraries(SampleWranglerAcpPresetReaderTests PRIVATE
     juce::juce_core
     juce::juce_data_structures
     juce::juce_audio_basics
+)
+
+target_link_libraries(SampleWranglerVoiceManagerRenderTests PRIVATE
+    juce::juce_audio_basics
+    juce::juce_gui_basics
 )
 
 target_include_directories(SampleWranglerScannerAppleLoopTests PRIVATE
@@ -520,6 +538,10 @@ target_compile_definitions(SampleWranglerScannerAppleLoopTests PRIVATE
     SW_HAVE_REX=${SW_HAVE_REX}
 )
 
+target_compile_definitions(SampleWranglerVoiceManagerRenderTests PRIVATE
+    SW_HAVE_RUBBERBAND=${SW_HAVE_RUBBERBAND}
+)
+
 if(SW_HAVE_REX)
     target_link_libraries(SampleWranglerScannerAppleLoopTests PRIVATE rex_loader)
     target_include_directories(SampleWranglerScannerAppleLoopTests PRIVATE "${REX_SDK_DIR}")
@@ -528,6 +550,10 @@ if(SW_HAVE_REX)
         REX_MAC=0
         REX_DLL_LOADER=1
     )
+endif()
+
+if(SW_HAVE_RUBBERBAND)
+    target_link_libraries(SampleWranglerVoiceManagerRenderTests PRIVATE rubberband)
 endif()
 
 if(MSVC)
@@ -547,8 +573,13 @@ if(MSVC)
         /NODEFAULTLIB:MSVCRT
         /NODEFAULTLIB:MSVCRTD
     )
+    target_link_options(SampleWranglerVoiceManagerRenderTests PRIVATE
+        /NODEFAULTLIB:MSVCRT
+        /NODEFAULTLIB:MSVCRTD
+    )
 endif()
 
 add_test(NAME SampleWrangler.ScannerAppleLoop COMMAND SampleWranglerScannerAppleLoopTests)
 add_test(NAME SampleWrangler.WaveformPeak COMMAND SampleWranglerWaveformPeakTests)
 add_test(NAME SampleWrangler.AcpPresetReader COMMAND SampleWranglerAcpPresetReaderTests)
+add_test(NAME SampleWrangler.VoiceManagerRender COMMAND SampleWranglerVoiceManagerRenderTests)

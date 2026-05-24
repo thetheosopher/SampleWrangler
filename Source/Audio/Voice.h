@@ -70,6 +70,10 @@ namespace sw
         double playbackRate = 1.0;
         double pitchRatio = 1.0;
         bool granularResetRequested = true;
+        bool preserveLengthModeLatched = false;
+        bool preserveLengthHighQualityLatched = false;
+        bool lastPreserveLengthUsedRubberBandRt = false;
+        bool rubberBandRtFailedForCurrentNote = false;
 
         double playbackPos = 0.0;
         float fadeGain = 0.0f;
@@ -92,6 +96,10 @@ namespace sw
             fadeGain = 0.0f;
             grainSamplesRemaining = 0;
             granularResetRequested = true;
+            preserveLengthModeLatched = false;
+            preserveLengthHighQualityLatched = false;
+            lastPreserveLengthUsedRubberBandRt = false;
+            rubberBandRtFailedForCurrentNote = false;
             midiNote = note;
             playbackRate = rate;
             pitchRatio = pitch;

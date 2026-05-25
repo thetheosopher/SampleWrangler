@@ -8,7 +8,7 @@ namespace sw
 
     namespace
     {
-        constexpr int kCurrentSchemaVersion = 5;
+        constexpr int kCurrentSchemaVersion = 6;
 
         bool execSql(sqlite3 *db, const char *sql)
         {
@@ -64,6 +64,27 @@ namespace sw
             }
 
             return false;
+        }
+
+        bool columnExists(sqlite3 *db, const char *tableName, const char *columnName)
+        {
+            sqlite3_stmt *stmt = nullptr;
+            const auto sql = "PRAGMA table_info(" + std::string(tableName) + ");";
+            if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+                return false;
+
+            bool found = false;
+            while (sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                if (const auto *name = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)); name != nullptr && std::string(name) == columnName)
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            sqlite3_finalize(stmt);
+            return found;
         }
 
         bool applyMigration1(sqlite3 *db)
@@ -190,39 +211,13 @@ namespace sw
             if (!execSql(db, R"SQL(
         CREATE TABLE IF NOT EXISTS file_user_data (
             file_id      INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
-            is_favorite  INTEGER NOT NULL DEFAULT 0,
-            rating       INTEGER CHECK (rating IS NULL OR (rating >= 1 AND rating <= 5))
+            is_favorite  INTEGER NOT NULL DEFAULT 0
         );
     )SQL"))
                 return false;
 
             if (!execSql(db, R"SQL(
         CREATE INDEX IF NOT EXISTS idx_file_user_data_favorite ON file_user_data(is_favorite);
-    )SQL"))
-                return false;
-
-            if (!execSql(db, R"SQL(
-        CREATE TABLE IF NOT EXISTS file_tags (
-            file_id  INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-            tag      TEXT NOT NULL,
-            PRIMARY KEY (file_id, tag)
-        );
-    )SQL"))
-                return false;
-
-            if (!execSql(db, R"SQL(
-        CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag);
-    )SQL"))
-                return false;
-
-            if (!execSql(db, R"SQL(
-        CREATE TABLE IF NOT EXISTS saved_searches (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL UNIQUE,
-            query_text      TEXT NOT NULL DEFAULT '',
-            root_id         INTEGER REFERENCES roots(id) ON DELETE SET NULL,
-            favorites_only  INTEGER NOT NULL DEFAULT 0
-        );
     )SQL"))
                 return false;
 
@@ -266,39 +261,13 @@ namespace sw
             if (!execSql(db, R"SQL(
         CREATE TABLE IF NOT EXISTS file_user_data (
             file_id      INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
-            is_favorite  INTEGER NOT NULL DEFAULT 0,
-            rating       INTEGER CHECK (rating IS NULL OR (rating >= 1 AND rating <= 5))
+            is_favorite  INTEGER NOT NULL DEFAULT 0
         );
-    )SQL"))
-                return false;
-
-            if (!execSql(db, R"SQL(
-        CREATE INDEX IF NOT EXISTS idx_file_user_data_favorite ON file_user_data(is_favorite);
-    )SQL"))
-                return false;
-
-            if (!execSql(db, R"SQL(
-        CREATE TABLE IF NOT EXISTS file_tags (
-            file_id  INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-            tag      TEXT NOT NULL,
-            PRIMARY KEY (file_id, tag)
-        );
-    )SQL"))
-                return false;
-
-            if (!execSql(db, R"SQL(
-        CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag);
     )SQL"))
                 return false;
 
             return execSql(db, R"SQL(
-        CREATE TABLE IF NOT EXISTS saved_searches (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL UNIQUE,
-            query_text      TEXT NOT NULL DEFAULT '',
-            root_id         INTEGER REFERENCES roots(id) ON DELETE SET NULL,
-            favorites_only  INTEGER NOT NULL DEFAULT 0
-        );
+        CREATE INDEX IF NOT EXISTS idx_file_user_data_favorite ON file_user_data(is_favorite);
     )SQL");
         }
 
@@ -318,6 +287,52 @@ namespace sw
                 return false;
 
             return true;
+        }
+
+        bool applyMigration6(sqlite3 *db)
+        {
+            if (!execSql(db, "DROP TABLE IF EXISTS file_tags;"))
+                return false;
+
+            if (!execSql(db, "DROP TABLE IF EXISTS saved_searches;"))
+                return false;
+
+            if (columnExists(db, "file_user_data", "rating"))
+            {
+                if (!execSql(db, "ALTER TABLE file_user_data RENAME TO file_user_data_legacy;"))
+                    return false;
+
+                if (!execSql(db, R"SQL(
+        CREATE TABLE file_user_data (
+            file_id      INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+            is_favorite  INTEGER NOT NULL DEFAULT 0
+        );
+    )SQL"))
+                    return false;
+
+                if (!execSql(db, R"SQL(
+        INSERT INTO file_user_data (file_id, is_favorite)
+        SELECT file_id, is_favorite
+        FROM file_user_data_legacy;
+    )SQL"))
+                    return false;
+
+                if (!execSql(db, "DROP TABLE file_user_data_legacy;"))
+                    return false;
+            }
+            else if (!execSql(db, R"SQL(
+        CREATE TABLE IF NOT EXISTS file_user_data (
+            file_id      INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+            is_favorite  INTEGER NOT NULL DEFAULT 0
+        );
+    )SQL"))
+            {
+                return false;
+            }
+
+            return execSql(db, R"SQL(
+        CREATE INDEX IF NOT EXISTS idx_file_user_data_favorite ON file_user_data(is_favorite);
+    )SQL");
         }
     }
 
@@ -348,6 +363,9 @@ namespace sw
                 break;
             case 5:
                 ok = applyMigration5(db);
+                break;
+            case 6:
+                ok = applyMigration6(db);
                 break;
             default:
                 ok = false;

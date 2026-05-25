@@ -102,7 +102,7 @@ namespace
                duplicates[1].contentHash.has_value() && *duplicates[1].contentHash == "duplicate-hash";
     }
 
-    bool testFileUserMetadataAndSavedSearches(sw::CatalogDb &db)
+    bool testFileUserFavorites(sw::CatalogDb &db)
     {
         const auto roots = db.allRoots();
         if (roots.empty())
@@ -115,51 +115,27 @@ namespace
         sw::FileUserDataRecord userData;
         userData.fileId = file->id;
         userData.isFavorite = true;
-        userData.rating = 5;
 
         if (!db.setFileUserData(userData))
             return false;
 
         const auto fetchedUserData = db.fileUserDataByFileId(file->id);
-        if (!fetchedUserData.has_value() || !fetchedUserData->isFavorite || !fetchedUserData->rating.has_value() || *fetchedUserData->rating != 5)
-            return false;
-
-        if (!db.replaceFileTags(file->id, {" Drum ", "One Shot", "drum"}))
-            return false;
-
-        const auto fileTags = db.tagsForFile(file->id);
-        if (fileTags.size() != 2 || fileTags[0] != "drum" || fileTags[1] != "one shot")
-            return false;
-
-        const auto allTags = db.allTags();
-        if (allTags.size() != 2)
+        if (!fetchedUserData.has_value() || !fetchedUserData->isFavorite)
             return false;
 
         const auto favoriteFiles = db.listFavoriteFiles();
         if (favoriteFiles.size() != 1 || favoriteFiles.front().id != file->id)
             return false;
 
-        sw::SavedSearchRecord savedSearch;
-        savedSearch.name = "Favorite Kicks";
-        savedSearch.queryText = "Kick";
-        savedSearch.rootId = roots.front().id;
-        savedSearch.favoritesOnly = true;
-
-        if (!db.upsertSavedSearch(savedSearch))
+        userData.isFavorite = false;
+        if (!db.setFileUserData(userData))
             return false;
 
-        auto savedSearches = db.listSavedSearches();
-        if (savedSearches.size() != 1)
+        const auto clearedUserData = db.fileUserDataByFileId(file->id);
+        if (!clearedUserData.has_value() || clearedUserData->isFavorite)
             return false;
 
-        if (savedSearches.front().name != "Favorite Kicks" || !savedSearches.front().favoritesOnly)
-            return false;
-
-        if (!db.removeSavedSearch(savedSearches.front().id))
-            return false;
-
-        savedSearches = db.listSavedSearches();
-        return savedSearches.empty();
+        return db.listFavoriteFiles().empty();
     }
 
     bool testSettings(sw::CatalogDb &db)
@@ -230,9 +206,9 @@ int main()
         return 1;
     }
 
-    if (!testFileUserMetadataAndSavedSearches(db))
+    if (!testFileUserFavorites(db))
     {
-        std::cerr << "testFileUserMetadataAndSavedSearches failed.\n";
+        std::cerr << "testFileUserFavorites failed.\n";
         return 1;
     }
 

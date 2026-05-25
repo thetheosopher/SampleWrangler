@@ -30,7 +30,7 @@ namespace sw
                                 private juce::Timer
     {
     public:
-        MainComponent();
+        explicit MainComponent(std::function<void()> onShowAboutRequested = {});
         ~MainComponent() override;
 
         void paint(juce::Graphics &g) override;
@@ -40,7 +40,6 @@ namespace sw
     private:
         void refreshRoots();
         void refreshResults(const std::string &query = "");
-        void refreshSavedSearches(std::optional<int64_t> preferredSavedSearchId = std::nullopt);
         void rebuildRootWatchers(const std::vector<RootRecord> &roots);
         void processPendingRootWatchRescans();
         void refreshOutputDeviceTypeList();
@@ -84,9 +83,7 @@ namespace sw
         void handleAddRootClicked();
         void handleFileSelected(const FileRecord &file, bool playWhenReady, bool showIndexOnlyAlert);
         void loadSelectedFileMetadata();
-        void persistSelectedFileUserData(bool isFavorite, std::optional<int> rating);
-        void persistSelectedFileTags(const std::vector<std::string> &tags);
-        void applySavedSearch(std::optional<int64_t> savedSearchId);
+        void persistSelectedFileUserData(bool isFavorite);
         void setPreviewLoadingState(bool isLoading, uint64_t requestId);
         void applyEffectiveLoopPlaybackMode();
         void advanceAutoplaySelectionAndPlay();
@@ -164,6 +161,8 @@ namespace sw
         juce::DrawableButton resetLayoutToolbarButton{"Reset Layout", juce::DrawableButton::ImageFitted};
         juce::DrawableButton vacuumDbToolbarButton{"Compress Database", juce::DrawableButton::ImageFitted};
         juce::DrawableButton themeToolbarButton{"Theme", juce::DrawableButton::ImageFitted};
+        juce::DrawableButton aboutToolbarButton{"About Sample Wrangler", juce::DrawableButton::ImageFitted};
+        std::function<void()> showAboutRequested;
         TooltipLookAndFeel tooltipLookAndFeel;
         ToolbarButtonLookAndFeel toolbarButtonLookAndFeel;
         juce::TooltipWindow tooltipWindow{this};
@@ -205,15 +204,11 @@ namespace sw
         std::optional<int64_t> selectedRootFilterId;
         std::optional<FileRecord> currentSelectedFile;
         std::optional<FileUserDataRecord> currentSelectedFileUserData;
-        std::vector<std::string> currentSelectedFileTags;
         std::atomic<uint64_t> previewLoadRequestCounter{0};
         bool previewLoading = false;
         uint64_t previewLoadingRequestId = 0;
         std::string currentSearchQuery;
         ResultsPanel::ViewMode currentResultsViewMode = ResultsPanel::ViewMode::Recent;
-        std::vector<SavedSearchRecord> savedSearches;
-        std::optional<int64_t> selectedSavedSearchId;
-        bool applyingSavedSearchSelection = false;
         juce::String selectedMidiInputIdentifier;
         juce::StringArray lastKnownMidiInputIdentifiers;
         int midiDeviceRefreshCounter = 0;

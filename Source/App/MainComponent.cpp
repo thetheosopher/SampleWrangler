@@ -864,83 +864,6 @@ namespace sw
             juce::String &nameResult;
         };
 
-        class SaveSearchDialogContent final : public juce::Component
-        {
-        public:
-            SaveSearchDialogContent(const juce::String &initialName,
-                                    juce::String &nameOut)
-                : nameResult(nameOut)
-            {
-                nameEditor.setMultiLine(false);
-                nameEditor.setScrollbarsShown(false);
-                nameEditor.setText(initialName, false);
-                nameEditor.onReturnKey = [this]
-                {
-                    submitAndClose();
-                };
-                addAndMakeVisible(nameEditor);
-
-                saveButton.setButtonText("Save");
-                saveButton.onClick = [this]
-                {
-                    submitAndClose();
-                };
-                addAndMakeVisible(saveButton);
-
-                cancelButton.setButtonText("Cancel");
-                cancelButton.onClick = [this]
-                {
-                    if (auto *window = findParentComponentOfClass<juce::DialogWindow>())
-                        window->exitModalState(0);
-                };
-                addAndMakeVisible(cancelButton);
-
-                nameEditor.grabKeyboardFocus();
-                nameEditor.selectAll();
-            }
-
-            void paint(juce::Graphics &g) override
-            {
-                g.fillAll(juce::Colour(0xff22272e));
-
-                g.setColour(juce::Colours::white);
-                g.setFont(14.0f);
-                g.drawText("Saved search name", 12, 16, getWidth() - 24, 22, juce::Justification::centredLeft, false);
-            }
-
-            void resized() override
-            {
-                nameEditor.setBounds(12, 44, getWidth() - 24, 28);
-
-                constexpr int actionWidth = 102;
-                cancelButton.setBounds(getWidth() - 12 - actionWidth, 94, actionWidth, 30);
-                saveButton.setBounds(cancelButton.getX() - 8 - actionWidth, 94, actionWidth, 30);
-            }
-
-        private:
-            void submitAndClose()
-            {
-                const auto trimmed = nameEditor.getText().trim();
-                if (trimmed.isEmpty())
-                {
-                    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                                                           "Save Search",
-                                                           "Saved search name cannot be blank.");
-                    nameEditor.grabKeyboardFocus();
-                    return;
-                }
-
-                nameResult = trimmed;
-                if (auto *window = findParentComponentOfClass<juce::DialogWindow>())
-                    window->exitModalState(1);
-            }
-
-            juce::TextEditor nameEditor;
-            juce::TextButton saveButton;
-            juce::TextButton cancelButton;
-            juce::String &nameResult;
-        };
-
         std::unique_ptr<juce::Drawable> createThemeIcon(const juce::Colour colour, bool showSun)
         {
             constexpr int iconSizePx = 96;
@@ -1039,9 +962,48 @@ namespace sw
             drawable->setImage(image);
             return drawable;
         }
+
+        std::unique_ptr<juce::Drawable> createAboutIcon(const juce::Colour colour)
+        {
+            constexpr int iconSizePx = 96;
+            constexpr float scale = static_cast<float>(iconSizePx) / 24.0f;
+
+            juce::Image image(juce::Image::ARGB, iconSizePx, iconSizePx, true);
+            juce::Graphics g(image);
+            g.addTransform(juce::AffineTransform::scale(scale));
+
+            juce::Path badge;
+            badge.addEllipse(4.0f, 4.0f, 16.0f, 16.0f);
+
+            g.setGradientFill(juce::ColourGradient(juce::Colour(0xff7ec2f3), 9.0f, 5.0f,
+                                                   juce::Colour(0xff3e92d4), 15.0f, 19.0f,
+                                                   false));
+            g.fillPath(badge);
+
+            g.setColour(juce::Colour(0x55ffffff));
+            g.fillEllipse(7.1f, 6.0f, 6.4f, 2.6f);
+
+            g.setColour(juce::Colour(0xff163a59));
+            g.strokePath(badge, juce::PathStrokeType(0.95f));
+
+            g.setColour(juce::Colours::white.withAlpha(0.97f));
+            g.fillEllipse(10.55f, 6.0f, 2.9f, 2.9f);
+            g.fillRoundedRectangle(10.9f, 10.0f, 2.2f, 7.2f, 1.1f);
+
+            const auto tintOverlay = colour.getPerceivedBrightness() < 0.45f
+                                         ? colour.withAlpha(0.18f)
+                                         : colour.withAlpha(0.09f);
+            g.setColour(tintOverlay);
+            g.fillPath(badge);
+
+            auto drawable = std::make_unique<juce::DrawableImage>();
+            drawable->setImage(image);
+            return drawable;
+        }
     }
 
-    MainComponent::MainComponent()
+    MainComponent::MainComponent(std::function<void()> onShowAboutRequested)
+        : showAboutRequested(onShowAboutRequested)
     {
         // Initialise REX SDK early so Scanner knows whether REX files are playable.
         RexManager::initialize();
@@ -1060,6 +1022,7 @@ namespace sw
         addAndMakeVisible(resetLayoutToolbarButton);
         addAndMakeVisible(vacuumDbToolbarButton);
         addAndMakeVisible(themeToolbarButton);
+        addAndMakeVisible(aboutToolbarButton);
 
         addRootToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
         openSourceInExplorerToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
@@ -1070,6 +1033,7 @@ namespace sw
         resetLayoutToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
         vacuumDbToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
         themeToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
+        aboutToolbarButton.setLookAndFeel(&toolbarButtonLookAndFeel);
 
         addAndMakeVisible(browserPanel);
         addAndMakeVisible(leftRightSplitter);
@@ -1228,11 +1192,6 @@ namespace sw
         browserPanel.onRootSelected = [this](std::optional<int64_t> rootId)
         {
             selectedRootFilterId = rootId;
-            if (!applyingSavedSearchSelection && selectedSavedSearchId.has_value())
-            {
-                selectedSavedSearchId.reset();
-                refreshSavedSearches();
-            }
             updateToolbarScanState(scanInProgress);
             refreshResults(currentSearchQuery);
         };
@@ -1324,6 +1283,17 @@ namespace sw
             applyThemeMode(!darkModeEnabled, true);
         };
 
+        aboutToolbarButton.setImages(createAboutIcon(juce::Colours::white).release(),
+                                     createAboutIcon(juce::Colours::lightgrey).release(),
+                                     createAboutIcon(juce::Colour(0xff9ec4e6)).release());
+        aboutToolbarButton.setTooltip("About Sample Wrangler");
+        aboutToolbarButton.setEnabled(static_cast<bool>(showAboutRequested));
+        aboutToolbarButton.onClick = [this]
+        {
+            if (showAboutRequested)
+                showAboutRequested();
+        };
+
         updateToolbarScanState(false);
 
         const auto appDataDir = defaultCacheDirectory();
@@ -1350,140 +1320,18 @@ namespace sw
 
         resultsPanel.onSearchQueryChanged = [this](const std::string &query)
         {
-            if (!applyingSavedSearchSelection && selectedSavedSearchId.has_value())
-            {
-                selectedSavedSearchId.reset();
-                refreshSavedSearches();
-            }
             refreshResults(query);
         };
 
         resultsPanel.onViewModeChanged = [this](ResultsPanel::ViewMode mode)
         {
             currentResultsViewMode = mode;
-            if (!applyingSavedSearchSelection && selectedSavedSearchId.has_value())
-            {
-                selectedSavedSearchId.reset();
-                refreshSavedSearches();
-            }
             refreshResults(currentSearchQuery);
-        };
-
-        resultsPanel.onSaveSearchRequested = [this]()
-        {
-            if (currentResultsViewMode == ResultsPanel::ViewMode::Duplicates)
-                return;
-
-            const auto roots = catalogDb.allRoots();
-            juce::String suggestedName;
-
-            if (!currentSearchQuery.empty())
-                suggestedName = juce::String(currentSearchQuery);
-            else if (currentResultsViewMode == ResultsPanel::ViewMode::Favorites)
-                suggestedName = "Favorites";
-            else
-                suggestedName = "Recent Library";
-
-            if (selectedRootFilterId.has_value())
-            {
-                const auto rootIt = std::find_if(roots.begin(), roots.end(), [this](const RootRecord &root)
-                                                 { return root.id == *selectedRootFilterId; });
-                if (rootIt != roots.end())
-                    suggestedName += " [" + juce::String(rootIt->label) + "]";
-            }
-
-            const auto queryText = currentSearchQuery;
-            const auto rootId = selectedRootFilterId;
-            const bool favoritesOnly = currentResultsViewMode == ResultsPanel::ViewMode::Favorites;
-            auto newName = std::make_shared<juce::String>(suggestedName);
-            auto dialogContent = std::make_unique<SaveSearchDialogContent>(*newName, *newName);
-
-            juce::DialogWindow::LaunchOptions options;
-            options.content.setOwned(dialogContent.release());
-            options.dialogTitle = "Save Search";
-            options.dialogBackgroundColour = juce::Colour(0xff22272e);
-            options.escapeKeyTriggersCloseButton = true;
-            options.useNativeTitleBar = true;
-            options.resizable = false;
-            options.componentToCentreAround = this;
-
-            juce::Component::SafePointer<MainComponent> safeThis(this);
-            auto *window = options.launchAsync();
-            window->setSize(420, 140);
-            window->enterModalState(true,
-                                    juce::ModalCallbackFunction::create([safeThis, newName, queryText, rootId, favoritesOnly](int result)
-                                                                        {
-                                                                            if (safeThis == nullptr || result != 1)
-                                                                                return;
-
-                                                                            const auto trimmedName = newName->trim();
-                                                                            if (trimmedName.isEmpty())
-                                                                                return;
-
-                                                                            SavedSearchRecord savedSearch;
-                                                                            savedSearch.name = trimmedName.toStdString();
-                                                                            savedSearch.queryText = queryText;
-                                                                            savedSearch.rootId = rootId;
-                                                                            savedSearch.favoritesOnly = favoritesOnly;
-
-                                                                            if (!safeThis->catalogDb.upsertSavedSearch(savedSearch))
-                                                                            {
-                                                                                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                                                                                                                       "Save Search Failed",
-                                                                                                                       "Unable to save the current search preset.");
-                                                                                return;
-                                                                            }
-
-                                                                            safeThis->refreshSavedSearches();
-                                                                            const auto it = std::find_if(safeThis->savedSearches.begin(), safeThis->savedSearches.end(), [savedName = savedSearch.name](const SavedSearchRecord &record)
-                                                                                                         { return record.name == savedName; });
-                                                                            if (it != safeThis->savedSearches.end())
-                                                                            {
-                                                                                safeThis->selectedSavedSearchId = it->id;
-                                                                                safeThis->refreshSavedSearches(safeThis->selectedSavedSearchId);
-                                                                            }
-
-                                                                            safeThis->showToolbarToast("Saved search: " + trimmedName, 120); }),
-                                    true);
-        };
-
-        resultsPanel.onSavedSearchSelected = [this](std::optional<int64_t> savedSearchId)
-        {
-            applySavedSearch(savedSearchId);
-        };
-
-        resultsPanel.onDeleteSavedSearchRequested = [this](int64_t savedSearchId)
-        {
-            if (!catalogDb.removeSavedSearch(savedSearchId))
-            {
-                juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                                                       "Delete Saved Search Failed",
-                                                       "Unable to delete the selected saved search.");
-                return;
-            }
-
-            if (selectedSavedSearchId.has_value() && *selectedSavedSearchId == savedSearchId)
-                selectedSavedSearchId.reset();
-
-            refreshSavedSearches();
-            showToolbarToast("Saved search removed", 120);
         };
 
         resultsPanel.onSelectedFileFavoriteChanged = [this](bool isFavorite)
         {
-            persistSelectedFileUserData(isFavorite,
-                                        currentSelectedFileUserData.has_value() ? currentSelectedFileUserData->rating : std::nullopt);
-        };
-
-        resultsPanel.onSelectedFileRatingChanged = [this](std::optional<int> rating)
-        {
-            persistSelectedFileUserData(currentSelectedFileUserData.has_value() && currentSelectedFileUserData->isFavorite,
-                                        rating);
-        };
-
-        resultsPanel.onSelectedFileTagsChanged = [this](const std::vector<std::string> &tags)
-        {
-            persistSelectedFileTags(tags);
+            persistSelectedFileUserData(isFavorite);
         };
 
         resultsPanel.onFileSelected = [this](const FileRecord &file)
@@ -1654,8 +1502,7 @@ namespace sw
 
         refreshRoots();
         refreshResults();
-        refreshSavedSearches();
-        resultsPanel.setSelectedFileMetadata(std::nullopt, {});
+        resultsPanel.setSelectedFileMetadata(std::nullopt);
         restoreScanSummaryStatus();
         updateToolbarScanState(false);
         startTimerHz(kUiTimerHz);
@@ -1676,6 +1523,7 @@ namespace sw
         resetLayoutToolbarButton.setLookAndFeel(nullptr);
         vacuumDbToolbarButton.setLookAndFeel(nullptr);
         themeToolbarButton.setLookAndFeel(nullptr);
+        aboutToolbarButton.setLookAndFeel(nullptr);
         tooltipWindow.setLookAndFeel(nullptr);
 
         RexManager::shutdown();
@@ -1997,9 +1845,7 @@ namespace sw
         }
         else
         {
-            results = currentResultsViewMode == ResultsPanel::ViewMode::Favorites
-                          ? catalogDb.listFavoriteFiles(-1)
-                          : catalogDb.listDuplicateFiles(-1);
+            results = catalogDb.listFavoriteFiles(-1);
 
             if (selectedRootFilterId.has_value())
             {
@@ -2023,24 +1869,6 @@ namespace sw
 
         fileStatsStatusText = makeFileStatsStatusText(stats.first, stats.second);
         repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
-    }
-
-    void MainComponent::refreshSavedSearches(std::optional<int64_t> preferredSavedSearchId)
-    {
-        savedSearches = catalogDb.listSavedSearches();
-
-        if (preferredSavedSearchId.has_value())
-            selectedSavedSearchId = preferredSavedSearchId;
-
-        if (selectedSavedSearchId.has_value())
-        {
-            const auto it = std::find_if(savedSearches.begin(), savedSearches.end(), [this](const SavedSearchRecord &record)
-                                         { return record.id == *selectedSavedSearchId; });
-            if (it == savedSearches.end())
-                selectedSavedSearchId.reset();
-        }
-
-        resultsPanel.setSavedSearches(savedSearches, selectedSavedSearchId);
     }
 
     void MainComponent::rebuildRootWatchers(const std::vector<RootRecord> &roots)
@@ -2097,17 +1925,15 @@ namespace sw
         if (!currentSelectedFile.has_value())
         {
             currentSelectedFileUserData.reset();
-            currentSelectedFileTags.clear();
-            resultsPanel.setSelectedFileMetadata(std::nullopt, {});
+            resultsPanel.setSelectedFileMetadata(std::nullopt);
             return;
         }
 
         currentSelectedFileUserData = catalogDb.fileUserDataByFileId(currentSelectedFile->id);
-        currentSelectedFileTags = catalogDb.tagsForFile(currentSelectedFile->id);
-        resultsPanel.setSelectedFileMetadata(currentSelectedFileUserData, currentSelectedFileTags);
+        resultsPanel.setSelectedFileMetadata(currentSelectedFileUserData);
     }
 
-    void MainComponent::persistSelectedFileUserData(bool isFavorite, std::optional<int> rating)
+    void MainComponent::persistSelectedFileUserData(bool isFavorite)
     {
         if (!currentSelectedFile.has_value())
             return;
@@ -2115,66 +1941,21 @@ namespace sw
         FileUserDataRecord record;
         record.fileId = currentSelectedFile->id;
         record.isFavorite = isFavorite;
-        record.rating = rating;
 
         if (!catalogDb.setFileUserData(record))
         {
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
                                                    "Metadata Update Failed",
-                                                   "Unable to update favorite/rating metadata for the selected file.");
+                                                   "Unable to update favorite metadata for the selected file.");
             loadSelectedFileMetadata();
             return;
         }
 
         currentSelectedFileUserData = record;
-        resultsPanel.setSelectedFileMetadata(currentSelectedFileUserData, currentSelectedFileTags);
+        resultsPanel.setSelectedFileMetadata(currentSelectedFileUserData);
 
         if (currentResultsViewMode == ResultsPanel::ViewMode::Favorites)
             refreshResults(currentSearchQuery);
-    }
-
-    void MainComponent::persistSelectedFileTags(const std::vector<std::string> &tags)
-    {
-        if (!currentSelectedFile.has_value())
-            return;
-
-        if (!catalogDb.replaceFileTags(currentSelectedFile->id, tags))
-        {
-            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                                                   "Tag Update Failed",
-                                                   "Unable to update tags for the selected file.");
-            loadSelectedFileMetadata();
-            return;
-        }
-
-        currentSelectedFileTags = catalogDb.tagsForFile(currentSelectedFile->id);
-        resultsPanel.setSelectedFileMetadata(currentSelectedFileUserData, currentSelectedFileTags);
-    }
-
-    void MainComponent::applySavedSearch(std::optional<int64_t> savedSearchId)
-    {
-        selectedSavedSearchId = savedSearchId;
-        refreshSavedSearches(selectedSavedSearchId);
-
-        if (!savedSearchId.has_value())
-            return;
-
-        const auto it = std::find_if(savedSearches.begin(), savedSearches.end(), [savedSearchId](const SavedSearchRecord &record)
-                                     { return record.id == *savedSearchId; });
-        if (it == savedSearches.end())
-            return;
-
-        applyingSavedSearchSelection = true;
-        selectedRootFilterId = it->rootId;
-        browserPanel.setSelectedRootId(selectedRootFilterId);
-        updateToolbarScanState(scanInProgress);
-
-        currentResultsViewMode = it->favoritesOnly ? ResultsPanel::ViewMode::Favorites : ResultsPanel::ViewMode::Recent;
-        resultsPanel.setViewMode(currentResultsViewMode);
-        resultsPanel.setSearchQuery(it->queryText);
-        applyingSavedSearchSelection = false;
-
-        refreshResults(it->queryText);
     }
 
     void MainComponent::refreshOutputDeviceList()
@@ -2498,6 +2279,9 @@ namespace sw
             createThemeIcon(normalIconColour, darkModeEnabled).release(),
             createThemeIcon(hoverIconColour, darkModeEnabled).release(),
             createThemeIcon(pressedIconColour, darkModeEnabled).release());
+        aboutToolbarButton.setImages(createAboutIcon(normalIconColour).release(),
+                                     createAboutIcon(hoverIconColour).release(),
+                                     createAboutIcon(pressedIconColour).release());
         themeToolbarButton.setTooltip(darkModeEnabled ? "Switch to Light Mode" : "Switch to Dark Mode");
         tooltipLookAndFeel.setDarkMode(darkModeEnabled);
         toolbarButtonLookAndFeel.setDarkMode(darkModeEnabled);
@@ -3639,6 +3423,8 @@ namespace sw
         resetLayoutToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
         toolbarArea.removeFromLeft(toolbarGap);
         themeToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
+        toolbarArea.removeFromLeft(toolbarGap);
+        aboutToolbarButton.setBounds(toolbarArea.removeFromLeft(iconButtonSize));
 
         const int totalWidth = area.getWidth() - kSplitterThickness;
         int leftWidth = static_cast<int>(leftPanelRatio * static_cast<float>(totalWidth));

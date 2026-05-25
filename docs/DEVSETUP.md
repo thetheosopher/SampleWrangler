@@ -101,8 +101,8 @@ build/vs2026-release/SampleWrangler_artefacts/Release/SampleWrangler.exe  (Relea
 The packaged release artifacts are written to:
 
 ```text
-build/vs2026-release/packages/SampleWrangler-1.0.0-win64-setup.exe
-build/vs2026-release/packages/SampleWrangler-1.0.0-win64-portable.zip
+build/vs2026-release/packages/SampleWrangler-1.1.0-win64-setup.exe
+build/vs2026-release/packages/SampleWrangler-1.1.0-win64-portable.zip
 ```
 
 ## Run

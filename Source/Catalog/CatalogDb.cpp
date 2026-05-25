@@ -3,7 +3,6 @@
 #include <sqlite3.h>
 #include <algorithm>
 #include <cassert>
-#include <cctype>
 
 namespace sw
 {
@@ -80,37 +79,6 @@ namespace sw
             return r;
         }
 
-        std::string normaliseTag(std::string tag)
-        {
-            const auto first = tag.find_first_not_of(" \t\r\n");
-            if (first == std::string::npos)
-                return {};
-
-            const auto last = tag.find_last_not_of(" \t\r\n");
-            tag = tag.substr(first, (last - first) + 1);
-
-            std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c)
-                           { return static_cast<char>(std::tolower(c)); });
-            return tag;
-        }
-
-        std::vector<std::string> normaliseTags(const std::vector<std::string> &tags)
-        {
-            std::vector<std::string> result;
-            result.reserve(tags.size());
-
-            for (const auto &tag : tags)
-            {
-                auto normalised = normaliseTag(tag);
-                if (normalised.empty())
-                    continue;
-
-                if (std::find(result.begin(), result.end(), normalised) == result.end())
-                    result.push_back(std::move(normalised));
-            }
-
-            return result;
-        }
     }
 
 #define SW_DB_GUARD std::lock_guard<std::recursive_mutex> dbLock(apiMutex)
@@ -840,15 +808,11 @@ namespace sw
     {
         SW_DB_GUARD;
 
-        if (userData.rating.has_value() && (*userData.rating < 1 || *userData.rating > 5))
-            return false;
-
         const char *sql = R"SQL(
-        INSERT INTO file_user_data (file_id, is_favorite, rating)
-        VALUES (?, ?, ?)
+        INSERT INTO file_user_data (file_id, is_favorite)
+        VALUES (?, ?)
         ON CONFLICT(file_id) DO UPDATE SET
-            is_favorite = excluded.is_favorite,
-            rating = excluded.rating
+            is_favorite = excluded.is_favorite
     )SQL";
 
         sqlite3_stmt *stmt = nullptr;
@@ -857,10 +821,6 @@ namespace sw
 
         sqlite3_bind_int64(stmt, 1, userData.fileId);
         sqlite3_bind_int(stmt, 2, userData.isFavorite ? 1 : 0);
-        if (userData.rating.has_value())
-            sqlite3_bind_int(stmt, 3, *userData.rating);
-        else
-            sqlite3_bind_null(stmt, 3);
 
         const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
         sqlite3_finalize(stmt);
@@ -871,7 +831,7 @@ namespace sw
     {
         SW_DB_GUARD;
 
-        const char *sql = "SELECT file_id, is_favorite, rating FROM file_user_data WHERE file_id = ?";
+        const char *sql = "SELECT file_id, is_favorite FROM file_user_data WHERE file_id = ?";
         sqlite3_stmt *stmt = nullptr;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
             return std::nullopt;
@@ -887,209 +847,9 @@ namespace sw
         FileUserDataRecord result;
         result.fileId = sqlite3_column_int64(stmt, 0);
         result.isFavorite = sqlite3_column_int(stmt, 1) != 0;
-        if (sqlite3_column_type(stmt, 2) != SQLITE_NULL)
-            result.rating = sqlite3_column_int(stmt, 2);
 
         sqlite3_finalize(stmt);
         return result;
-    }
-
-    bool CatalogDb::replaceFileTags(int64_t fileId, const std::vector<std::string> &tags)
-    {
-        SW_DB_GUARD;
-
-        const auto normalisedTags = normaliseTags(tags);
-
-        if (sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION;", nullptr, nullptr, nullptr) != SQLITE_OK)
-            return false;
-
-        sqlite3_stmt *deleteStmt = nullptr;
-        if (sqlite3_prepare_v2(db, "DELETE FROM file_tags WHERE file_id = ?", -1, &deleteStmt, nullptr) != SQLITE_OK)
-        {
-            sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
-            return false;
-        }
-
-        sqlite3_bind_int64(deleteStmt, 1, fileId);
-        const bool deleted = sqlite3_step(deleteStmt) == SQLITE_DONE;
-        sqlite3_finalize(deleteStmt);
-        if (!deleted)
-        {
-            sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
-            return false;
-        }
-
-        const char *insertSql = "INSERT INTO file_tags (file_id, tag) VALUES (?, ?)";
-        sqlite3_stmt *insertStmt = nullptr;
-        if (!normalisedTags.empty() && sqlite3_prepare_v2(db, insertSql, -1, &insertStmt, nullptr) != SQLITE_OK)
-        {
-            sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
-            return false;
-        }
-
-        for (const auto &tag : normalisedTags)
-        {
-            sqlite3_reset(insertStmt);
-            sqlite3_clear_bindings(insertStmt);
-            sqlite3_bind_int64(insertStmt, 1, fileId);
-            sqlite3_bind_text(insertStmt, 2, tag.c_str(), -1, SQLITE_TRANSIENT);
-            if (sqlite3_step(insertStmt) != SQLITE_DONE)
-            {
-                sqlite3_finalize(insertStmt);
-                sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
-                return false;
-            }
-        }
-
-        if (insertStmt != nullptr)
-            sqlite3_finalize(insertStmt);
-
-        if (sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr) != SQLITE_OK)
-        {
-            sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
-            return false;
-        }
-
-        return true;
-    }
-
-    std::vector<std::string> CatalogDb::tagsForFile(int64_t fileId)
-    {
-        SW_DB_GUARD;
-
-        std::vector<std::string> results;
-
-        const char *sql = "SELECT tag FROM file_tags WHERE file_id = ? ORDER BY tag";
-        sqlite3_stmt *stmt = nullptr;
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
-            return results;
-
-        sqlite3_bind_int64(stmt, 1, fileId);
-
-        while (sqlite3_step(stmt) == SQLITE_ROW)
-            results.push_back(readTextColumn(stmt, 0));
-
-        sqlite3_finalize(stmt);
-        return results;
-    }
-
-    std::vector<std::string> CatalogDb::allTags(int limit)
-    {
-        SW_DB_GUARD;
-
-        std::vector<std::string> results;
-
-        const char *sql = R"SQL(
-        SELECT DISTINCT tag
-        FROM file_tags
-        ORDER BY tag
-        LIMIT ?
-    )SQL";
-
-        sqlite3_stmt *stmt = nullptr;
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
-            return results;
-
-        sqlite3_bind_int(stmt, 1, limit);
-
-        while (sqlite3_step(stmt) == SQLITE_ROW)
-            results.push_back(readTextColumn(stmt, 0));
-
-        sqlite3_finalize(stmt);
-        return results;
-    }
-
-    bool CatalogDb::upsertSavedSearch(const SavedSearchRecord &savedSearch)
-    {
-        SW_DB_GUARD;
-
-        const char *insertByNameSql = R"SQL(
-        INSERT INTO saved_searches (name, query_text, root_id, favorites_only)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET
-            query_text = excluded.query_text,
-            root_id = excluded.root_id,
-            favorites_only = excluded.favorites_only
-    )SQL";
-
-        const char *upsertByIdSql = R"SQL(
-        INSERT INTO saved_searches (id, name, query_text, root_id, favorites_only)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            query_text = excluded.query_text,
-            root_id = excluded.root_id,
-            favorites_only = excluded.favorites_only
-    )SQL";
-
-        const char *sql = savedSearch.id > 0 ? upsertByIdSql : insertByNameSql;
-        sqlite3_stmt *stmt = nullptr;
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
-            return false;
-
-        int bindIndex = 1;
-        if (savedSearch.id > 0)
-            sqlite3_bind_int64(stmt, bindIndex++, savedSearch.id);
-
-        sqlite3_bind_text(stmt, bindIndex++, savedSearch.name.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, bindIndex++, savedSearch.queryText.c_str(), -1, SQLITE_TRANSIENT);
-        if (savedSearch.rootId.has_value())
-            sqlite3_bind_int64(stmt, bindIndex++, *savedSearch.rootId);
-        else
-            sqlite3_bind_null(stmt, bindIndex++);
-        sqlite3_bind_int(stmt, bindIndex, savedSearch.favoritesOnly ? 1 : 0);
-
-        const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
-        sqlite3_finalize(stmt);
-        return ok;
-    }
-
-    std::vector<SavedSearchRecord> CatalogDb::listSavedSearches()
-    {
-        SW_DB_GUARD;
-
-        std::vector<SavedSearchRecord> results;
-
-        const char *sql = R"SQL(
-        SELECT id, name, query_text, root_id, favorites_only
-        FROM saved_searches
-        ORDER BY name
-    )SQL";
-
-        sqlite3_stmt *stmt = nullptr;
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
-            return results;
-
-        while (sqlite3_step(stmt) == SQLITE_ROW)
-        {
-            SavedSearchRecord record;
-            record.id = sqlite3_column_int64(stmt, 0);
-            record.name = readTextColumn(stmt, 1);
-            record.queryText = readTextColumn(stmt, 2);
-            if (sqlite3_column_type(stmt, 3) != SQLITE_NULL)
-                record.rootId = sqlite3_column_int64(stmt, 3);
-            record.favoritesOnly = sqlite3_column_int(stmt, 4) != 0;
-            results.push_back(std::move(record));
-        }
-
-        sqlite3_finalize(stmt);
-        return results;
-    }
-
-    bool CatalogDb::removeSavedSearch(int64_t savedSearchId)
-    {
-        SW_DB_GUARD;
-
-        const char *sql = "DELETE FROM saved_searches WHERE id = ?";
-        sqlite3_stmt *stmt = nullptr;
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
-            return false;
-
-        sqlite3_bind_int64(stmt, 1, savedSearchId);
-
-        const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
-        sqlite3_finalize(stmt);
-        return ok;
     }
 
     bool CatalogDb::setAppSetting(const std::string &key, const std::string &value)

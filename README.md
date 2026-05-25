@@ -21,6 +21,7 @@ The main window shows the source browser, searchable results list, waveform view
 
 - [Screenshot](#screenshot)
 - [Support](#support)
+- [Version History](#version-history)
 - [Features](#features)
 - [Supported Formats](#supported-formats)
 - [Build Requirements](#build-requirements)
@@ -40,6 +41,21 @@ The main window shows the source browser, searchable results list, waveform view
 If you find SampleWrangler useful and want to support continued development, you can buy me a coffee here:
 
 [☕ Buy Me a Coffee](https://buymeacoffee.com/theosopher)
+
+---
+
+## Version History
+
+### 1.1.0
+
+- Simplified the results workflow to two clear filters: `All Files` and `Favorites`.
+- Removed saved searches, tags, and ratings to keep browsing focused on text search and favorites.
+- Added a toolbar About button for quicker access to app information.
+- Updated release packaging and metadata for the 1.1.0 build.
+
+### 1.0.0
+
+- Initial public release with source scanning, SQLite catalog search, waveform preview, ASIO playback, and Windows installer/portable packaging.
 
 ---
 
@@ -177,10 +193,10 @@ cmake --build --preset vs2026-release-artifacts
 
 This produces:
 
-- `build/vs2026-release/packages/SampleWrangler-1.0.0-win64-setup.exe`
-- `build/vs2026-release/packages/SampleWrangler-1.0.0-win64-portable.zip`
+- `build/vs2026-release/packages/SampleWrangler-1.1.0-win64-setup.exe`
+- `build/vs2026-release/packages/SampleWrangler-1.1.0-win64-portable.zip`
 
-The app executable, installer, and portable artifact are versioned as `1.0.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
+The app executable, installer, and portable artifact are versioned as `1.1.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
 
 The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php) and supports per-user or per-machine installs, Add/Remove Programs registration, and optional Start Menu/Desktop shortcuts.
 

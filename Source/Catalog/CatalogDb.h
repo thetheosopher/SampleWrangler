@@ -58,12 +58,6 @@ namespace sw
         std::vector<FileRecord> listFavoriteFiles(int limit = 200);
         bool setFileUserData(const FileUserDataRecord &userData);
         std::optional<FileUserDataRecord> fileUserDataByFileId(int64_t fileId);
-        bool replaceFileTags(int64_t fileId, const std::vector<std::string> &tags);
-        std::vector<std::string> tagsForFile(int64_t fileId);
-        std::vector<std::string> allTags(int limit = 200);
-        bool upsertSavedSearch(const SavedSearchRecord &savedSearch);
-        std::vector<SavedSearchRecord> listSavedSearches();
-        bool removeSavedSearch(int64_t savedSearchId);
 
         // ----- App settings -----
         bool setAppSetting(const std::string &key, const std::string &value);

@@ -291,7 +291,9 @@ public:
             }
 #endif
 
-            setContentOwned(new sw::MainComponent(), true);
+            setContentOwned(new sw::MainComponent([this]
+                                                  { showAboutBox(); }),
+                            true);
 
 #if JUCE_IOS || JUCE_ANDROID
             setFullScreen(true);

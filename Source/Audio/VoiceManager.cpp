@@ -696,24 +696,36 @@ namespace sw
             return readPos;
         };
 
-        auto readInterpolatedSample = [&](int channel, double readPos)
+        auto readInterpolatedSampleFromPointer = [&](const float *srcRead, double readPos)
         {
             const double wrappedPos = wrapReadPosition(readPos);
             if (wrappedPos < 0.0 || wrappedPos >= static_cast<double>(srcLength))
                 return 0.0f;
 
-            const float *srcRead = nullptr;
+            const int idx0 = static_cast<int>(wrappedPos);
+            const float frac = static_cast<float>(wrappedPos - static_cast<double>(idx0));
+            return interpolatedSampleReader(srcRead, srcLength, idx0, frac);
+        };
+
+        auto readInterpolatedSampleLeft = [&](double readPos)
+        {
+            return readInterpolatedSampleFromPointer(srcReadPtr0, readPos);
+        };
+
+        auto readInterpolatedSampleRight = [&](double readPos)
+        {
+            return readInterpolatedSampleFromPointer(srcReadPtr1, readPos);
+        };
+
+        auto readInterpolatedSampleForChannel = [&](int channel, double readPos)
+        {
             if (channel == 0)
-                srcRead = srcReadPtr0;
-            else if (channel == 1)
-                srcRead = srcReadPtr1;
-            else
-                srcRead = srcBuffer.getReadPointer(channel);
+                return readInterpolatedSampleLeft(readPos);
 
-            if (useHighQualityInterpolation)
-                return readHermiteInterpolatedSample(srcRead, srcLength, wrappedPos);
+            if (channel == 1)
+                return readInterpolatedSampleRight(readPos);
 
-            return readLinearInterpolatedSample(srcRead, srcLength, wrappedPos);
+            return readInterpolatedSampleFromPointer(srcBuffer.getReadPointer(channel), readPos);
         };
 
         if (voice.lastPreserveLengthUsedRubberBandRt != useRubberBandRt)
@@ -776,8 +788,10 @@ namespace sw
                             float inputRight = 0.0f;
                             if (!provideStartPadSample)
                             {
-                                inputLeft = readInterpolatedSample(0, pos);
-                                inputRight = readInterpolatedSample((numSrcChannels > 1) ? 1 : 0, pos);
+                                inputLeft = readInterpolatedSampleLeft(pos);
+                                inputRight = (numSrcChannels > 1)
+                                                 ? readInterpolatedSampleRight(pos)
+                                                 : inputLeft;
                             }
 
                             voice.pushRubberBandInput(inputLeft, inputRight);
@@ -894,6 +908,155 @@ namespace sw
             if (preserveLength)
             {
                 const int outputBase = renderedSamples;
+                const bool canUseGranularFixedPhaseFastPath = numSrcChannels <= 2;
+                if (canUseGranularFixedPhaseFastPath)
+                {
+                    constexpr int kGranularChunkSize = 256;
+                    std::array<float, kGranularChunkSize> mixLeft{};
+                    std::array<float, kGranularChunkSize> mixRight{};
+
+                    const uint64_t loopStartPhase = readPositionToPhase(static_cast<double>(loopStart));
+                    const uint64_t loopEndExclusivePhase = readPositionToPhase(loopEndExclusive);
+                    const uint64_t loopLengthPhase = readPositionToPhase(loopLength);
+                    const uint64_t srcLengthPhase = readPositionToPhase(static_cast<double>(srcLength));
+
+                    auto wrapSamplePhase = [&](uint64_t phase)
+                    {
+                        if (hasLoopRegion)
+                        {
+                            while (phase < loopStartPhase)
+                                phase += loopLengthPhase;
+                            while (phase >= loopEndExclusivePhase)
+                                phase -= loopLengthPhase;
+                            return phase;
+                        }
+
+                        if (isLoopOn && srcLength > 0)
+                        {
+                            while (phase >= srcLengthPhase)
+                                phase -= srcLengthPhase;
+                        }
+
+                        return phase;
+                    };
+
+                    auto readInterpolatedSampleAtPhase = [&](const float *srcRead, uint64_t phase)
+                    {
+                        const uint64_t wrappedPhase = wrapSamplePhase(phase);
+                        const int idx0 = static_cast<int>(wrappedPhase >> kPhaseFractionBits);
+                        if (idx0 < 0 || idx0 >= srcLength)
+                            return 0.0f;
+
+                        const float frac = static_cast<float>(wrappedPhase & kPhaseFractionMask) * kPhaseScaleInv;
+                        return interpolatedSampleReader(srcRead, srcLength, idx0, frac);
+                    };
+
+                    const uint64_t sourceAdvancePhaseIncrement = juce::jmax<uint64_t>(1, readRateToPhaseIncrement(sourceAdvancePerOutputSample));
+                    const uint64_t grainPhaseIncrement = juce::jmax<uint64_t>(1, readRateToPhaseIncrement(rate));
+                    const uint64_t grainSpacingPhaseOffset = juce::jmax<uint64_t>(1, readRateToPhaseIncrement(Voice::kGrainSpacingSamples));
+
+                    uint64_t posPhase = readPositionToPhase(pos);
+                    uint64_t grainPhaseA = readPositionToPhase(voice.grainReadPosA);
+                    uint64_t grainPhaseB = readPositionToPhase(voice.grainReadPosB);
+                    int spanRendered = 0;
+
+                    while (spanRendered < spanSamples)
+                    {
+                        const int chunkSamples = juce::jmin(kGranularChunkSize, spanSamples - spanRendered);
+                        int produced = 0;
+
+                        while (produced < chunkSamples)
+                        {
+                            const float gain = voice.advanceFade(fadeRate);
+                            if (gain <= 0.0f)
+                            {
+                                renderedSamples += spanRendered + produced;
+                                pos = phaseToReadPosition(posPhase);
+                                voice.playbackPos = pos;
+                                voice.grainReadPosA = phaseToReadPosition(grainPhaseA);
+                                voice.grainReadPosB = phaseToReadPosition(grainPhaseB);
+                                return;
+                            }
+
+                            if (voice.grainSamplesRemaining <= 0)
+                            {
+                                grainPhaseA = posPhase;
+                                grainPhaseB = posPhase + grainSpacingPhaseOffset;
+                                voice.grainSamplesRemaining = Voice::kGrainLengthSamples;
+                            }
+
+                            const float blend = smoothCrossfadeBlend(1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples)));
+                            const float gainA = 1.0f - blend;
+                            const float gainB = blend;
+
+                            if (numSrcChannels <= 1)
+                            {
+                                const float sampleA = readInterpolatedSampleAtPhase(srcReadPtr0, grainPhaseA);
+                                const float sampleB = readInterpolatedSampleAtPhase(srcReadPtr0, grainPhaseB);
+                                mixLeft[static_cast<size_t>(produced)] = ((sampleA * gainA) + (sampleB * gainB)) * gain;
+                            }
+                            else
+                            {
+                                const float sampleALeft = readInterpolatedSampleAtPhase(srcReadPtr0, grainPhaseA);
+                                const float sampleBLeft = readInterpolatedSampleAtPhase(srcReadPtr0, grainPhaseB);
+                                mixLeft[static_cast<size_t>(produced)] = ((sampleALeft * gainA) + (sampleBLeft * gainB)) * gain;
+
+                                const float sampleARight = readInterpolatedSampleAtPhase(srcReadPtr1, grainPhaseA);
+                                const float sampleBRight = readInterpolatedSampleAtPhase(srcReadPtr1, grainPhaseB);
+                                mixRight[static_cast<size_t>(produced)] = ((sampleARight * gainA) + (sampleBRight * gainB)) * gain;
+                            }
+
+                            grainPhaseA += grainPhaseIncrement;
+                            grainPhaseB += grainPhaseIncrement;
+
+                            if (hasLoopRegion || isLoopOn)
+                            {
+                                grainPhaseA = wrapSamplePhase(grainPhaseA);
+                                grainPhaseB = wrapSamplePhase(grainPhaseB);
+                            }
+
+                            --voice.grainSamplesRemaining;
+
+                            if (voice.grainSamplesRemaining <= 0)
+                            {
+                                grainPhaseA = grainPhaseB;
+                                grainPhaseB = grainPhaseA + grainSpacingPhaseOffset;
+                            }
+
+                            posPhase += sourceAdvancePhaseIncrement;
+                            ++produced;
+                        }
+
+                        if (produced <= 0)
+                            break;
+
+                        const int outputStart = startSample + outputBase + spanRendered;
+                        outputBuffer.addFrom(0, outputStart, mixLeft.data(), produced);
+
+                        if (numSrcChannels <= 1)
+                        {
+                            for (int ch = 1; ch < numOutChannels; ++ch)
+                                outputBuffer.addFrom(ch, outputStart, mixLeft.data(), produced);
+                        }
+                        else
+                        {
+                            if (numOutChannels > 1)
+                                outputBuffer.addFrom(1, outputStart, mixRight.data(), produced);
+
+                            for (int ch = 2; ch < numOutChannels; ++ch)
+                                outputBuffer.addFrom(ch, outputStart, mixLeft.data(), produced);
+                        }
+
+                        spanRendered += produced;
+                    }
+
+                    renderedSamples += spanRendered;
+                    pos = phaseToReadPosition(posPhase);
+                    voice.grainReadPosA = phaseToReadPosition(grainPhaseA);
+                    voice.grainReadPosB = phaseToReadPosition(grainPhaseB);
+                    continue;
+                }
+
                 for (int i = 0; i < spanSamples; ++i)
                 {
                     const float gain = voice.advanceFade(fadeRate);
@@ -919,8 +1082,8 @@ namespace sw
                     const float gainB = blend;
                     if (numSrcChannels <= 1)
                     {
-                        const float sampleA = readInterpolatedSample(0, voice.grainReadPosA);
-                        const float sampleB = readInterpolatedSample(0, voice.grainReadPosB);
+                        const float sampleA = readInterpolatedSampleLeft(voice.grainReadPosA);
+                        const float sampleB = readInterpolatedSampleLeft(voice.grainReadPosB);
                         const float mixedSample = ((sampleA * gainA) + (sampleB * gainB)) * gain;
 
                         for (int ch = 0; ch < directMixChannels; ++ch)
@@ -931,12 +1094,12 @@ namespace sw
                     }
                     else if (numSrcChannels == 2)
                     {
-                        const float sampleALeft = readInterpolatedSample(0, voice.grainReadPosA);
-                        const float sampleBLeft = readInterpolatedSample(0, voice.grainReadPosB);
+                        const float sampleALeft = readInterpolatedSampleLeft(voice.grainReadPosA);
+                        const float sampleBLeft = readInterpolatedSampleLeft(voice.grainReadPosB);
                         const float mixedLeft = ((sampleALeft * gainA) + (sampleBLeft * gainB)) * gain;
 
-                        const float sampleARight = readInterpolatedSample(1, voice.grainReadPosA);
-                        const float sampleBRight = readInterpolatedSample(1, voice.grainReadPosB);
+                        const float sampleARight = readInterpolatedSampleRight(voice.grainReadPosA);
+                        const float sampleBRight = readInterpolatedSampleRight(voice.grainReadPosB);
                         const float mixedRight = ((sampleARight * gainA) + (sampleBRight * gainB)) * gain;
 
                         if (directMixChannels > 0)
@@ -961,8 +1124,8 @@ namespace sw
 
                         for (int srcCh = 0; srcCh < cachedSrcChannels; ++srcCh)
                         {
-                            const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
-                            const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                            const float sampleA = readInterpolatedSampleForChannel(srcCh, voice.grainReadPosA);
+                            const float sampleB = readInterpolatedSampleForChannel(srcCh, voice.grainReadPosB);
                             cachedMixedSamples[static_cast<size_t>(srcCh)] = ((sampleA * gainA) + (sampleB * gainB)) * gain;
                         }
 
@@ -972,8 +1135,8 @@ namespace sw
                             if (srcCh < cachedSrcChannels)
                                 return cachedMixedSamples[static_cast<size_t>(srcCh)];
 
-                            const float sampleA = readInterpolatedSample(srcCh, voice.grainReadPosA);
-                            const float sampleB = readInterpolatedSample(srcCh, voice.grainReadPosB);
+                            const float sampleA = readInterpolatedSampleForChannel(srcCh, voice.grainReadPosA);
+                            const float sampleB = readInterpolatedSampleForChannel(srcCh, voice.grainReadPosB);
                             return ((sampleA * gainA) + (sampleB * gainB)) * gain;
                         };
 
@@ -1004,55 +1167,80 @@ namespace sw
                 const bool canUseSteadyStateFastPath = (voice.fadeState == Voice::FadeState::Active);
                 if (canUseSteadyStateFastPath)
                 {
+                    constexpr int kSteadyStateChunkSize = 256;
+                    std::array<float, kSteadyStateChunkSize> mixLeft{};
+                    std::array<float, kSteadyStateChunkSize> mixRight{};
                     const int outputBase = renderedSamples;
                     uint64_t phase = readPositionToPhase(pos);
                     const uint64_t phaseIncrement = juce::jmax<uint64_t>(1, readRateToPhaseIncrement(rate));
 
-                    if (numSrcChannels <= 1)
+                    int spanRendered = 0;
+                    while (spanRendered < spanSamples)
                     {
-                        for (int i = 0; i < spanSamples; ++i)
-                        {
-                            const int outputIndex = outputBase + i;
-                            const int idx0 = static_cast<int>(phase >> kPhaseFractionBits);
-                            const float frac = static_cast<float>(phase & kPhaseFractionMask) * kPhaseScaleInv;
-                            const float sample = interpolatedSampleReader(srcReadPtr0, srcLength, idx0, frac);
+                        const int chunkSamples = juce::jmin(kSteadyStateChunkSize, spanSamples - spanRendered);
 
+                        if (numSrcChannels <= 1)
+                        {
+                            for (int i = 0; i < chunkSamples; ++i)
+                            {
+                                const int idx0 = static_cast<int>(phase >> kPhaseFractionBits);
+                                const float frac = static_cast<float>(phase & kPhaseFractionMask) * kPhaseScaleInv;
+                                mixLeft[static_cast<size_t>(i)] = interpolatedSampleReader(srcReadPtr0, srcLength, idx0, frac);
+                                phase += phaseIncrement;
+                            }
+
+                            const int outputStart = outputBase + spanRendered;
                             for (int ch = 0; ch < directMixChannels; ++ch)
-                                outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += sample;
+                            {
+                                juce::FloatVectorOperations::add(outputWritePtrs[static_cast<size_t>(ch)] + outputStart,
+                                                                 mixLeft.data(),
+                                                                 chunkSamples);
+                            }
 
                             for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                                outputBuffer.addSample(ch, startSample + outputIndex, sample);
-
-                            phase += phaseIncrement;
+                                outputBuffer.addFrom(ch, startSample + outputStart, mixLeft.data(), chunkSamples);
                         }
-                    }
-                    else
-                    {
-                        for (int i = 0; i < spanSamples; ++i)
+                        else
                         {
-                            const int outputIndex = outputBase + i;
-                            const int idx0 = static_cast<int>(phase >> kPhaseFractionBits);
-                            const float frac = static_cast<float>(phase & kPhaseFractionMask) * kPhaseScaleInv;
-                            const float sampleLeft = interpolatedSampleReader(srcReadPtr0, srcLength, idx0, frac);
-                            const float sampleRight = interpolatedSampleReader(srcReadPtr1, srcLength, idx0, frac);
+                            for (int i = 0; i < chunkSamples; ++i)
+                            {
+                                const int idx0 = static_cast<int>(phase >> kPhaseFractionBits);
+                                const float frac = static_cast<float>(phase & kPhaseFractionMask) * kPhaseScaleInv;
+                                mixLeft[static_cast<size_t>(i)] = interpolatedSampleReader(srcReadPtr0, srcLength, idx0, frac);
+                                mixRight[static_cast<size_t>(i)] = interpolatedSampleReader(srcReadPtr1, srcLength, idx0, frac);
+                                phase += phaseIncrement;
+                            }
 
+                            const int outputStart = outputBase + spanRendered;
                             if (directMixChannels > 0)
-                                outputWritePtrs[0][outputIndex] += sampleLeft;
+                            {
+                                juce::FloatVectorOperations::add(outputWritePtrs[0] + outputStart,
+                                                                 mixLeft.data(),
+                                                                 chunkSamples);
+                            }
 
                             if (directMixChannels > 1)
-                                outputWritePtrs[1][outputIndex] += sampleRight;
+                            {
+                                juce::FloatVectorOperations::add(outputWritePtrs[1] + outputStart,
+                                                                 mixRight.data(),
+                                                                 chunkSamples);
+                            }
 
                             for (int ch = 2; ch < directMixChannels; ++ch)
-                                outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += sampleLeft;
+                            {
+                                juce::FloatVectorOperations::add(outputWritePtrs[static_cast<size_t>(ch)] + outputStart,
+                                                                 mixLeft.data(),
+                                                                 chunkSamples);
+                            }
 
                             for (int ch = directMixChannels; ch < numOutChannels; ++ch)
                             {
-                                const float sample = (ch == 1) ? sampleRight : sampleLeft;
-                                outputBuffer.addSample(ch, startSample + outputIndex, sample);
+                                const float *mixData = (ch == 1) ? mixRight.data() : mixLeft.data();
+                                outputBuffer.addFrom(ch, startSample + outputStart, mixData, chunkSamples);
                             }
-
-                            phase += phaseIncrement;
                         }
+
+                        spanRendered += chunkSamples;
                     }
 
                     pos = phaseToReadPosition(phase);

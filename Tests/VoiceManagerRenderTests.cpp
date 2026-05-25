@@ -164,6 +164,36 @@ namespace
         return loopStats.totalAbs > 1.0 && !loopStats.playbackFinishedSeen && loopStats.lastProgress > 0.10 && loopStats.lastProgress < 0.35 && stopStats.playbackFinishedSeen && !manager.isPlaying();
     }
 
+    bool testLoopedPreserveLengthPlaybackRemainsActiveAndBounded()
+    {
+        constexpr int kBlockSize = 16;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(true);
+        manager.setStretchHighQualityEnabled(false);
+        manager.setLoopEnabled(true);
+        manager.setLoopRegionSamples(64, 127);
+        manager.loadBuffer(makeTestBuffer(1, 256), kSampleRate);
+        manager.play();
+        manager.updateAllVoicePitch(7.0);
+
+        RenderStats loopStats;
+        for (int blockIndex = 0; blockIndex < 24; ++blockIndex)
+        {
+            const auto blockStats = renderBlock(manager, 2, kBlockSize);
+            accumulateRenderStats(loopStats, blockStats);
+
+            if (!blockStats.primaryPlaying)
+                return false;
+        }
+
+        manager.stop();
+        const auto stopStats = renderUntilIdle(manager, 2, kBlockSize, 64);
+
+        return loopStats.totalAbs > 1.0 && !loopStats.playbackFinishedSeen && loopStats.lastProgress > 0.20 && loopStats.lastProgress < 0.55 && stopStats.playbackFinishedSeen && !manager.isPlaying();
+    }
+
     bool testScrubResetRepositionsPrimaryPreserveLengthPlayback()
     {
         constexpr int kBlockSize = 8;
@@ -257,6 +287,77 @@ namespace
 
         return directStats.totalAbs > 1.0 && preserveStats.totalAbs > 1.0 && preserveStats.renderedBlocks > directStats.renderedBlocks && !directManager.isPlaying() && !preserveManager.isPlaying();
     }
+
+    bool testStereoPreserveLengthMaintainsChannelSeparation()
+    {
+        constexpr int kBlockSize = 32;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(true);
+        manager.setStretchHighQualityEnabled(false);
+        manager.loadBuffer(makeTestBuffer(2, 256), kSampleRate);
+        manager.noteOn(60, 1.5, 1.5);
+
+        juce::AudioBuffer<float> block(2, kBlockSize);
+        block.clear();
+        juce::AudioSourceChannelInfo info(&block, 0, kBlockSize);
+        manager.getNextAudioBlock(info);
+
+        double leftAbs = 0.0;
+        double rightAbs = 0.0;
+        double channelDifferenceAbs = 0.0;
+        const float *leftRead = block.getReadPointer(0);
+        const float *rightRead = block.getReadPointer(1);
+
+        for (int i = 0; i < kBlockSize; ++i)
+        {
+            leftAbs += std::abs(leftRead[i]);
+            rightAbs += std::abs(rightRead[i]);
+            channelDifferenceAbs += std::abs(leftRead[i] - rightRead[i]);
+        }
+
+        return leftAbs > 0.1 && rightAbs > 0.1 && channelDifferenceAbs > 0.01 && manager.isPlaying();
+    }
+
+    bool testStereoDirectPlaybackMaintainsChannelSeparation()
+    {
+        constexpr int kBlockSize = 32;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(false);
+        manager.setStretchHighQualityEnabled(false);
+        manager.loadBuffer(makeTestBuffer(2, 1024), kSampleRate);
+        manager.play();
+
+        for (int blockIndex = 0; blockIndex < 8; ++blockIndex)
+        {
+            const auto warmupStats = renderBlock(manager, 2, kBlockSize);
+            if (!warmupStats.anyPlaying)
+                return false;
+        }
+
+        juce::AudioBuffer<float> block(2, kBlockSize);
+        block.clear();
+        juce::AudioSourceChannelInfo info(&block, 0, kBlockSize);
+        manager.getNextAudioBlock(info);
+
+        double leftAbs = 0.0;
+        double rightAbs = 0.0;
+        double channelDifferenceAbs = 0.0;
+        const float *leftRead = block.getReadPointer(0);
+        const float *rightRead = block.getReadPointer(1);
+
+        for (int i = 0; i < kBlockSize; ++i)
+        {
+            leftAbs += std::abs(leftRead[i]);
+            rightAbs += std::abs(rightRead[i]);
+            channelDifferenceAbs += std::abs(leftRead[i] - rightRead[i]);
+        }
+
+        return leftAbs > 0.1 && rightAbs > 0.1 && channelDifferenceAbs > 0.01 && manager.isPlaying();
+    }
 }
 
 int main()
@@ -276,6 +377,12 @@ int main()
     if (!testLoopedPrimaryPlaybackRemainsActiveAndBounded())
     {
         std::cerr << "testLoopedPrimaryPlaybackRemainsActiveAndBounded failed.\n";
+        return 1;
+    }
+
+    if (!testLoopedPreserveLengthPlaybackRemainsActiveAndBounded())
+    {
+        std::cerr << "testLoopedPreserveLengthPlaybackRemainsActiveAndBounded failed.\n";
         return 1;
     }
 
@@ -300,6 +407,18 @@ int main()
     if (!testPreserveLengthRespectsSourceSampleRate())
     {
         std::cerr << "testPreserveLengthRespectsSourceSampleRate failed.\n";
+        return 1;
+    }
+
+    if (!testStereoPreserveLengthMaintainsChannelSeparation())
+    {
+        std::cerr << "testStereoPreserveLengthMaintainsChannelSeparation failed.\n";
+        return 1;
+    }
+
+    if (!testStereoDirectPlaybackMaintainsChannelSeparation())
+    {
+        std::cerr << "testStereoDirectPlaybackMaintainsChannelSeparation failed.\n";
         return 1;
     }
 

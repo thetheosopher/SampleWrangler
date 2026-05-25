@@ -92,6 +92,16 @@ Later candidates:
 
 Status: Not started
 
+Detailed execution plan: see `docs/SPRINT_D_TRACKER.md`.
+
+Recommended landing order:
+
+- Analysis substrate and persistence
+- Duplicate and near-duplicate discovery
+- BPM, key, transient, and loop inference
+- Similarity search
+- ML-assisted classification as a stretch goal
+
 - BPM detection
 - Key detection
 - Duplicate/near-duplicate browsing

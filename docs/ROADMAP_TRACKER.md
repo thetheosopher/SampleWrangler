@@ -34,7 +34,7 @@ Build the most compelling desktop sample librarian possible while complementing 
 
 - `SampleWrangler` builds successfully with CMake Tools.
 - The current sampler-engine follow-up build is clean after moving Rubber Band state and helpers out of `Source/Audio/Voice.h` into `Source/Audio/Voice.cpp` and tightening the preserve-length render path.
-- `SampleWranglerVoiceManagerRenderTests` now builds successfully and gives the sampler engine an offline render harness that exercises primary playback completion, direct and preserve-length loop behavior, scrub resets, preserve-length duration behavior, source-sample-rate handling, stereo direct and preserve-length channel separation, fresh-start HQ preserve-length playback, and deterministic live HQ-toggle deferral to the next note through the public `VoiceManager` API.
+- `SampleWranglerVoiceManagerRenderTests` now builds successfully and gives the sampler engine an offline render harness that exercises primary playback completion, direct and preserve-length loop behavior, preserve-length loop-boundary wrapping, scrub resets, preserve-length duration behavior, source-sample-rate handling, stereo direct steady-state and fade-in channel separation, short-clip HQ fallback audibility, fresh-start HQ preserve-length playback, and deterministic live HQ-toggle deferral to the next note through the public `VoiceManager` API.
 - `SampleWranglerAcpPresetReaderTests` builds successfully.
 - `SampleWranglerCatalogDbTests` builds successfully and now also round-trip the indexed preset summary fields (`preset_name`, `zone_count`, `key_low/high`, `velocity_low/high`).
 - `SampleWranglerScannerAppleLoopTests` builds successfully and now covers Apple Loop AIFF metadata plus indexed SFZ, Bitwig `.multisample`, Korg `.korgmultisample`, SoundFont `.sf2`, DecentSampler `.dspreset`, TAL `.talsmpl`, and TX16Wx `.txprog` preset ingestion.
@@ -149,19 +149,20 @@ Status: Partially started through `.acp` preview support
   - The granular preserve-length fallback now also uses mono/stereo-specific output fanout in the common 1- and 2-channel cases, removing another per-sample channel-mapping layer from that hot path.
   - The granular preserve-length path now routes mono/stereo sample reads through pointer-specialized interpolators built around the already-selected interpolation function, removing another layer of per-sample channel and interpolation-mode dispatch from the common case.
   - The steady-state non-preserve mono/stereo path now mixes in chunks and uses vectorized fanout (`FloatVectorOperations::add` plus contiguous scratch buffers) instead of per-sample per-channel accumulation in the common case.
+  - The faded non-preserve direct mono/stereo path now also mixes in chunks and uses vectorized fanout in the common attack/release case, reducing per-sample output-channel dispatch without changing fade progression.
   - The faded non-preserve direct path now caches interpolated source samples per frame before distributing them to output channels, removing another repeated-read path during attack/release playback.
   - When Rubber Band RT cannot produce startup output before a short clip is exhausted, the current note now degrades to the granular preserve-length path instead of failing silently.
   - Consider further SIMD/vectorized mixing for steady-state spans.
-  - Consider pushing fixed-phase accumulation further into the remaining non-steady-state paths if profiling shows it is worth the extra complexity.
+  - Consider pushing the same chunked/vector fanout pattern into the remaining wider-channel generic paths if profiling shows it is worth the extra complexity.
 - If true in-flight HQ/Rubber Band switching is ever required, design it explicitly as a crossfade or note re-arm flow; the current contract is deterministic deferral to the next note.
-- Extend the offline `VoiceManager` render tests further with short-clip HQ latency behavior, more boundary-focused loop assertions, and any future true in-flight mode-switch design if that becomes a product goal.
+- Extend the offline `VoiceManager` render tests further with repeated-wrap stress cases, wider-channel fallback coverage, and any future true in-flight mode-switch design if that becomes a product goal.
 - The `MainComponent` class is still large and could eventually be split into controller/state pieces.
 
 ## Suggested Next Session Order
 
-1. Keep Sprint C paused for now and continue sampler-core work by profiling the remaining render paths for additional steady-state SIMD/vector opportunities.
+1. Keep Sprint C paused for now and continue sampler-core work by profiling the remaining wider-channel and generic render paths for additional SIMD/vector opportunities.
 2. Revisit the non-Rubber-Band preserve-length fallback after listening tests and profiling, especially around grain sizing, spacing, denormal safety, and any further fixed-phase opportunities.
-3. Extend the offline `VoiceManager` harness with tighter loop-boundary assertions and any remaining short-clip HQ latency checks before attempting more invasive render-path changes.
+3. Extend the offline `VoiceManager` harness with repeated-wrap stress cases and wider-channel fallback coverage before attempting more invasive render-path changes.
 4. Resume Sprint C only after the sampler engine slice is stable enough to support more ambitious preview workflows.
 5. Expose richer preset-specific metadata in the UI beyond the new summary row once format breadth work resumes.
 

@@ -194,6 +194,27 @@ namespace
         return loopStats.totalAbs > 1.0 && !loopStats.playbackFinishedSeen && loopStats.lastProgress > 0.20 && loopStats.lastProgress < 0.55 && stopStats.playbackFinishedSeen && !manager.isPlaying();
     }
 
+    bool testLoopedPreserveLengthWrapsAcrossBoundaryCleanly()
+    {
+        constexpr int kBlockSize = 16;
+        constexpr double kStartProgress = 126.0 / 256.0;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(true);
+        manager.setStretchHighQualityEnabled(false);
+        manager.setLoopEnabled(true);
+        manager.setLoopRegionSamples(64, 127);
+        manager.loadBuffer(makeTestBuffer(1, 256), kSampleRate);
+        manager.play();
+        manager.updateAllVoicePitch(7.0);
+        manager.setPlaybackProgressNormalized(kStartProgress);
+
+        const auto wrapStats = renderBlock(manager, 2, kBlockSize);
+
+        return wrapStats.totalAbs > 0.1 && wrapStats.primaryPlaying && wrapStats.progress < kStartProgress && wrapStats.progress > 0.24 && wrapStats.progress < 0.50;
+    }
+
     bool testScrubResetRepositionsPrimaryPreserveLengthPlayback()
     {
         constexpr int kBlockSize = 8;
@@ -230,6 +251,23 @@ namespace
         const auto highQualityCompletion = renderUntilIdle(manager, 2, kBlockSize, 128);
 
         return highQualityCompletion.totalAbs > 0.1 && highQualityCompletion.playbackFinishedSeen && !manager.isPlaying();
+    }
+
+    bool testShortClipHighQualityPreserveLengthFallsBackAudibly()
+    {
+        constexpr int kBlockSize = 16;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(true);
+        manager.setStretchHighQualityEnabled(true);
+        manager.loadBuffer(makeTestBuffer(1, 48), kSampleRate);
+        manager.play();
+        manager.updateAllVoicePitch(7.0);
+
+        const auto stats = renderUntilIdle(manager, 2, kBlockSize, 64);
+
+        return stats.totalAbs > 0.1 && stats.renderedBlocks > 0 && stats.playbackFinishedSeen && !manager.isPlaying();
     }
 
     bool testLiveHighQualityToggleDefersUntilNextPreserveLengthPlayback()
@@ -320,6 +358,38 @@ namespace
         return leftAbs > 0.1 && rightAbs > 0.1 && channelDifferenceAbs > 0.01 && manager.isPlaying();
     }
 
+    bool testStereoDirectFadeInMaintainsChannelSeparation()
+    {
+        constexpr int kBlockSize = 32;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(false);
+        manager.setStretchHighQualityEnabled(false);
+        manager.loadBuffer(makeTestBuffer(2, 256), kSampleRate);
+        manager.play();
+
+        juce::AudioBuffer<float> block(2, kBlockSize);
+        block.clear();
+        juce::AudioSourceChannelInfo info(&block, 0, kBlockSize);
+        manager.getNextAudioBlock(info);
+
+        double leftAbs = 0.0;
+        double rightAbs = 0.0;
+        double channelDifferenceAbs = 0.0;
+        const float *leftRead = block.getReadPointer(0);
+        const float *rightRead = block.getReadPointer(1);
+
+        for (int i = 0; i < kBlockSize; ++i)
+        {
+            leftAbs += std::abs(leftRead[i]);
+            rightAbs += std::abs(rightRead[i]);
+            channelDifferenceAbs += std::abs(leftRead[i] - rightRead[i]);
+        }
+
+        return leftAbs > 0.05 && rightAbs > 0.05 && channelDifferenceAbs > 0.01 && manager.isPlaying();
+    }
+
     bool testStereoDirectPlaybackMaintainsChannelSeparation()
     {
         constexpr int kBlockSize = 32;
@@ -386,6 +456,12 @@ int main()
         return 1;
     }
 
+    if (!testLoopedPreserveLengthWrapsAcrossBoundaryCleanly())
+    {
+        std::cerr << "testLoopedPreserveLengthWrapsAcrossBoundaryCleanly failed.\n";
+        return 1;
+    }
+
     if (!testScrubResetRepositionsPrimaryPreserveLengthPlayback())
     {
         std::cerr << "testScrubResetRepositionsPrimaryPreserveLengthPlayback failed.\n";
@@ -395,6 +471,12 @@ int main()
     if (!testHighQualityPreserveLengthPlaybackCompletes())
     {
         std::cerr << "testHighQualityPreserveLengthPlaybackCompletes failed.\n";
+        return 1;
+    }
+
+    if (!testShortClipHighQualityPreserveLengthFallsBackAudibly())
+    {
+        std::cerr << "testShortClipHighQualityPreserveLengthFallsBackAudibly failed.\n";
         return 1;
     }
 
@@ -413,6 +495,12 @@ int main()
     if (!testStereoPreserveLengthMaintainsChannelSeparation())
     {
         std::cerr << "testStereoPreserveLengthMaintainsChannelSeparation failed.\n";
+        return 1;
+    }
+
+    if (!testStereoDirectFadeInMaintainsChannelSeparation())
+    {
+        std::cerr << "testStereoDirectFadeInMaintainsChannelSeparation failed.\n";
         return 1;
     }
 

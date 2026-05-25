@@ -1248,6 +1248,106 @@ namespace sw
                     continue;
                 }
 
+                if (numSrcChannels <= 2)
+                {
+                    constexpr int kFadedDirectChunkSize = 256;
+                    std::array<float, kFadedDirectChunkSize> mixLeft{};
+                    std::array<float, kFadedDirectChunkSize> mixRight{};
+
+                    int spanRendered = 0;
+                    while (spanRendered < spanSamples)
+                    {
+                        const int chunkSamples = juce::jmin(kFadedDirectChunkSize, spanSamples - spanRendered);
+                        int produced = 0;
+
+                        if (numSrcChannels <= 1)
+                        {
+                            for (; produced < chunkSamples; ++produced)
+                            {
+                                const float gain = voice.advanceFade(fadeRate);
+                                if (gain <= 0.0f)
+                                    break;
+
+                                const int idx0 = static_cast<int>(pos);
+                                const float frac = static_cast<float>(pos - static_cast<double>(idx0));
+                                mixLeft[static_cast<size_t>(produced)] = interpolatedSampleReader(srcReadPtr0, srcLength, idx0, frac) * gain;
+                                pos += rate;
+                            }
+
+                            if (produced > 0)
+                            {
+                                const int outputStart = renderedSamples + spanRendered;
+                                for (int ch = 0; ch < directMixChannels; ++ch)
+                                {
+                                    juce::FloatVectorOperations::add(outputWritePtrs[static_cast<size_t>(ch)] + outputStart,
+                                                                     mixLeft.data(),
+                                                                     produced);
+                                }
+
+                                for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                                    outputBuffer.addFrom(ch, startSample + outputStart, mixLeft.data(), produced);
+                            }
+                        }
+                        else
+                        {
+                            for (; produced < chunkSamples; ++produced)
+                            {
+                                const float gain = voice.advanceFade(fadeRate);
+                                if (gain <= 0.0f)
+                                    break;
+
+                                const int idx0 = static_cast<int>(pos);
+                                const float frac = static_cast<float>(pos - static_cast<double>(idx0));
+                                mixLeft[static_cast<size_t>(produced)] = interpolatedSampleReader(srcReadPtr0, srcLength, idx0, frac) * gain;
+                                mixRight[static_cast<size_t>(produced)] = interpolatedSampleReader(srcReadPtr1, srcLength, idx0, frac) * gain;
+                                pos += rate;
+                            }
+
+                            if (produced > 0)
+                            {
+                                const int outputStart = renderedSamples + spanRendered;
+                                if (directMixChannels > 0)
+                                {
+                                    juce::FloatVectorOperations::add(outputWritePtrs[0] + outputStart,
+                                                                     mixLeft.data(),
+                                                                     produced);
+                                }
+
+                                if (directMixChannels > 1)
+                                {
+                                    juce::FloatVectorOperations::add(outputWritePtrs[1] + outputStart,
+                                                                     mixRight.data(),
+                                                                     produced);
+                                }
+
+                                for (int ch = 2; ch < directMixChannels; ++ch)
+                                {
+                                    juce::FloatVectorOperations::add(outputWritePtrs[static_cast<size_t>(ch)] + outputStart,
+                                                                     mixLeft.data(),
+                                                                     produced);
+                                }
+
+                                for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                                {
+                                    const float *mixData = (ch == 1) ? mixRight.data() : mixLeft.data();
+                                    outputBuffer.addFrom(ch, startSample + outputStart, mixData, produced);
+                                }
+                            }
+                        }
+
+                        spanRendered += produced;
+                        if (produced < chunkSamples)
+                        {
+                            renderedSamples += spanRendered;
+                            voice.playbackPos = pos;
+                            return;
+                        }
+                    }
+
+                    renderedSamples += spanRendered;
+                    continue;
+                }
+
                 for (int i = 0; i < spanSamples; ++i)
                 {
                     const float gain = voice.advanceFade(fadeRate);

@@ -33,6 +33,7 @@ Build the most compelling desktop sample librarian possible while complementing 
 ## Current Validation State
 
 - `SampleWrangler` builds successfully with CMake Tools.
+- The shipped results workflow is intentionally limited to text search plus `All Files` and `Favorites`; ratings, tags, and saved searches were removed in 1.1.
 - The current sampler-engine follow-up build is clean after moving Rubber Band state and helpers out of `Source/Audio/Voice.h` into `Source/Audio/Voice.cpp` and tightening the preserve-length render path.
 - `SampleWranglerVoiceManagerRenderTests` now builds successfully and gives the sampler engine an offline render harness that exercises primary playback completion, direct and preserve-length loop behavior, preserve-length loop-boundary wrapping, scrub resets, preserve-length duration behavior, source-sample-rate handling, stereo direct steady-state and fade-in channel separation, short-clip HQ fallback audibility, fresh-start HQ preserve-length playback, and deterministic live HQ-toggle deferral to the next note through the public `VoiceManager` API.
 - `SampleWranglerAcpPresetReaderTests` builds successfully.
@@ -57,11 +58,11 @@ Status: Complete
 
 ### Sprint B: Catalog and Library Intelligence Foundation
 
-Status: Complete
+Status: Complete, with 1.1 narrowing the shipped metadata UI to favorites-only
 
 - Introduce `PRAGMA user_version` schema migrations. Done.
 - Add `content_hash` or near-duplicate hash for duplicate detection and move resilience. Storage, scanner ingestion, and duplicate-query foundation are done.
-- Add favorites, ratings, tags, and saved searches. Database foundation and results/browser UI integration are done.
+- Favorites-only user metadata is shipped. Ratings, tags, and saved searches were intentionally removed in 1.1 to keep the results workflow focused on text search plus favorites.
 - Consolidate waveform cache persistence strategy if the file-based and blob-based systems remain redundant. Runtime reads now use blob-backed peaks only.
 - Add source-folder live watching on Windows. Done via per-root watcher callbacks that queue rescans when the app is idle.
 
@@ -123,9 +124,8 @@ Status: Partially started through `.acp` preview support
 
 ### Library UX
 
-- Tags, favorites, ratings
-- Smart folders / saved queries
-- Filter sidebar by format, BPM, key, duration, channels, loop availability
+- Keep the primary browse flow simple: text search, source-tree scoping, and favorites.
+- Consider lightweight secondary filters for format, BPM, key, duration, channels, and loop availability only if they earn their keep.
 - Duplicate finder
 - Recently added / recently previewed panes
 
@@ -182,8 +182,8 @@ Status: Partially started through `.acp` preview support
 - The `files` table stores `content_hash` and indexes it.
 - Scanner ingestion computes a sampled content fingerprint from file size plus the first/last 64 KB.
 - `CatalogDb::listDuplicateFiles()` is available for future duplicate-browser UI work.
-- Favorites, ratings, tags, and saved searches now persist in dedicated catalog tables and are wired into the results UI.
-- Results browsing now supports recent/favorites/duplicates views plus saved-search recall and per-file metadata editing.
+- `file_user_data` now persists favorites only; schema migration 6 removes the older ratings, tags, and saved-search tables.
+- Results browsing is intentionally limited to text search plus `All Files` and `Favorites`, with per-root scoping coming from the source browser.
 - Source roots now rebuild Windows directory watchers and queue automatic rescans when the library changes on disk.
 - Results/runtime waveform reads now treat `WaveCacheBlobDb` as authoritative instead of falling back to legacy `.peak` files.
 

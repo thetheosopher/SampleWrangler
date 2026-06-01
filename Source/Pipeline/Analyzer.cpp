@@ -1,5 +1,6 @@
 #include "Analyzer.h"
 #include "Util/Paths.h"
+#include "Util/Logging.h"
 #include <algorithm>
 #include <JuceHeader.h>
 
@@ -42,7 +43,10 @@ namespace sw
                 const juce::File sourceFile(absolutePath);
                 auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(sourceFile));
                 if (!reader)
+                {
+                    SW_LOG_WARN("Analyzer: could not open reader for " << absolutePath << " (file left un-analyzed)");
                     return;
+                }
 
                 if (reader->sampleRate > 0.0)
                     rec.durationSec = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
@@ -72,20 +76,9 @@ namespace sw
 
     void Analyzer::analyzeRoot(int64_t rootId)
     {
-        const auto files = catalogDb.listRecentFiles(1000000);
-        for (const auto &file : files)
-        {
-            if (file.rootId != rootId)
-                continue;
-
-            if (file.indexOnly)
-                continue;
-
-            if (file.durationSec.has_value())
-                continue;
-
-            analyzeFile(file.id);
-        }
+        const auto fileIds = catalogDb.listFileIdsNeedingAnalysisByRoot(rootId);
+        for (const auto fileId : fileIds)
+            analyzeFile(fileId);
     }
 
 } // namespace sw

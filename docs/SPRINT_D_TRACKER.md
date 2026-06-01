@@ -17,7 +17,7 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
 | Slice | Status | Why it comes first | Notes |
 | --- | --- | --- | --- |
 | Analysis substrate and persistence | Planned | Everything else depends on a durable background-analysis path. | Wire analysis jobs after scan completion and store derived features with versioning. |
-| Duplicate and near-duplicate discovery | Planned | Immediate user value; exact duplicates already have catalog support. | Upgrade the existing duplicates view before tackling full similarity search. |
+| Duplicate and near-duplicate discovery | Planned | Immediate user value; exact duplicates already have catalog support. | Introduce a dedicated duplicates workflow without complicating the default `All Files` / `Favorites` results model. |
 | BPM, key, transient, and loop inference | Planned | Extends metadata the UI already knows how to render. | Use offline analysis only for playable audio and never on the audio thread. |
 | Similarity search | Planned | Needs persisted features and a query flow first. | Start with deterministic feature vectors and ranked search, not embeddings. |
 | ML-assisted classification | Stretch | Highest uncertainty and weakest current foundation. | Defer until feature quality and UX prove out. |
@@ -42,7 +42,7 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
 
 ### 2. Duplicate and Near-Duplicate Discovery
 
-- Reuse the exact-duplicate foundation already present in `CatalogDb::listDuplicateFiles()` and the existing duplicates view mode in `ResultsPanel`.
+- Reuse the exact-duplicate foundation already present in `CatalogDb::listDuplicateFiles()`; Sprint D will need to add a dedicated duplicates workflow because the current results UI intentionally ships with only `All Files` and `Favorites`.
 - Improve the duplicates UX before attempting near-duplicate ranking:
   - group duplicate rows by hash cluster
   - show cluster counts
@@ -120,7 +120,7 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
 
 - Full source scans remain responsive and do not block on heavy analysis work.
 - Root-watch rescans invalidate and refresh stale analysis only when needed.
-- Exact duplicates are grouped and browseable through the existing duplicates workflow.
+- Exact duplicates are grouped and browseable through a dedicated Sprint D duplicates workflow without disturbing the default `All Files` / `Favorites` flow.
 - Missing BPM/key values can be inferred for playable files without overwriting embedded authoritative metadata.
 - Similarity search returns stable, explainable top results for a small curated test corpus.
 - The app still builds cleanly, and focused tests cover migrations, invalidation, duplicates, BPM/key inference, and similarity ranking.

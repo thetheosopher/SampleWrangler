@@ -5,6 +5,7 @@
 - **Visual Studio 2026** (Build Tools or full IDE) with the **Desktop C++** workload (MSVC toolchain)
 - **CMake 3.15+** (ships with VS 2026, or install separately)
 - **Git**
+- **Inno Setup 6** (optional, only required when building the Windows installer target)
 - **VS Code** + recommended extensions (see `.vscode/extensions.json`)
 
 ## Clone & initialise
@@ -12,7 +13,7 @@
 ```bash
 git clone <repo-url> SampleWrangler
 cd SampleWrangler
-git submodule update --init --recursive   # pulls JUCE
+git submodule update --init --recursive   # pulls JUCE and Rubber Band
 ```
 
 ## Configure & build (CMake Presets)
@@ -113,6 +114,22 @@ build/vs2026-release/packages/SampleWrangler-1.1.0-win64-portable.zip
 
 Or press **F5** in VS Code (the launch config is pre-configured).
 
+## Tests
+
+The current native test suite registers five CTest entries:
+
+- `SampleWrangler.CatalogDb`
+- `SampleWrangler.ScannerAppleLoop`
+- `SampleWrangler.WaveformPeak`
+- `SampleWrangler.AcpPresetReader`
+- `SampleWrangler.VoiceManagerRender`
+
+Run them after a debug build with:
+
+```powershell
+ctest --test-dir build/vs2026-debug -C Debug --output-on-failure
+```
+
 ## MP3 support
 
 MP3 reading is enabled via `JUCE_USE_MP3AUDIOFORMAT=1` in CMakeLists.txt.
@@ -172,10 +189,12 @@ Source/
   Pipeline/     JobQueue, Scanner, Analyzer, WaveformCache
   Audio/        AudioEngine, VoiceManager, MidiInputRouter
   Util/         Paths, Hashing, Logging
+Tests/          Native tests for catalog, scanner, waveform, ACP parsing, and voice rendering
 third_party/
   sqlite/       Vendored SQLite amalgamation
   rubberband/   Rubber Band Library v4 (git submodule, GPL)
 JUCE/           JUCE framework (git submodule)
+REXSDK_Win_1.9.2/ Propellerhead REX SDK integration files
 ```
 
 ## ASIO

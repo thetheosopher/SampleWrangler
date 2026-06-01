@@ -2129,8 +2129,9 @@ namespace sw
                 previewPanel.setPitchSemitones(clamped);
                 audioEngine.setPitchSemitones(clamped);
             }
-            catch (const std::exception &)
+            catch (const std::exception &e)
             {
+                SW_LOG_WARN("Ignoring invalid setting preview.pitchSemitones='" << *savedPitch << "': " << e.what());
             }
         }
 
@@ -2301,8 +2302,9 @@ namespace sw
             {
                 leftPanelRatio = juce::jlimit(0.15f, 0.55f, std::stof(*value));
             }
-            catch (const std::exception &)
+            catch (const std::exception &e)
             {
+                SW_LOG_WARN("Ignoring invalid setting layout.leftPanelRatio='" << *value << "': " << e.what());
             }
         }
 
@@ -2312,8 +2314,9 @@ namespace sw
             {
                 waveformPanelRatio = juce::jlimit(0.30f, 0.70f, std::stof(*value));
             }
-            catch (const std::exception &)
+            catch (const std::exception &e)
             {
+                SW_LOG_WARN("Ignoring invalid setting layout.waveformPanelRatio='" << *value << "': " << e.what());
             }
         }
 
@@ -2323,8 +2326,9 @@ namespace sw
             {
                 bottomPanelRatio = juce::jlimit(0.15f, 0.55f, std::stof(*value));
             }
-            catch (const std::exception &)
+            catch (const std::exception &e)
             {
+                SW_LOG_WARN("Ignoring invalid setting layout.bottomPanelRatio='" << *value << "': " << e.what());
             }
         }
 
@@ -2334,8 +2338,9 @@ namespace sw
             {
                 previewPanelRatio = juce::jlimit(0.20f, 0.70f, std::stof(*value));
             }
-            catch (const std::exception &)
+            catch (const std::exception &e)
             {
+                SW_LOG_WARN("Ignoring invalid setting layout.previewPanelRatio='" << *value << "': " << e.what());
             }
         }
     }
@@ -2366,8 +2371,9 @@ namespace sw
             if (const auto file = catalogDb.fileByRootAndRelativePath(rootId, *savedRelPath))
                 handleFileSelected(*file, false, false);
         }
-        catch (const std::exception &)
+        catch (const std::exception &e)
         {
+            SW_LOG_WARN("Ignoring invalid persisted last selection: " << e.what());
         }
     }
 

@@ -46,6 +46,12 @@ If you find SampleWrangler useful and want to support continued development, you
 
 ## Version History
 
+### 1.2.0
+
+- Improved catalog analysis efficiency by avoiding whole-catalog over-fetches during root re-analysis.
+- Added warning logs for invalid persisted settings and unreadable analysis inputs.
+- Refreshed the release build and metadata for the 1.2.0 release.
+
 ### 1.1.0
 
 - Simplified the results workflow to two clear filters: `All Files` and `Favorites`.
@@ -64,9 +70,10 @@ If you find SampleWrangler useful and want to support continued development, you
 ### Library and Catalog
 
 - Local-only SQLite catalog with FTS5 full-text search over file names and paths.
+- Results workflow centered on text search plus `All Files` and `Favorites`, with per-root browsing from the source tree.
 - Source folder management: add, rename, remap, delete, rescan, and reveal in Explorer.
 - File identity based on source root + relative path, making source-folder relocation practical.
-- Search scopes: whole-library or per-root. File statistics tracked per library, root, or result set.
+- File statistics tracked per library, root, or current result set.
 
 ### Scanning and Metadata Extraction
 
@@ -75,6 +82,7 @@ If you find SampleWrangler useful and want to support continued development, you
 - ACID WAV metadata parsing (BPM, root note, beats, loop points).
 - Apple Loop AIFF metadata parsing (root note, loop markers).
 - REX/RX2 metadata extraction via the bundled REX SDK when available.
+- Indexed preset formats surface preset summaries such as preset name, zone count, key/velocity coverage, and representative waveform peaks when a source sample can be resolved or probed.
 - Automatic waveform overview generation during scanning.
 
 ### Preview and Audio
@@ -83,6 +91,7 @@ If you find SampleWrangler useful and want to support continued development, you
 - Play/stop (spacebar), loop, and autoplay controls.
 - Resample-style pitch shifting in semitones.
 - Optional time-stretch mode with high-quality stretch via [Rubber Band Library](https://breakfastquay.com/rubberband/).
+- Audiocity `.acp` presets can preview embedded audio or a resolved external sample reference.
 - Physical MIDI input routing and on-screen keyboard for pitch preview.
 - Polyphonic MIDI-triggered preview with preallocated voices and RT-safe audio thread.
 
@@ -108,7 +117,10 @@ If you find SampleWrangler useful and want to support continued development, you
 - `AIFF / AIF (incl. Apple Loop)`: playback plus duration, sample rate, channels, bit depth, bitrate, codec, root note, and loop-marker metadata.
 - `FLAC`: playback with standard JUCE reader metadata.
 - `MP3`: playback with standard JUCE reader metadata.
-- `REX / RX2`: playback plus sample rate, channels, bit depth, duration, BPM, and slice count.
+- `OGG`: playback with standard JUCE reader metadata.
+- `Audiocity ACP`: preset indexing plus preview from embedded audio or a resolved external sample reference.
+- `REX / RX2`: playback plus sample rate, channels, bit depth, duration, BPM, and slice count when the REX SDK DLL is available.
+- `SFZ`, `DecentSampler DSPRESET`, `Bitwig MULTISAMPLE`, `Korg KORGMULTISAMPLE`, `SoundFont SF2`, `TAL TALSMPL`, and `TX16Wx TXPROG`: index-only preset support with representative metadata and waveform thumbnails when a source sample can be resolved or probed.
 
 > **Note:** REX/RX2 support requires the Propellerhead REX SDK DLL at runtime.
 > MP3 reading is enabled via `JUCE_USE_MP3AUDIOFORMAT=1`. See the [JUCE MP3 legal disclaimer](https://docs.juce.com/develop/classjuce_1_1MP3AudioFormat.html).
@@ -193,10 +205,10 @@ cmake --build --preset vs2026-release-artifacts
 
 This produces:
 
-- `build/vs2026-release/packages/SampleWrangler-1.1.0-win64-setup.exe`
-- `build/vs2026-release/packages/SampleWrangler-1.1.0-win64-portable.zip`
+- `build/vs2026-release/packages/SampleWrangler-1.2.0-win64-setup.exe`
+- `build/vs2026-release/packages/SampleWrangler-1.2.0-win64-portable.zip`
 
-The app executable, installer, and portable artifact are versioned as `1.1.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
+The app executable, installer, and portable artifact are versioned as `1.2.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
 
 The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php) and supports per-user or per-machine installs, Add/Remove Programs registration, and optional Start Menu/Desktop shortcuts.
 
@@ -213,18 +225,20 @@ Release artifacts are statically linked where possible. The only unavoidable ext
 
 ## Running Tests
 
-The repository includes lightweight native tests for non-audio modules:
+The repository includes lightweight native tests for catalog, scanning, waveform, preset parsing, and preview-render behavior:
 
-| Test Target                           | Coverage                          |
-| ------------------------------------- | --------------------------------- |
-| `SampleWranglerCatalogDbTests`        | SQLite catalog queries and schema |
-| `SampleWranglerScannerAppleLoopTests` | Apple Loop AIFF metadata parsing  |
-| `SampleWranglerWaveformPeakTests`     | Waveform peak generation          |
+| Test Target                             | Coverage                                                   |
+| --------------------------------------- | ---------------------------------------------------------- |
+| `SampleWranglerCatalogDbTests`          | SQLite catalog queries, schema migrations, and favorites   |
+| `SampleWranglerScannerAppleLoopTests`   | Apple Loop parsing plus indexed preset-format ingestion    |
+| `SampleWranglerWaveformPeakTests`       | Waveform peak generation                                   |
+| `SampleWranglerAcpPresetReaderTests`    | Audiocity `.acp` preset parsing and sample-path resolution |
+| `SampleWranglerVoiceManagerRenderTests` | Preview voice render behavior and playback edge cases      |
 
 After building, run with CTest:
 
 ```bash
-ctest --test-dir build/vs2026-debug -C Debug
+ctest --test-dir build/vs2026-debug -C Debug --output-on-failure
 ```
 
 ---
@@ -251,6 +265,7 @@ Source/
   Audio/          Audio engine, voice manager, and MIDI input routing
   Util/           Path helpers, hashing, and logging
 Tests/            Native tests for catalog, scanner, and waveform peaks
+                  plus ACP parsing and preview render coverage
 third_party/
   sqlite/         Vendored SQLite amalgamation
   rubberband/     Rubber Band Library v4 (git submodule, GPL)
@@ -276,25 +291,7 @@ docs/             Developer setup and archive notes
 
 This project is licensed under the [MIT License](LICENSE.txt).
 
-> **Third-party licenses:** JUCE is dual-licensed (GPLv3 / commercial). Rubber Band Library is GPL unless commercially licensed. See each submodule for details.
-
-- CMake presets for Visual Studio 2026
-- Rubber Band v4 for optional high-quality stretch
-- Propellerhead REX SDK integration for REX and RX2 support
-
-## Licensing And Third-Party Notes
-
-SampleWrangler itself is distributed under the MIT License. See [LICENSE.txt](LICENSE.txt).
-
-Important third-party considerations:
-
 - JUCE is included as a submodule and remains subject to JUCE's own license terms.
 - MP3 support is enabled through `JUCE_USE_MP3AUDIOFORMAT=1`; JUCE documents a legal disclaimer for MP3 support that you should review before redistribution.
 - Rubber Band v4 is included as a submodule for high-quality stretch. Rubber Band is GPL unless you have a commercial license.
 - REX and RX2 support depends on the Propellerhead REX SDK and its license terms.
-
-## Current Status
-
-This repository already contains a functioning Windows-focused MVP with scanning, search, waveform caching, preview playback, MIDI preview routing, ASIO-capable device management, and packaging support. The codebase is organized to keep UI, database, worker-thread processing, and the real-time audio path separated.
-
-For more setup detail, see [docs/DEVSETUP.md](docs/DEVSETUP.md).

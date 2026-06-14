@@ -36,6 +36,22 @@ Build the most compelling desktop sample librarian possible while complementing 
 - The shipped results workflow is intentionally limited to text search plus `All Files` and `Favorites`; ratings, tags, and saved searches were removed in 1.1.
 - The current sampler-engine follow-up build is clean after moving Rubber Band state and helpers out of `Source/Audio/Voice.h` into `Source/Audio/Voice.cpp` and tightening the preserve-length render path.
 - `SampleWranglerVoiceManagerRenderTests` now builds successfully and gives the sampler engine an offline render harness that exercises primary playback completion, direct and preserve-length loop behavior, preserve-length loop-boundary wrapping, scrub resets, preserve-length duration behavior, source-sample-rate handling, stereo direct steady-state and fade-in channel separation, short-clip HQ fallback audibility, fresh-start HQ preserve-length playback, and deterministic live HQ-toggle deferral to the next note through the public `VoiceManager` API.
+- `SampleWranglerVoiceManagerRenderTests` now also cover repeated preserve-length loop-wrap stress plus wider-channel generic fallback routing for both preserve-length and direct playback paths.
+- `SampleWranglerVoiceManagerRenderTests` now also cover true `>32` source-channel routing through the generic add-sample fallback path for both preserve-length and direct playback.
+- `SampleWranglerVoiceManagerBenchmark` now builds successfully in release mode and benchmarks the common mono/stereo baselines plus the widened generic fallback paths.
+- The first release-mode benchmark pass shows the recent direct-path work landing where expected: direct mono/stereo render stays around `0.20` to `0.30` us per 64-sample block, widened direct fallback stays around `1.35` to `1.42` us per block, and the next clear hotspot is widened preserve-length playback at roughly `11.32` to `11.85` us per block.
+- The follow-up preserve-length generic optimization now caches mixed chunk data per source channel when fanout reuse is high (for example, wide output with fewer source channels), keeps an uncached path for high-unique-source layouts, and precomputes wrapped interpolation indices/fractions per chunk to reduce repeated wrap work across channels.
+- On the latest release benchmark pass (`--warmup-blocks 256 --measured-blocks 8192`), widened preserve-length fanout (`4 src -> 34 out`) improved from the original `11.32` us/block baseline down to about `3.25` us/block, while the high-unique-source preserve-length case (`34 src -> 36 out`) improved to about `10.95` us/block and remains the next measurement-driven hotspot.
+- The benchmark harness now also includes 256-sample-block preserve-length wide-channel scenarios; current results (`4 src -> 34 out`: `9.99` us/block, `34 src -> 36 out`: `43.30` us/block) show similar per-frame cost separation and help track scaling behavior.
+- Two fresh release benchmark sweeps with the expanded harness (including new 512-sample-block preserve scenarios) are stable and reinforce the same shape: preserve `34 src -> 36 out` remains the dominant widened hotspot while preserve `4 src -> 34 out` stays much cheaper.
+- The latest high-unique preserve-length pass now groups uncached fanout by source channel, so each source mix is computed once per chunk and then fanned out to all mapped outputs.
+- Midpoint values from the two latest post-grouping sweeps (`--warmup-blocks 256 --measured-blocks 8192`) are approximately: preserve `4 src -> 34 out` @64 = `3.23` us/block, preserve `34 src -> 36 out` @64 = `9.11` us/block, preserve `4 src -> 34 out` @256 = `9.70` us/block, preserve `34 src -> 36 out` @256 = `35.26` us/block, preserve `4 src -> 34 out` @512 = `19.92` us/block, preserve `34 src -> 36 out` @512 = `69.38` us/block.
+- The latest interpolation-focused pass now specializes the widened preserve-length generic mixer to precompute neighbor indices and inline linear/Hermite interpolation in the per-source chunk loop, removing repeated interpolation function dispatch and neighbor-index math from the hot path.
+- Midpoint values from the two latest post-interpolation sweeps (`--warmup-blocks 256 --measured-blocks 8192`) are approximately: preserve `4 src -> 34 out` @64 = `2.86` us/block, preserve `34 src -> 36 out` @64 = `3.96` us/block, preserve `4 src -> 34 out` @256 = `8.03` us/block, preserve `34 src -> 36 out` @256 = `14.35` us/block, preserve `4 src -> 34 out` @512 = `16.46` us/block, preserve `34 src -> 36 out` @512 = `29.05` us/block.
+- A follow-up branch-free fast-kernel/SIMD-style micro-pass (all-valid index fast path) was tested and then reverted after two-sweep benchmarking showed regressions in widened preserve-length cases; current baseline remains the post-interpolation values above.
+- A follow-up cache-locality pass that generated wrapped interpolation metadata inline during chunk production (to remove a second metadata pass) was also measured and reverted after regressing the primary widened preserve-length hotspot.
+- A follow-up metadata packing pass (compact interpolation index storage using 16-bit lanes where valid for current source sizes) held or slightly improved widened preserve-length performance while preserving checksums and render-test behavior.
+- Midpoint values from the latest post-packing sweeps (`--warmup-blocks 256 --measured-blocks 8192`) are approximately: preserve `4 src -> 34 out` @64 = `2.82` us/block, preserve `34 src -> 36 out` @64 = `3.92` us/block, preserve `4 src -> 34 out` @256 = `7.97` us/block, preserve `34 src -> 36 out` @256 = `14.10` us/block, preserve `4 src -> 34 out` @512 = `16.18` us/block, preserve `34 src -> 36 out` @512 = `28.22` us/block.
 - `SampleWranglerAcpPresetReaderTests` builds successfully.
 - `SampleWranglerCatalogDbTests` builds successfully and now also round-trip the indexed preset summary fields (`preset_name`, `zone_count`, `key_low/high`, `velocity_low/high`).
 - `SampleWranglerScannerAppleLoopTests` builds successfully and now covers Apple Loop AIFF metadata plus indexed SFZ, Bitwig `.multisample`, Korg `.korgmultisample`, SoundFont `.sf2`, DecentSampler `.dspreset`, TAL `.talsmpl`, and TX16Wx `.txprog` preset ingestion.
@@ -161,18 +177,29 @@ Status: Partially started through `.acp` preview support
   - The steady-state non-preserve mono/stereo path now mixes in chunks and uses vectorized fanout (`FloatVectorOperations::add` plus contiguous scratch buffers) instead of per-sample per-channel accumulation in the common case.
   - The faded non-preserve direct mono/stereo path now also mixes in chunks and uses vectorized fanout in the common attack/release case, reducing per-sample output-channel dispatch without changing fade progression.
   - The faded non-preserve direct path now caches interpolated source samples per frame before distributing them to output channels, removing another repeated-read path during attack/release playback.
+  - The wider-channel generic preserve-length and direct fallback paths now hoist cached source-pointer selection out of their inner per-sample loops, trimming repeated source lookup work in the covered `>2` channel cases.
+  - The wider-channel generic non-preserve direct fallback path now also mixes in chunks by caching sample positions and fade gains per chunk before vector-adding each output channel, reducing per-sample output dispatch in the scalar `>2` channel case.
+  - The wider-channel generic preserve-length fallback path now also mixes in chunks by caching granular read positions and crossfade weights per chunk before vector-adding each output channel, removing the last obvious per-sample output-dispatch path in the `>2` channel preserve-length case.
+  - The widened preserve-length generic fallback now also caches mixed chunk data per source channel when channel mapping fanout would otherwise recompute the same source repeatedly; this significantly reduced the `4 src -> 34 out` preserve-length case.
+  - The high-unique-source uncached preserve-length branch now also groups output fanout by source channel (bitmask-based direct/tail fanout), reducing redundant per-source chunk recompute work in `>32` source layouts.
+  - The high-unique-source preserve-length path now also precomputes wrapped index/fraction neighbors and uses inline linear/Hermite interpolation in the per-source chunk mixer, sharply reducing interpolation overhead in widened generic playback.
+  - A later branch-free fast-path experiment for all-valid indices was reverted after measured regressions, so it is currently a known non-win for this code shape/hardware path.
+  - A later in-loop metadata-generation experiment (compute wrapped indices/fractions during sample production instead of a separate pass) was also reverted after measured regressions.
+  - A later metadata-packing pass (compact interpolation index lanes) is now retained and forms the current baseline for widened preserve-length playback on the measured hardware.
+  - Benchmark scaling at 64/256/512 block sizes remains close in per-frame terms, indicating the remaining `34 src -> 36 out` cost is largely compute-bound interpolation/mixing work rather than small fixed per-block overhead.
   - When Rubber Band RT cannot produce startup output before a short clip is exhausted, the current note now degrades to the granular preserve-length path instead of failing silently.
+  - A dedicated release-mode benchmark harness now exists in `Tests/VoiceManagerBenchmark.cpp`; after the latest grouped-fanout plus interpolation-specialization passes, widened preserve-length playback is much closer to widened direct playback and the remaining opportunities are likely lower-level SIMD/cache tuning rather than major control-flow reshaping.
   - Consider further SIMD/vectorized mixing for steady-state spans.
-  - Consider pushing the same chunked/vector fanout pattern into the remaining wider-channel generic paths if profiling shows it is worth the extra complexity.
+  - Focus the next measurement-driven pass on SIMD/cache tuning for the widened preserve-length generic mixer (`>32` source channels), especially around improving data locality and evaluating vectorized interpolation/mix kernels.
 - If true in-flight HQ/Rubber Band switching is ever required, design it explicitly as a crossfade or note re-arm flow; the current contract is deterministic deferral to the next note.
-- Extend the offline `VoiceManager` render tests further with repeated-wrap stress cases, wider-channel fallback coverage, and any future true in-flight mode-switch design if that becomes a product goal.
+- Extend the offline `VoiceManager` render tests further with any future true in-flight mode-switch design, more pathological loop-shape cases, and any new render-path specializations that get introduced.
 - The `MainComponent` class is still large and could eventually be split into controller/state pieces.
 
 ## Suggested Next Session Order
 
-1. Keep Sprint C paused for now and continue sampler-core work by profiling the remaining wider-channel and generic render paths for additional SIMD/vector opportunities.
-2. Revisit the non-Rubber-Band preserve-length fallback after listening tests and profiling, especially around grain sizing, spacing, denormal safety, and any further fixed-phase opportunities.
-3. Extend the offline `VoiceManager` harness with repeated-wrap stress cases and wider-channel fallback coverage before attempting more invasive render-path changes.
+1. Keep Sprint C paused for now and continue sampler-core work by targeting the widened preserve-length path first; the new release benchmark shows widened direct playback is already cheap enough relative to preserve-length playback.
+2. Revisit the non-Rubber-Band preserve-length fallback after listening tests and profiling, especially around grain sizing, spacing, denormal safety, crossfade-weight generation, and any further fixed-phase opportunities.
+3. Use the expanded offline `VoiceManager` render tests plus the new `SampleWranglerVoiceManagerBenchmark` target as the safety net for any further wider-channel or generic-path optimization work.
 4. Resume Sprint C only after the sampler engine slice is stable enough to support more ambitious preview workflows.
 5. Expose richer preset-specific metadata in the UI beyond the new summary row once format breadth work resumes.
 
@@ -207,6 +234,7 @@ Status: Partially started through `.acp` preview support
 - `Source/Audio/VoiceManager.cpp`
 - `Source/UI/PreviewPanel.cpp`
 - `Tests/VoiceManagerRenderTests.cpp`
+- `Tests/VoiceManagerBenchmark.cpp`
 - `Tests/AcpPresetReaderTests.cpp`
 - `CMakeLists.txt`
 - `docs/SPRINT_A_TRACKER.md`

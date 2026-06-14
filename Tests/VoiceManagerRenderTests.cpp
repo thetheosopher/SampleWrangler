@@ -45,12 +45,37 @@ namespace
         return buffer;
     }
 
+    double sumChannelAbs(const juce::AudioBuffer<float> &buffer,
+                         int channel,
+                         int samples)
+    {
+        double totalAbs = 0.0;
+        const float *read = buffer.getReadPointer(channel);
+        for (int i = 0; i < samples; ++i)
+            totalAbs += std::abs(read[i]);
+
+        return totalAbs;
+    }
+
+    double sumChannelDifferenceAbs(const juce::AudioBuffer<float> &buffer,
+                                   int channelA,
+                                   int channelB,
+                                   int samples)
+    {
+        double totalAbs = 0.0;
+        const float *readA = buffer.getReadPointer(channelA);
+        const float *readB = buffer.getReadPointer(channelB);
+        for (int i = 0; i < samples; ++i)
+            totalAbs += std::abs(readA[i] - readB[i]);
+
+        return totalAbs;
+    }
+
     BlockStats renderBlock(sw::VoiceManager &manager,
-                           int outputChannels,
+                           juce::AudioBuffer<float> &block,
                            int blockSize)
     {
         BlockStats stats;
-        juce::AudioBuffer<float> block(outputChannels, blockSize);
         block.clear();
 
         juce::AudioSourceChannelInfo info(&block, 0, blockSize);
@@ -61,7 +86,7 @@ namespace
         stats.anyPlaying = manager.isPlaying();
         stats.primaryPlaying = manager.isPrimaryPlaying();
 
-        for (int ch = 0; ch < outputChannels; ++ch)
+        for (int ch = 0; ch < block.getNumChannels(); ++ch)
         {
             const auto *read = block.getReadPointer(ch);
             for (int i = 0; i < blockSize; ++i)
@@ -69,6 +94,14 @@ namespace
         }
 
         return stats;
+    }
+
+    BlockStats renderBlock(sw::VoiceManager &manager,
+                           int outputChannels,
+                           int blockSize)
+    {
+        juce::AudioBuffer<float> block(outputChannels, blockSize);
+        return renderBlock(manager, block, blockSize);
     }
 
     void accumulateRenderStats(RenderStats &aggregate,
@@ -215,6 +248,46 @@ namespace
         return wrapStats.totalAbs > 0.1 && wrapStats.primaryPlaying && wrapStats.progress < kStartProgress && wrapStats.progress > 0.24 && wrapStats.progress < 0.50;
     }
 
+    bool testLoopedPreserveLengthSurvivesRepeatedWrapStress()
+    {
+        constexpr int kBlockSize = 8;
+        constexpr double kStartProgress = 126.0 / 256.0;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(true);
+        manager.setStretchHighQualityEnabled(false);
+        manager.setLoopEnabled(true);
+        manager.setLoopRegionSamples(64, 127);
+        manager.loadBuffer(makeTestBuffer(1, 256), kSampleRate);
+        manager.play();
+        manager.updateAllVoicePitch(7.0);
+        manager.setPlaybackProgressNormalized(kStartProgress);
+
+        int wrapCount = 0;
+        double previousProgress = kStartProgress;
+        double totalAbs = 0.0;
+
+        for (int blockIndex = 0; blockIndex < 24; ++blockIndex)
+        {
+            const auto blockStats = renderBlock(manager, 2, kBlockSize);
+            totalAbs += blockStats.totalAbs;
+
+            if (!blockStats.primaryPlaying)
+                return false;
+
+            if (blockStats.progress + 0.05 < previousProgress)
+                ++wrapCount;
+
+            previousProgress = blockStats.progress;
+        }
+
+        manager.stop();
+        const auto stopStats = renderUntilIdle(manager, 2, kBlockSize, 64);
+
+        return totalAbs > 1.0 && wrapCount >= 2 && stopStats.playbackFinishedSeen && !manager.isPlaying();
+    }
+
     bool testScrubResetRepositionsPrimaryPreserveLengthPlayback()
     {
         constexpr int kBlockSize = 8;
@@ -358,6 +431,87 @@ namespace
         return leftAbs > 0.1 && rightAbs > 0.1 && channelDifferenceAbs > 0.01 && manager.isPlaying();
     }
 
+    bool testWiderChannelPreserveLengthFallbackMaintainsRouting()
+    {
+        constexpr int kBlockSize = 32;
+        constexpr int kOutputChannels = 34;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(true);
+        manager.setStretchHighQualityEnabled(false);
+        manager.loadBuffer(makeTestBuffer(4, 512), kSampleRate);
+        manager.noteOn(60, 1.5, 1.5);
+
+        juce::AudioBuffer<float> block(kOutputChannels, kBlockSize);
+        const auto stats = renderBlock(manager, block, kBlockSize);
+
+        const double channel0Abs = sumChannelAbs(block, 0, kBlockSize);
+        const double channel1Abs = sumChannelAbs(block, 1, kBlockSize);
+        const double channel2Abs = sumChannelAbs(block, 2, kBlockSize);
+        const double channel3Abs = sumChannelAbs(block, 3, kBlockSize);
+        const double channel32Abs = sumChannelAbs(block, 32, kBlockSize);
+        const double channel33Abs = sumChannelAbs(block, 33, kBlockSize);
+
+        const double channel01Diff = sumChannelDifferenceAbs(block, 0, 1, kBlockSize);
+        const double channel12Diff = sumChannelDifferenceAbs(block, 1, 2, kBlockSize);
+        const double channel032Diff = sumChannelDifferenceAbs(block, 0, 32, kBlockSize);
+        const double channel033Diff = sumChannelDifferenceAbs(block, 0, 33, kBlockSize);
+
+        return stats.totalAbs > 0.1 &&
+               channel0Abs > 0.05 &&
+               channel1Abs > 0.05 &&
+               channel2Abs > 0.05 &&
+               channel3Abs > 0.05 &&
+               channel32Abs > 0.05 &&
+               channel33Abs > 0.05 &&
+               channel01Diff > 0.01 &&
+               channel12Diff > 0.01 &&
+               channel032Diff < 1.0e-4 &&
+               channel033Diff < 1.0e-4 &&
+               manager.isPlaying();
+    }
+
+    bool testWideSourcePreserveLengthFallbackMaintainsRouting()
+    {
+        constexpr int kBlockSize = 32;
+        constexpr int kSourceChannels = 34;
+        constexpr int kOutputChannels = 36;
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(true);
+        manager.setStretchHighQualityEnabled(false);
+        manager.loadBuffer(makeTestBuffer(kSourceChannels, 512), kSampleRate);
+        manager.noteOn(60, 1.5, 1.5);
+
+        juce::AudioBuffer<float> block(kOutputChannels, kBlockSize);
+        const auto stats = renderBlock(manager, block, kBlockSize);
+
+        const double channel31Abs = sumChannelAbs(block, 31, kBlockSize);
+        const double channel32Abs = sumChannelAbs(block, 32, kBlockSize);
+        const double channel33Abs = sumChannelAbs(block, 33, kBlockSize);
+        const double channel34Abs = sumChannelAbs(block, 34, kBlockSize);
+        const double channel35Abs = sumChannelAbs(block, 35, kBlockSize);
+
+        const double channel3132Diff = sumChannelDifferenceAbs(block, 31, 32, kBlockSize);
+        const double channel3233Diff = sumChannelDifferenceAbs(block, 32, 33, kBlockSize);
+        const double channel034Diff = sumChannelDifferenceAbs(block, 0, 34, kBlockSize);
+        const double channel035Diff = sumChannelDifferenceAbs(block, 0, 35, kBlockSize);
+
+        return stats.totalAbs > 0.1 &&
+               channel31Abs > 0.02 &&
+               channel32Abs > 0.02 &&
+               channel33Abs > 0.02 &&
+               channel34Abs > 0.02 &&
+               channel35Abs > 0.02 &&
+               channel3132Diff > 0.005 &&
+               channel3233Diff > 0.005 &&
+               channel034Diff < 1.0e-4 &&
+               channel035Diff < 1.0e-4 &&
+               manager.isPlaying();
+    }
+
     bool testStereoDirectFadeInMaintainsChannelSeparation()
     {
         constexpr int kBlockSize = 32;
@@ -428,6 +582,121 @@ namespace
 
         return leftAbs > 0.1 && rightAbs > 0.1 && channelDifferenceAbs > 0.01 && manager.isPlaying();
     }
+
+    bool testWiderChannelDirectFallbackMaintainsRouting()
+    {
+        constexpr int kBlockSize = 32;
+        constexpr int kOutputChannels = 34;
+
+        auto routingLooksValid = [](const juce::AudioBuffer<float> &block)
+        {
+            const double channel0Abs = sumChannelAbs(block, 0, kBlockSize);
+            const double channel1Abs = sumChannelAbs(block, 1, kBlockSize);
+            const double channel2Abs = sumChannelAbs(block, 2, kBlockSize);
+            const double channel3Abs = sumChannelAbs(block, 3, kBlockSize);
+            const double channel32Abs = sumChannelAbs(block, 32, kBlockSize);
+            const double channel33Abs = sumChannelAbs(block, 33, kBlockSize);
+
+            const double channel01Diff = sumChannelDifferenceAbs(block, 0, 1, kBlockSize);
+            const double channel12Diff = sumChannelDifferenceAbs(block, 1, 2, kBlockSize);
+            const double channel032Diff = sumChannelDifferenceAbs(block, 0, 32, kBlockSize);
+            const double channel033Diff = sumChannelDifferenceAbs(block, 0, 33, kBlockSize);
+
+            return channel0Abs > 0.05 &&
+                   channel1Abs > 0.05 &&
+                   channel2Abs > 0.05 &&
+                   channel3Abs > 0.05 &&
+                   channel32Abs > 0.05 &&
+                   channel33Abs > 0.05 &&
+                   channel01Diff > 0.01 &&
+                   channel12Diff > 0.01 &&
+                   channel032Diff < 1.0e-4 &&
+                   channel033Diff < 1.0e-4;
+        };
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(false);
+        manager.setStretchHighQualityEnabled(false);
+        manager.loadBuffer(makeTestBuffer(4, 1024), kSampleRate);
+        manager.play();
+
+        juce::AudioBuffer<float> fadeInBlock(kOutputChannels, kBlockSize);
+        const auto fadeInStats = renderBlock(manager, fadeInBlock, kBlockSize);
+
+        for (int blockIndex = 0; blockIndex < 8; ++blockIndex)
+        {
+            const auto warmupStats = renderBlock(manager, kOutputChannels, kBlockSize);
+            if (!warmupStats.anyPlaying)
+                return false;
+        }
+
+        juce::AudioBuffer<float> steadyStateBlock(kOutputChannels, kBlockSize);
+        const auto steadyStateStats = renderBlock(manager, steadyStateBlock, kBlockSize);
+
+        return fadeInStats.totalAbs > 0.1 &&
+               steadyStateStats.totalAbs > 0.1 &&
+               routingLooksValid(fadeInBlock) &&
+               routingLooksValid(steadyStateBlock) &&
+               manager.isPlaying();
+    }
+
+    bool testWideSourceDirectFallbackMaintainsRouting()
+    {
+        constexpr int kBlockSize = 32;
+        constexpr int kSourceChannels = 34;
+        constexpr int kOutputChannels = 36;
+
+        auto routingLooksValid = [](const juce::AudioBuffer<float> &block)
+        {
+            const double channel31Abs = sumChannelAbs(block, 31, kBlockSize);
+            const double channel32Abs = sumChannelAbs(block, 32, kBlockSize);
+            const double channel33Abs = sumChannelAbs(block, 33, kBlockSize);
+            const double channel34Abs = sumChannelAbs(block, 34, kBlockSize);
+            const double channel35Abs = sumChannelAbs(block, 35, kBlockSize);
+
+            const double channel3132Diff = sumChannelDifferenceAbs(block, 31, 32, kBlockSize);
+            const double channel3233Diff = sumChannelDifferenceAbs(block, 32, 33, kBlockSize);
+            const double channel034Diff = sumChannelDifferenceAbs(block, 0, 34, kBlockSize);
+            const double channel035Diff = sumChannelDifferenceAbs(block, 0, 35, kBlockSize);
+
+            return channel31Abs > 0.02 &&
+                   channel32Abs > 0.02 &&
+                   channel33Abs > 0.02 &&
+                   channel34Abs > 0.02 &&
+                   channel35Abs > 0.02 &&
+                   channel3132Diff > 0.005 &&
+                   channel3233Diff > 0.005 &&
+                   channel034Diff < 1.0e-4 &&
+                   channel035Diff < 1.0e-4;
+        };
+
+        sw::VoiceManager manager;
+        manager.prepareToPlay(kBlockSize, kSampleRate);
+        manager.setPreserveLengthEnabled(false);
+        manager.setStretchHighQualityEnabled(false);
+        manager.loadBuffer(makeTestBuffer(kSourceChannels, 1024), kSampleRate);
+        manager.play();
+
+        juce::AudioBuffer<float> fadeInBlock(kOutputChannels, kBlockSize);
+        const auto fadeInStats = renderBlock(manager, fadeInBlock, kBlockSize);
+
+        for (int blockIndex = 0; blockIndex < 8; ++blockIndex)
+        {
+            const auto warmupStats = renderBlock(manager, kOutputChannels, kBlockSize);
+            if (!warmupStats.anyPlaying)
+                return false;
+        }
+
+        juce::AudioBuffer<float> steadyStateBlock(kOutputChannels, kBlockSize);
+        const auto steadyStateStats = renderBlock(manager, steadyStateBlock, kBlockSize);
+
+        return fadeInStats.totalAbs > 0.1 &&
+               steadyStateStats.totalAbs > 0.1 &&
+               routingLooksValid(fadeInBlock) &&
+               routingLooksValid(steadyStateBlock) &&
+               manager.isPlaying();
+    }
 }
 
 int main()
@@ -459,6 +728,12 @@ int main()
     if (!testLoopedPreserveLengthWrapsAcrossBoundaryCleanly())
     {
         std::cerr << "testLoopedPreserveLengthWrapsAcrossBoundaryCleanly failed.\n";
+        return 1;
+    }
+
+    if (!testLoopedPreserveLengthSurvivesRepeatedWrapStress())
+    {
+        std::cerr << "testLoopedPreserveLengthSurvivesRepeatedWrapStress failed.\n";
         return 1;
     }
 
@@ -498,6 +773,18 @@ int main()
         return 1;
     }
 
+    if (!testWiderChannelPreserveLengthFallbackMaintainsRouting())
+    {
+        std::cerr << "testWiderChannelPreserveLengthFallbackMaintainsRouting failed.\n";
+        return 1;
+    }
+
+    if (!testWideSourcePreserveLengthFallbackMaintainsRouting())
+    {
+        std::cerr << "testWideSourcePreserveLengthFallbackMaintainsRouting failed.\n";
+        return 1;
+    }
+
     if (!testStereoDirectFadeInMaintainsChannelSeparation())
     {
         std::cerr << "testStereoDirectFadeInMaintainsChannelSeparation failed.\n";
@@ -507,6 +794,18 @@ int main()
     if (!testStereoDirectPlaybackMaintainsChannelSeparation())
     {
         std::cerr << "testStereoDirectPlaybackMaintainsChannelSeparation failed.\n";
+        return 1;
+    }
+
+    if (!testWiderChannelDirectFallbackMaintainsRouting())
+    {
+        std::cerr << "testWiderChannelDirectFallbackMaintainsRouting failed.\n";
+        return 1;
+    }
+
+    if (!testWideSourceDirectFallbackMaintainsRouting())
+    {
+        std::cerr << "testWideSourceDirectFallbackMaintainsRouting failed.\n";
         return 1;
     }
 

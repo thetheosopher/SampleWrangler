@@ -1,5 +1,7 @@
 #include "VoiceManager.h"
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <cmath>
 #include <cstring>
 
@@ -873,6 +875,25 @@ namespace sw
         for (int ch = 0; ch < directMixChannels; ++ch)
             outputWritePtrs[static_cast<size_t>(ch)] = outputBuffer.getWritePointer(ch, startSample);
 
+        const int cachedGenericSrcChannels = (numSrcChannels > 2)
+                                                 ? juce::jmin(numSrcChannels, directMixChannels)
+                                                 : 0;
+        std::array<const float *, kMaxDirectMixChannels> cachedGenericSrcReadPtrs{};
+        for (int srcCh = 0; srcCh < cachedGenericSrcChannels; ++srcCh)
+        {
+            cachedGenericSrcReadPtrs[static_cast<size_t>(srcCh)] = (srcCh == 0) ? srcReadPtr0
+                                                                                : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
+        }
+
+        const auto getGenericSrcReadPtr = [&](int srcCh)
+        {
+            if (srcCh < cachedGenericSrcChannels)
+                return cachedGenericSrcReadPtrs[static_cast<size_t>(srcCh)];
+
+            return (srcCh == 0) ? srcReadPtr0
+                                : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
+        };
+
         int renderedSamples = 0;
         while (renderedSamples < numSamples)
         {
@@ -1057,110 +1078,427 @@ namespace sw
                     continue;
                 }
 
-                for (int i = 0; i < spanSamples; ++i)
+                if (numSrcChannels <= 2)
                 {
-                    const float gain = voice.advanceFade(fadeRate);
-                    if (gain <= 0.0f)
+                    for (int i = 0; i < spanSamples; ++i)
                     {
-                        renderedSamples += i;
-                        voice.playbackPos = pos;
-                        return;
-                    }
-
-                    const int outputIndex = outputBase + i;
-
-                    // Granular pitch-shift fallback
-                    if (voice.grainSamplesRemaining <= 0)
-                    {
-                        voice.grainReadPosA = pos;
-                        voice.grainReadPosB = pos + Voice::kGrainSpacingSamples;
-                        voice.grainSamplesRemaining = Voice::kGrainLengthSamples;
-                    }
-
-                    const float blend = smoothCrossfadeBlend(1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples)));
-                    const float gainA = 1.0f - blend;
-                    const float gainB = blend;
-                    if (numSrcChannels <= 1)
-                    {
-                        const float sampleA = readInterpolatedSampleLeft(voice.grainReadPosA);
-                        const float sampleB = readInterpolatedSampleLeft(voice.grainReadPosB);
-                        const float mixedSample = ((sampleA * gainA) + (sampleB * gainB)) * gain;
-
-                        for (int ch = 0; ch < directMixChannels; ++ch)
-                            outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += mixedSample;
-
-                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                            outputBuffer.addSample(ch, startSample + outputIndex, mixedSample);
-                    }
-                    else if (numSrcChannels == 2)
-                    {
-                        const float sampleALeft = readInterpolatedSampleLeft(voice.grainReadPosA);
-                        const float sampleBLeft = readInterpolatedSampleLeft(voice.grainReadPosB);
-                        const float mixedLeft = ((sampleALeft * gainA) + (sampleBLeft * gainB)) * gain;
-
-                        const float sampleARight = readInterpolatedSampleRight(voice.grainReadPosA);
-                        const float sampleBRight = readInterpolatedSampleRight(voice.grainReadPosB);
-                        const float mixedRight = ((sampleARight * gainA) + (sampleBRight * gainB)) * gain;
-
-                        if (directMixChannels > 0)
-                            outputWritePtrs[0][outputIndex] += mixedLeft;
-
-                        if (directMixChannels > 1)
-                            outputWritePtrs[1][outputIndex] += mixedRight;
-
-                        for (int ch = 2; ch < directMixChannels; ++ch)
-                            outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += mixedLeft;
-
-                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                        const float gain = voice.advanceFade(fadeRate);
+                        if (gain <= 0.0f)
                         {
-                            const float sample = (ch == 1) ? mixedRight : mixedLeft;
-                            outputBuffer.addSample(ch, startSample + outputIndex, sample);
-                        }
-                    }
-                    else
-                    {
-                        const int cachedSrcChannels = juce::jmin(numSrcChannels, directMixChannels);
-                        std::array<float, kMaxDirectMixChannels> cachedMixedSamples{};
-
-                        for (int srcCh = 0; srcCh < cachedSrcChannels; ++srcCh)
-                        {
-                            const float sampleA = readInterpolatedSampleForChannel(srcCh, voice.grainReadPosA);
-                            const float sampleB = readInterpolatedSampleForChannel(srcCh, voice.grainReadPosB);
-                            cachedMixedSamples[static_cast<size_t>(srcCh)] = ((sampleA * gainA) + (sampleB * gainB)) * gain;
+                            renderedSamples += i;
+                            voice.playbackPos = pos;
+                            return;
                         }
 
-                        const auto getMixedGranularSample = [&](int outputChannel)
+                        const int outputIndex = outputBase + i;
+
+                        // Granular pitch-shift fallback
+                        if (voice.grainSamplesRemaining <= 0)
                         {
-                            const int srcCh = (outputChannel < numSrcChannels) ? outputChannel : 0;
-                            if (srcCh < cachedSrcChannels)
-                                return cachedMixedSamples[static_cast<size_t>(srcCh)];
+                            voice.grainReadPosA = pos;
+                            voice.grainReadPosB = pos + Voice::kGrainSpacingSamples;
+                            voice.grainSamplesRemaining = Voice::kGrainLengthSamples;
+                        }
 
-                            const float sampleA = readInterpolatedSampleForChannel(srcCh, voice.grainReadPosA);
-                            const float sampleB = readInterpolatedSampleForChannel(srcCh, voice.grainReadPosB);
-                            return ((sampleA * gainA) + (sampleB * gainB)) * gain;
-                        };
+                        const float blend = smoothCrossfadeBlend(1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples)));
+                        const float gainA = 1.0f - blend;
+                        const float gainB = blend;
+                        if (numSrcChannels <= 1)
+                        {
+                            const float sampleA = readInterpolatedSampleLeft(voice.grainReadPosA);
+                            const float sampleB = readInterpolatedSampleLeft(voice.grainReadPosB);
+                            const float mixedSample = ((sampleA * gainA) + (sampleB * gainB)) * gain;
 
-                        for (int ch = 0; ch < directMixChannels; ++ch)
-                            outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += getMixedGranularSample(ch);
+                            for (int ch = 0; ch < directMixChannels; ++ch)
+                                outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += mixedSample;
 
-                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                            outputBuffer.addSample(ch, startSample + outputIndex, getMixedGranularSample(ch));
+                            for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                                outputBuffer.addSample(ch, startSample + outputIndex, mixedSample);
+                        }
+                        else
+                        {
+                            const float sampleALeft = readInterpolatedSampleLeft(voice.grainReadPosA);
+                            const float sampleBLeft = readInterpolatedSampleLeft(voice.grainReadPosB);
+                            const float mixedLeft = ((sampleALeft * gainA) + (sampleBLeft * gainB)) * gain;
+
+                            const float sampleARight = readInterpolatedSampleRight(voice.grainReadPosA);
+                            const float sampleBRight = readInterpolatedSampleRight(voice.grainReadPosB);
+                            const float mixedRight = ((sampleARight * gainA) + (sampleBRight * gainB)) * gain;
+
+                            if (directMixChannels > 0)
+                                outputWritePtrs[0][outputIndex] += mixedLeft;
+
+                            if (directMixChannels > 1)
+                                outputWritePtrs[1][outputIndex] += mixedRight;
+
+                            for (int ch = 2; ch < directMixChannels; ++ch)
+                                outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += mixedLeft;
+
+                            for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                            {
+                                const float sample = (ch == 1) ? mixedRight : mixedLeft;
+                                outputBuffer.addSample(ch, startSample + outputIndex, sample);
+                            }
+                        }
+
+                        voice.grainReadPosA += rate;
+                        voice.grainReadPosB += rate;
+                        --voice.grainSamplesRemaining;
+
+                        if (voice.grainSamplesRemaining <= 0)
+                        {
+                            voice.grainReadPosA = voice.grainReadPosB;
+                            voice.grainReadPosB = voice.grainReadPosA + Voice::kGrainSpacingSamples;
+                        }
+
+                        pos += sourceAdvancePerOutputSample;
                     }
 
-                    voice.grainReadPosA += rate;
-                    voice.grainReadPosB += rate;
-                    --voice.grainSamplesRemaining;
-
-                    if (voice.grainSamplesRemaining <= 0)
-                    {
-                        voice.grainReadPosA = voice.grainReadPosB;
-                        voice.grainReadPosB = voice.grainReadPosA + Voice::kGrainSpacingSamples;
-                    }
-
-                    pos += sourceAdvancePerOutputSample;
+                    renderedSamples += spanSamples;
                 }
+                else
+                {
+                    constexpr int kGenericGranularChunkSize = 256;
+                    constexpr int kGenericGranularCachedSources = 64;
+                    constexpr int kGenericGranularGroupedSourceLimit = 64;
+                    constexpr uint16_t kInvalidReadIndex = std::numeric_limits<uint16_t>::max();
+                    std::array<double, kGenericGranularChunkSize> grainReadPosAChunk{};
+                    std::array<double, kGenericGranularChunkSize> grainReadPosBChunk{};
+                    std::array<float, kGenericGranularChunkSize> gainWeightAChunk{};
+                    std::array<float, kGenericGranularChunkSize> gainWeightBChunk{};
+                    std::array<uint16_t, kGenericGranularChunkSize> idxAChunk{};
+                    std::array<uint16_t, kGenericGranularChunkSize> idxBChunk{};
+                    std::array<uint16_t, kGenericGranularChunkSize> idxA1Chunk{};
+                    std::array<uint16_t, kGenericGranularChunkSize> idxB1Chunk{};
+                    std::array<int16_t, kGenericGranularChunkSize> idxAM1Chunk{};
+                    std::array<int16_t, kGenericGranularChunkSize> idxBM1Chunk{};
+                    std::array<uint16_t, kGenericGranularChunkSize> idxA2Chunk{};
+                    std::array<uint16_t, kGenericGranularChunkSize> idxB2Chunk{};
+                    std::array<float, kGenericGranularChunkSize> fracAChunk{};
+                    std::array<float, kGenericGranularChunkSize> fracBChunk{};
+                    std::array<float, kGenericGranularChunkSize> fallbackMixedSamples{};
 
-                renderedSamples += spanSamples;
+                    bool useGroupedSourceFanout = (numOutChannels <= kGenericGranularGroupedSourceLimit) &&
+                                                  (numSrcChannels <= kGenericGranularGroupedSourceLimit);
+                    int groupedSourceCount = 0;
+                    std::array<int, kGenericGranularGroupedSourceLimit> groupedSourceChannels{};
+                    std::array<uint32_t, kGenericGranularGroupedSourceLimit> groupedDirectMasks{};
+                    std::array<uint32_t, kGenericGranularGroupedSourceLimit> groupedTailMasks{};
+
+                    if (useGroupedSourceFanout)
+                    {
+                        for (int ch = 0; ch < numOutChannels; ++ch)
+                        {
+                            const int srcCh = (ch < numSrcChannels) ? ch : 0;
+
+                            int sourceSlot = -1;
+                            for (int groupedIndex = 0; groupedIndex < groupedSourceCount; ++groupedIndex)
+                            {
+                                if (groupedSourceChannels[static_cast<size_t>(groupedIndex)] == srcCh)
+                                {
+                                    sourceSlot = groupedIndex;
+                                    break;
+                                }
+                            }
+
+                            if (sourceSlot < 0)
+                            {
+                                if (groupedSourceCount >= kGenericGranularGroupedSourceLimit)
+                                {
+                                    useGroupedSourceFanout = false;
+                                    break;
+                                }
+
+                                sourceSlot = groupedSourceCount;
+                                groupedSourceChannels[static_cast<size_t>(sourceSlot)] = srcCh;
+                                ++groupedSourceCount;
+                            }
+
+                            if (ch < directMixChannels)
+                            {
+                                groupedDirectMasks[static_cast<size_t>(sourceSlot)] |= (uint32_t{1} << ch);
+                            }
+                            else
+                            {
+                                const int tailIndex = ch - directMixChannels;
+                                if (tailIndex < 0 || tailIndex >= 32)
+                                {
+                                    useGroupedSourceFanout = false;
+                                    break;
+                                }
+
+                                groupedTailMasks[static_cast<size_t>(sourceSlot)] |= (uint32_t{1} << tailIndex);
+                            }
+                        }
+                    }
+
+                    int spanRendered = 0;
+                    while (spanRendered < spanSamples)
+                    {
+                        const int chunkSamples = juce::jmin(kGenericGranularChunkSize, spanSamples - spanRendered);
+                        int produced = 0;
+
+                        for (; produced < chunkSamples; ++produced)
+                        {
+                            if (voice.grainSamplesRemaining <= 0)
+                            {
+                                voice.grainReadPosA = pos;
+                                voice.grainReadPosB = pos + Voice::kGrainSpacingSamples;
+                                voice.grainSamplesRemaining = Voice::kGrainLengthSamples;
+                            }
+
+                            const float gain = voice.advanceFade(fadeRate);
+                            if (gain <= 0.0f)
+                                break;
+
+                            const float blend = smoothCrossfadeBlend(1.0f - (static_cast<float>(voice.grainSamplesRemaining) / static_cast<float>(Voice::kGrainLengthSamples)));
+                            grainReadPosAChunk[static_cast<size_t>(produced)] = voice.grainReadPosA;
+                            grainReadPosBChunk[static_cast<size_t>(produced)] = voice.grainReadPosB;
+                            gainWeightAChunk[static_cast<size_t>(produced)] = (1.0f - blend) * gain;
+                            gainWeightBChunk[static_cast<size_t>(produced)] = blend * gain;
+
+                            voice.grainReadPosA += rate;
+                            voice.grainReadPosB += rate;
+                            --voice.grainSamplesRemaining;
+
+                            if (voice.grainSamplesRemaining <= 0)
+                            {
+                                voice.grainReadPosA = voice.grainReadPosB;
+                                voice.grainReadPosB = voice.grainReadPosA + Voice::kGrainSpacingSamples;
+                            }
+
+                            pos += sourceAdvancePerOutputSample;
+                        }
+
+                        if (produced > 0)
+                        {
+                            const int outputStart = outputBase + spanRendered;
+                            const bool shouldCacheMixedBySource = (numOutChannels > numSrcChannels) &&
+                                                                  ((numSrcChannels <= 16) || ((numOutChannels - numSrcChannels) >= 4));
+                            const bool useHermiteInGeneric = useHighQualityInterpolation && (srcLength >= 4);
+
+                            const auto fillMixedSamples = [&](const float *srcRead, float *mixedSampleTarget)
+                            {
+                                if (useHermiteInGeneric)
+                                {
+                                    for (int sampleIndex = 0; sampleIndex < produced; ++sampleIndex)
+                                    {
+                                        const uint16_t idxA = idxAChunk[static_cast<size_t>(sampleIndex)];
+                                        float sampleA = 0.0f;
+                                        if (idxA != kInvalidReadIndex)
+                                        {
+                                            const float fracA = fracAChunk[static_cast<size_t>(sampleIndex)];
+                                            const int xm1Index = static_cast<int>(idxAM1Chunk[static_cast<size_t>(sampleIndex)]);
+                                            const float xm1 = srcRead[xm1Index];
+                                            const float x0 = srcRead[idxA];
+                                            const float x1 = srcRead[idxA1Chunk[static_cast<size_t>(sampleIndex)]];
+                                            const float x2 = srcRead[idxA2Chunk[static_cast<size_t>(sampleIndex)]];
+                                            const float c0 = x0;
+                                            const float c1 = 0.5f * (x1 - xm1);
+                                            const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+                                            const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+                                            sampleA = ((c3 * fracA + c2) * fracA + c1) * fracA + c0;
+                                        }
+
+                                        const uint16_t idxB = idxBChunk[static_cast<size_t>(sampleIndex)];
+                                        float sampleB = 0.0f;
+                                        if (idxB != kInvalidReadIndex)
+                                        {
+                                            const float fracB = fracBChunk[static_cast<size_t>(sampleIndex)];
+                                            const int xm1Index = static_cast<int>(idxBM1Chunk[static_cast<size_t>(sampleIndex)]);
+                                            const float xm1 = srcRead[xm1Index];
+                                            const float x0 = srcRead[idxB];
+                                            const float x1 = srcRead[idxB1Chunk[static_cast<size_t>(sampleIndex)]];
+                                            const float x2 = srcRead[idxB2Chunk[static_cast<size_t>(sampleIndex)]];
+                                            const float c0 = x0;
+                                            const float c1 = 0.5f * (x1 - xm1);
+                                            const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+                                            const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+                                            sampleB = ((c3 * fracB + c2) * fracB + c1) * fracB + c0;
+                                        }
+
+                                        mixedSampleTarget[static_cast<size_t>(sampleIndex)] = (sampleA * gainWeightAChunk[static_cast<size_t>(sampleIndex)]) +
+                                                                                              (sampleB * gainWeightBChunk[static_cast<size_t>(sampleIndex)]);
+                                    }
+                                }
+                                else
+                                {
+                                    for (int sampleIndex = 0; sampleIndex < produced; ++sampleIndex)
+                                    {
+                                        const uint16_t idxA = idxAChunk[static_cast<size_t>(sampleIndex)];
+                                        float sampleA = 0.0f;
+                                        if (idxA != kInvalidReadIndex)
+                                        {
+                                            const float s0 = srcRead[idxA];
+                                            const float s1 = srcRead[idxA1Chunk[static_cast<size_t>(sampleIndex)]];
+                                            const float fracA = fracAChunk[static_cast<size_t>(sampleIndex)];
+                                            sampleA = s0 + fracA * (s1 - s0);
+                                        }
+
+                                        const uint16_t idxB = idxBChunk[static_cast<size_t>(sampleIndex)];
+                                        float sampleB = 0.0f;
+                                        if (idxB != kInvalidReadIndex)
+                                        {
+                                            const float s0 = srcRead[idxB];
+                                            const float s1 = srcRead[idxB1Chunk[static_cast<size_t>(sampleIndex)]];
+                                            const float fracB = fracBChunk[static_cast<size_t>(sampleIndex)];
+                                            sampleB = s0 + fracB * (s1 - s0);
+                                        }
+
+                                        mixedSampleTarget[static_cast<size_t>(sampleIndex)] = (sampleA * gainWeightAChunk[static_cast<size_t>(sampleIndex)]) +
+                                                                                              (sampleB * gainWeightBChunk[static_cast<size_t>(sampleIndex)]);
+                                    }
+                                }
+                            };
+
+                            for (int sampleIndex = 0; sampleIndex < produced; ++sampleIndex)
+                            {
+                                const double wrappedA = wrapReadPosition(grainReadPosAChunk[static_cast<size_t>(sampleIndex)]);
+                                const double wrappedB = wrapReadPosition(grainReadPosBChunk[static_cast<size_t>(sampleIndex)]);
+
+                                if (wrappedA < 0.0 || wrappedA >= static_cast<double>(srcLength))
+                                {
+                                    idxAChunk[static_cast<size_t>(sampleIndex)] = kInvalidReadIndex;
+                                    fracAChunk[static_cast<size_t>(sampleIndex)] = 0.0f;
+                                }
+                                else
+                                {
+                                    const int idxA = static_cast<int>(wrappedA);
+                                    idxAChunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(idxA);
+                                    idxA1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmin(idxA + 1, srcLength - 1));
+                                    idxAM1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<int16_t>(juce::jmax(0, idxA - 1));
+                                    idxA2Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmin(idxA + 2, srcLength - 1));
+                                    fracAChunk[static_cast<size_t>(sampleIndex)] = static_cast<float>(wrappedA - static_cast<double>(idxA));
+                                }
+
+                                if (wrappedB < 0.0 || wrappedB >= static_cast<double>(srcLength))
+                                {
+                                    idxBChunk[static_cast<size_t>(sampleIndex)] = kInvalidReadIndex;
+                                    fracBChunk[static_cast<size_t>(sampleIndex)] = 0.0f;
+                                }
+                                else
+                                {
+                                    const int idxB = static_cast<int>(wrappedB);
+                                    idxBChunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(idxB);
+                                    idxB1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmin(idxB + 1, srcLength - 1));
+                                    idxBM1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<int16_t>(juce::jmax(0, idxB - 1));
+                                    idxB2Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmin(idxB + 2, srcLength - 1));
+                                    fracBChunk[static_cast<size_t>(sampleIndex)] = static_cast<float>(wrappedB - static_cast<double>(idxB));
+                                }
+                            }
+
+                            if (shouldCacheMixedBySource)
+                            {
+                                int cachedSourceCount = 0;
+                                std::array<std::array<float, kGenericGranularChunkSize>, kGenericGranularCachedSources> cachedMixedSamples{};
+                                std::array<int, kGenericGranularCachedSources> cachedSourceToSlot;
+                                cachedSourceToSlot.fill(-1);
+
+                                const auto getOrComputeCachedMixedSamplesForSource = [&](int srcCh)
+                                {
+                                    if (srcCh >= 0 && srcCh < kGenericGranularCachedSources)
+                                    {
+                                        const int cachedSlot = cachedSourceToSlot[static_cast<size_t>(srcCh)];
+                                        if (cachedSlot >= 0)
+                                            return cachedMixedSamples[static_cast<size_t>(cachedSlot)].data();
+                                    }
+
+                                    if (cachedSourceCount < kGenericGranularCachedSources)
+                                    {
+                                        auto &mixedForSource = cachedMixedSamples[static_cast<size_t>(cachedSourceCount)];
+                                        fillMixedSamples(getGenericSrcReadPtr(srcCh), mixedForSource.data());
+                                        if (srcCh >= 0 && srcCh < kGenericGranularCachedSources)
+                                            cachedSourceToSlot[static_cast<size_t>(srcCh)] = cachedSourceCount;
+                                        ++cachedSourceCount;
+                                        return mixedForSource.data();
+                                    }
+
+                                    fillMixedSamples(getGenericSrcReadPtr(srcCh), fallbackMixedSamples.data());
+                                    return fallbackMixedSamples.data();
+                                };
+
+                                for (int ch = 0; ch < directMixChannels; ++ch)
+                                {
+                                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                                    const float *mixedSamples = getOrComputeCachedMixedSamplesForSource(srcCh);
+                                    juce::FloatVectorOperations::add(outputWritePtrs[static_cast<size_t>(ch)] + outputStart,
+                                                                     mixedSamples,
+                                                                     produced);
+                                }
+
+                                for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                                {
+                                    const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                                    const float *mixedSamples = getOrComputeCachedMixedSamplesForSource(srcCh);
+                                    outputBuffer.addFrom(ch, startSample + outputStart, mixedSamples, produced);
+                                }
+                            }
+                            else
+                            {
+                                if (useGroupedSourceFanout)
+                                {
+                                    for (int groupedIndex = 0; groupedIndex < groupedSourceCount; ++groupedIndex)
+                                    {
+                                        const int srcCh = groupedSourceChannels[static_cast<size_t>(groupedIndex)];
+                                        fillMixedSamples(getGenericSrcReadPtr(srcCh), fallbackMixedSamples.data());
+
+                                        uint32_t directMask = groupedDirectMasks[static_cast<size_t>(groupedIndex)];
+                                        while (directMask != 0)
+                                        {
+                                            const int ch = static_cast<int>(std::countr_zero(directMask));
+                                            directMask &= (directMask - 1);
+                                            juce::FloatVectorOperations::add(outputWritePtrs[static_cast<size_t>(ch)] + outputStart,
+                                                                             fallbackMixedSamples.data(),
+                                                                             produced);
+                                        }
+
+                                        uint32_t tailMask = groupedTailMasks[static_cast<size_t>(groupedIndex)];
+                                        while (tailMask != 0)
+                                        {
+                                            const int tailIndex = static_cast<int>(std::countr_zero(tailMask));
+                                            tailMask &= (tailMask - 1);
+                                            outputBuffer.addFrom(directMixChannels + tailIndex,
+                                                                 startSample + outputStart,
+                                                                 fallbackMixedSamples.data(),
+                                                                 produced);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    for (int ch = 0; ch < directMixChannels; ++ch)
+                                    {
+                                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                                        fillMixedSamples(getGenericSrcReadPtr(srcCh), fallbackMixedSamples.data());
+                                        juce::FloatVectorOperations::add(outputWritePtrs[static_cast<size_t>(ch)] + outputStart,
+                                                                         fallbackMixedSamples.data(),
+                                                                         produced);
+                                    }
+
+                                    for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                                    {
+                                        const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                                        fillMixedSamples(getGenericSrcReadPtr(srcCh), fallbackMixedSamples.data());
+                                        outputBuffer.addFrom(ch,
+                                                             startSample + outputStart,
+                                                             fallbackMixedSamples.data(),
+                                                             produced);
+                                    }
+                                }
+                            }
+                        }
+
+                        spanRendered += produced;
+                        if (produced < chunkSamples)
+                        {
+                            renderedSamples += spanRendered;
+                            voice.playbackPos = pos;
+                            return;
+                        }
+                    }
+
+                    renderedSamples += spanRendered;
+                }
             }
             else
             {
@@ -1348,46 +1686,74 @@ namespace sw
                     continue;
                 }
 
-                for (int i = 0; i < spanSamples; ++i)
+                constexpr int kGenericDirectChunkSize = 256;
+                std::array<int, kGenericDirectChunkSize> sampleIndices{};
+                std::array<float, kGenericDirectChunkSize> sampleFracs{};
+                std::array<float, kGenericDirectChunkSize> sampleGains{};
+                std::array<float, kGenericDirectChunkSize> mixedSamples{};
+
+                int spanRendered = 0;
+                while (spanRendered < spanSamples)
                 {
-                    const float gain = voice.advanceFade(fadeRate);
-                    if (gain <= 0.0f)
-                        break;
+                    const int chunkSamples = juce::jmin(kGenericDirectChunkSize, spanSamples - spanRendered);
+                    int produced = 0;
 
-                    const int outputIndex = renderedSamples + i;
-                    const int idx0 = static_cast<int>(pos);
-                    const float frac = static_cast<float>(pos - static_cast<double>(idx0));
-                    const int cachedSrcChannels = juce::jmin(numSrcChannels, directMixChannels);
-                    std::array<float, kMaxDirectMixChannels> cachedScaledSamples{};
-
-                    for (int srcCh = 0; srcCh < cachedSrcChannels; ++srcCh)
+                    for (; produced < chunkSamples; ++produced)
                     {
-                        const float *srcRead = (srcCh == 0) ? srcReadPtr0
-                                                            : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
-                        cachedScaledSamples[static_cast<size_t>(srcCh)] = interpolatedSampleReader(srcRead, srcLength, idx0, frac) * gain;
+                        const float gain = voice.advanceFade(fadeRate);
+                        if (gain <= 0.0f)
+                            break;
+
+                        const int idx0 = static_cast<int>(pos);
+                        sampleIndices[static_cast<size_t>(produced)] = idx0;
+                        sampleFracs[static_cast<size_t>(produced)] = static_cast<float>(pos - static_cast<double>(idx0));
+                        sampleGains[static_cast<size_t>(produced)] = gain;
+                        pos += rate;
                     }
 
-                    const auto getScaledSample = [&](int outputChannel)
+                    if (produced > 0)
                     {
-                        const int srcCh = (outputChannel < numSrcChannels) ? outputChannel : 0;
-                        if (srcCh < cachedSrcChannels)
-                            return cachedScaledSamples[static_cast<size_t>(srcCh)];
+                        const int outputStart = renderedSamples + spanRendered;
 
-                        const float *srcRead = (srcCh == 0) ? srcReadPtr0
-                                                            : ((srcCh == 1) ? srcReadPtr1 : srcBuffer.getReadPointer(srcCh));
-                        return interpolatedSampleReader(srcRead, srcLength, idx0, frac) * gain;
-                    };
+                        const auto fillMixedSamples = [&](const float *srcRead)
+                        {
+                            for (int i = 0; i < produced; ++i)
+                            {
+                                mixedSamples[static_cast<size_t>(i)] = interpolatedSampleReader(srcRead,
+                                                                                                srcLength,
+                                                                                                sampleIndices[static_cast<size_t>(i)],
+                                                                                                sampleFracs[static_cast<size_t>(i)]) *
+                                                                       sampleGains[static_cast<size_t>(i)];
+                            }
+                        };
 
-                    for (int ch = 0; ch < directMixChannels; ++ch)
-                        outputWritePtrs[static_cast<size_t>(ch)][outputIndex] += getScaledSample(ch);
+                        for (int ch = 0; ch < directMixChannels; ++ch)
+                        {
+                            const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                            fillMixedSamples(getGenericSrcReadPtr(srcCh));
+                            juce::FloatVectorOperations::add(outputWritePtrs[static_cast<size_t>(ch)] + outputStart,
+                                                             mixedSamples.data(),
+                                                             produced);
+                        }
 
-                    for (int ch = directMixChannels; ch < numOutChannels; ++ch)
-                        outputBuffer.addSample(ch, startSample + outputIndex, getScaledSample(ch));
+                        for (int ch = directMixChannels; ch < numOutChannels; ++ch)
+                        {
+                            const int srcCh = (ch < numSrcChannels) ? ch : 0;
+                            fillMixedSamples(getGenericSrcReadPtr(srcCh));
+                            outputBuffer.addFrom(ch, startSample + outputStart, mixedSamples.data(), produced);
+                        }
+                    }
 
-                    pos += rate;
+                    spanRendered += produced;
+                    if (produced < chunkSamples)
+                    {
+                        renderedSamples += spanRendered;
+                        voice.playbackPos = pos;
+                        return;
+                    }
                 }
 
-                renderedSamples += spanSamples;
+                renderedSamples += spanRendered;
             }
 
             if (hasLoopRegion && pos >= loopEndExclusive)

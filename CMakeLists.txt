@@ -492,6 +492,12 @@ add_executable(SampleWranglerVoiceManagerRenderTests
     Source/Audio/VoiceManager.cpp
 )
 
+add_executable(SampleWranglerVoiceManagerBenchmark
+    Tests/VoiceManagerBenchmark.cpp
+    Source/Audio/Voice.cpp
+    Source/Audio/VoiceManager.cpp
+)
+
 target_include_directories(SampleWranglerWaveformPeakTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
 )
@@ -509,7 +515,13 @@ target_include_directories(SampleWranglerVoiceManagerRenderTests PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/SampleWrangler_artefacts/JuceLibraryCode
 )
 
+target_include_directories(SampleWranglerVoiceManagerBenchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    ${CMAKE_CURRENT_BINARY_DIR}/SampleWrangler_artefacts/JuceLibraryCode
+)
+
 add_dependencies(SampleWranglerVoiceManagerRenderTests SampleWrangler)
+add_dependencies(SampleWranglerVoiceManagerBenchmark SampleWrangler)
 
 target_link_libraries(SampleWranglerAcpPresetReaderTests PRIVATE
     juce::juce_core
@@ -518,6 +530,11 @@ target_link_libraries(SampleWranglerAcpPresetReaderTests PRIVATE
 )
 
 target_link_libraries(SampleWranglerVoiceManagerRenderTests PRIVATE
+    juce::juce_audio_basics
+    juce::juce_gui_basics
+)
+
+target_link_libraries(SampleWranglerVoiceManagerBenchmark PRIVATE
     juce::juce_audio_basics
     juce::juce_gui_basics
 )
@@ -542,6 +559,10 @@ target_compile_definitions(SampleWranglerVoiceManagerRenderTests PRIVATE
     SW_HAVE_RUBBERBAND=${SW_HAVE_RUBBERBAND}
 )
 
+target_compile_definitions(SampleWranglerVoiceManagerBenchmark PRIVATE
+    SW_HAVE_RUBBERBAND=${SW_HAVE_RUBBERBAND}
+)
+
 if(SW_HAVE_REX)
     target_link_libraries(SampleWranglerScannerAppleLoopTests PRIVATE rex_loader)
     target_include_directories(SampleWranglerScannerAppleLoopTests PRIVATE "${REX_SDK_DIR}")
@@ -554,6 +575,7 @@ endif()
 
 if(SW_HAVE_RUBBERBAND)
     target_link_libraries(SampleWranglerVoiceManagerRenderTests PRIVATE rubberband)
+    target_link_libraries(SampleWranglerVoiceManagerBenchmark PRIVATE rubberband)
 endif()
 
 if(MSVC)
@@ -574,6 +596,10 @@ if(MSVC)
         /NODEFAULTLIB:MSVCRTD
     )
     target_link_options(SampleWranglerVoiceManagerRenderTests PRIVATE
+        /NODEFAULTLIB:MSVCRT
+        /NODEFAULTLIB:MSVCRTD
+    )
+    target_link_options(SampleWranglerVoiceManagerBenchmark PRIVATE
         /NODEFAULTLIB:MSVCRT
         /NODEFAULTLIB:MSVCRTD
     )

@@ -46,6 +46,13 @@ If you find SampleWrangler useful and want to support continued development, you
 
 ## Version History
 
+### 1.3.0
+
+- Added sortable results in the browser UI with name, date, and size sort modes.
+- Added lightweight facet filters for format, channels, and loop presence.
+- Added a dedicated `Duplicates` results view backed by sampled content-hash duplicate detection.
+- Added persistence and restore for browser workflow controls (results view mode, sort mode, and facet filters).
+
 ### 1.2.0
 
 - Improved catalog analysis efficiency by avoiding whole-catalog over-fetches during root re-analysis.
@@ -70,9 +77,12 @@ If you find SampleWrangler useful and want to support continued development, you
 ### Library and Catalog
 
 - Local-only SQLite catalog with FTS5 full-text search over file names and paths.
-- Results workflow centered on text search plus `All Files` and `Favorites`, with per-root browsing from the source tree.
+- Results workflow includes `All Files`, `Favorites`, and `Duplicates`, with per-root browsing from the source tree.
+- Sortable results with name/date/size ordering.
+- Lightweight facet filters for format, channels, and loop presence.
 - Source folder management: add, rename, remap, delete, rescan, and reveal in Explorer.
 - File identity based on source root + relative path, making source-folder relocation practical.
+- Duplicate browsing based on sampled content-hash grouping.
 - File statistics tracked per library, root, or current result set.
 
 ### Scanning and Metadata Extraction
@@ -108,6 +118,7 @@ If you find SampleWrangler useful and want to support continued development, you
 - Database maintenance (VACUUM) from the toolbar.
 - Drag-and-drop files out of the application to Explorer or other programs.
 - Persisted app state: theme, audio device, MIDI input, preview settings, layout, and last selection.
+- Persisted browser state: results view mode, sort mode, and facet filters.
 
 ---
 
@@ -205,10 +216,10 @@ cmake --build --preset vs2026-release-artifacts
 
 This produces:
 
-- `build/vs2026-release/packages/SampleWrangler-1.2.0-win64-setup.exe`
-- `build/vs2026-release/packages/SampleWrangler-1.2.0-win64-portable.zip`
+- `build/vs2026-release/packages/SampleWrangler-1.3.0-win64-setup.exe`
+- `build/vs2026-release/packages/SampleWrangler-1.3.0-win64-portable.zip`
 
-The app executable, installer, and portable artifact are versioned as `1.2.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
+The app executable, installer, and portable artifact are versioned as `1.3.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
 
 The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php) and supports per-user or per-machine installs, Add/Remove Programs registration, and optional Start Menu/Desktop shortcuts.
 

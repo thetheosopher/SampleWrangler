@@ -22,7 +22,8 @@ namespace sw
         enum class ViewMode
         {
             Recent,
-            Favorites
+            Favorites,
+            Duplicates
         };
 
         enum class SortMode
@@ -33,6 +34,42 @@ namespace sw
             OldestFirst,
             SizeLargestFirst,
             SizeSmallestFirst
+        };
+
+        enum class FormatFilter
+        {
+            Any,
+            AudioOnly,
+            IndexedPresetOnly,
+            Wav,
+            Aiff,
+            Flac,
+            Mp3,
+            Ogg,
+            Rex,
+            Sfz
+        };
+
+        enum class ChannelsFilter
+        {
+            Any,
+            Mono,
+            Stereo,
+            MultiChannel
+        };
+
+        enum class LoopFilter
+        {
+            Any,
+            LoopedOnly,
+            OneShotOnly
+        };
+
+        struct FacetFilters
+        {
+            FormatFilter format = FormatFilter::Any;
+            ChannelsFilter channels = ChannelsFilter::Any;
+            LoopFilter loop = LoopFilter::Any;
         };
 
         ResultsPanel();
@@ -47,6 +84,8 @@ namespace sw
         ViewMode getViewMode() const noexcept;
         void setSortMode(SortMode mode);
         SortMode getSortMode() const noexcept;
+        void setFacetFilters(FacetFilters filters);
+        FacetFilters getFacetFilters() const noexcept;
         void setSelectedFileMetadata(std::optional<FileUserDataRecord> userData);
         void selectFirstRowIfNoneSelected();
         bool selectFile(int64_t rootId, const std::string &relativePath);
@@ -59,6 +98,7 @@ namespace sw
         std::function<void(const std::string &query)> onSearchQueryChanged;
         std::function<void(ViewMode mode)> onViewModeChanged;
         std::function<void(SortMode mode)> onSortModeChanged;
+        std::function<void(FacetFilters filters)> onFacetFiltersChanged;
         std::function<void(bool isFavorite)> onSelectedFileFavoriteChanged;
         std::function<void(const FileRecord &file)> onFileSelected;
         std::function<void(const FileRecord &file)> onFileActivated;
@@ -86,6 +126,9 @@ namespace sw
         juce::TextEditor searchBox;
         juce::ComboBox viewSelector;
         juce::ComboBox sortSelector;
+        juce::ComboBox formatSelector;
+        juce::ComboBox channelsSelector;
+        juce::ComboBox loopSelector;
         juce::ToggleButton favoriteToggle{"Favorite"};
         juce::ListBox resultsList;
         std::vector<FileRecord> results;
@@ -93,6 +136,7 @@ namespace sw
         std::unordered_set<int64_t> waveformCacheMisses;
         ViewMode viewMode = ViewMode::Recent;
         SortMode sortMode = SortMode::NameAsc;
+        FacetFilters facetFilters{};
         bool darkModeEnabled = false;
         bool suppressControlCallbacks = false;
 

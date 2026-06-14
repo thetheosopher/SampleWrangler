@@ -85,6 +85,86 @@ namespace sw
                    juce::String(file.relativePath).containsIgnoreCase(needle);
         }
 
+        bool hasLoopMetadata(const FileRecord &file)
+        {
+            return file.loopType.has_value() || file.loopStartSample.has_value() || file.loopEndSample.has_value();
+        }
+
+        bool matchesFormatFilter(const FileRecord &file, ResultsPanel::FormatFilter filter)
+        {
+            const auto ext = juce::String(file.extension);
+
+            switch (filter)
+            {
+            case ResultsPanel::FormatFilter::Any:
+                return true;
+            case ResultsPanel::FormatFilter::AudioOnly:
+                return !file.indexOnly;
+            case ResultsPanel::FormatFilter::IndexedPresetOnly:
+                return file.indexOnly;
+            case ResultsPanel::FormatFilter::Wav:
+                return ext.equalsIgnoreCase("wav");
+            case ResultsPanel::FormatFilter::Aiff:
+                return ext.equalsIgnoreCase("aiff") || ext.equalsIgnoreCase("aif");
+            case ResultsPanel::FormatFilter::Flac:
+                return ext.equalsIgnoreCase("flac");
+            case ResultsPanel::FormatFilter::Mp3:
+                return ext.equalsIgnoreCase("mp3");
+            case ResultsPanel::FormatFilter::Ogg:
+                return ext.equalsIgnoreCase("ogg");
+            case ResultsPanel::FormatFilter::Rex:
+                return ext.equalsIgnoreCase("rex") || ext.equalsIgnoreCase("rx2");
+            case ResultsPanel::FormatFilter::Sfz:
+                return ext.equalsIgnoreCase("sfz");
+            }
+
+            return true;
+        }
+
+        bool matchesChannelsFilter(const FileRecord &file, ResultsPanel::ChannelsFilter filter)
+        {
+            if (filter == ResultsPanel::ChannelsFilter::Any)
+                return true;
+
+            if (!file.channels.has_value())
+                return false;
+
+            switch (filter)
+            {
+            case ResultsPanel::ChannelsFilter::Mono:
+                return *file.channels == 1;
+            case ResultsPanel::ChannelsFilter::Stereo:
+                return *file.channels == 2;
+            case ResultsPanel::ChannelsFilter::MultiChannel:
+                return *file.channels > 2;
+            case ResultsPanel::ChannelsFilter::Any:
+            default:
+                return true;
+            }
+        }
+
+        bool matchesLoopFilter(const FileRecord &file, ResultsPanel::LoopFilter filter)
+        {
+            switch (filter)
+            {
+            case ResultsPanel::LoopFilter::Any:
+                return true;
+            case ResultsPanel::LoopFilter::LoopedOnly:
+                return hasLoopMetadata(file);
+            case ResultsPanel::LoopFilter::OneShotOnly:
+                return !hasLoopMetadata(file);
+            }
+
+            return true;
+        }
+
+        bool matchesFacetFilters(const FileRecord &file, const ResultsPanel::FacetFilters &filters)
+        {
+            return matchesFormatFilter(file, filters.format) &&
+                   matchesChannelsFilter(file, filters.channels) &&
+                   matchesLoopFilter(file, filters.loop);
+        }
+
         std::pair<int64_t, int64_t> buildStatsForResults(const std::vector<FileRecord> &results)
         {
             int64_t totalBytes = 0;
@@ -1326,6 +1406,20 @@ namespace sw
         resultsPanel.onViewModeChanged = [this](ResultsPanel::ViewMode mode)
         {
             currentResultsViewMode = mode;
+            persistResultsViewMode(mode);
+            refreshResults(currentSearchQuery);
+        };
+
+        resultsPanel.onSortModeChanged = [this](ResultsPanel::SortMode mode)
+        {
+            currentResultsSortMode = mode;
+            persistResultsSortMode(mode);
+        };
+
+        resultsPanel.onFacetFiltersChanged = [this](ResultsPanel::FacetFilters filters)
+        {
+            currentFacetFilters = filters;
+            persistResultsFacetFilters(filters);
             refreshResults(currentSearchQuery);
         };
 
@@ -1501,6 +1595,7 @@ namespace sw
         refreshMidiInputDeviceList(true);
 
         refreshRoots();
+        restoreBrowserSettings();
         refreshResults();
         resultsPanel.setSelectedFileMetadata(std::nullopt);
         restoreScanSummaryStatus();
@@ -1820,12 +1915,10 @@ namespace sw
                 if (query.empty())
                 {
                     results = catalogDb.listRecentFiles(-1);
-                    stats = catalogDb.fileStatsAll();
                 }
                 else
                 {
                     results = catalogDb.searchFiles(statsQuery, -1);
-                    stats = catalogDb.fileStatsSearch(statsQuery);
                 }
             }
             else
@@ -1834,16 +1927,14 @@ namespace sw
                 if (query.empty())
                 {
                     results = catalogDb.listRecentFilesByRoot(rootId, -1);
-                    stats = catalogDb.fileStatsByRoot(rootId);
                 }
                 else
                 {
                     results = catalogDb.searchFilesByRoot(rootId, statsQuery, -1);
-                    stats = catalogDb.fileStatsSearchByRoot(rootId, statsQuery);
                 }
             }
         }
-        else
+        else if (currentResultsViewMode == ResultsPanel::ViewMode::Favorites)
         {
             results = catalogDb.listFavoriteFiles(-1);
 
@@ -1861,9 +1952,32 @@ namespace sw
                                              { return !matchesSearchText(file, query); }),
                               results.end());
             }
-
-            stats = buildStatsForResults(results);
         }
+        else
+        {
+            results = catalogDb.listDuplicateFiles(-1);
+
+            if (selectedRootFilterId.has_value())
+            {
+                const auto rootId = *selectedRootFilterId;
+                results.erase(std::remove_if(results.begin(), results.end(), [rootId](const FileRecord &file)
+                                             { return file.rootId != rootId; }),
+                              results.end());
+            }
+
+            if (!query.empty())
+            {
+                results.erase(std::remove_if(results.begin(), results.end(), [query](const FileRecord &file)
+                                             { return !matchesSearchText(file, query); }),
+                              results.end());
+            }
+        }
+
+        results.erase(std::remove_if(results.begin(), results.end(), [this](const FileRecord &file)
+                                     { return !matchesFacetFilters(file, currentFacetFilters); }),
+                      results.end());
+
+        stats = buildStatsForResults(results);
 
         resultsPanel.setResults(std::move(results));
 
@@ -2206,6 +2320,197 @@ namespace sw
     void MainComponent::persistThemeMode(bool darkMode)
     {
         catalogDb.setAppSetting("ui.themeMode", darkMode ? "dark" : "light");
+    }
+
+    void MainComponent::restoreBrowserSettings()
+    {
+        if (const auto savedViewMode = catalogDb.getAppSetting("results.viewMode"))
+        {
+            if (*savedViewMode == "favorites")
+                currentResultsViewMode = ResultsPanel::ViewMode::Favorites;
+            else if (*savedViewMode == "duplicates")
+                currentResultsViewMode = ResultsPanel::ViewMode::Duplicates;
+            else
+                currentResultsViewMode = ResultsPanel::ViewMode::Recent;
+        }
+
+        if (const auto savedSortMode = catalogDb.getAppSetting("results.sortMode"))
+        {
+            if (*savedSortMode == "name.desc")
+                currentResultsSortMode = ResultsPanel::SortMode::NameDesc;
+            else if (*savedSortMode == "date.newest")
+                currentResultsSortMode = ResultsPanel::SortMode::NewestFirst;
+            else if (*savedSortMode == "date.oldest")
+                currentResultsSortMode = ResultsPanel::SortMode::OldestFirst;
+            else if (*savedSortMode == "size.largest")
+                currentResultsSortMode = ResultsPanel::SortMode::SizeLargestFirst;
+            else if (*savedSortMode == "size.smallest")
+                currentResultsSortMode = ResultsPanel::SortMode::SizeSmallestFirst;
+            else
+                currentResultsSortMode = ResultsPanel::SortMode::NameAsc;
+        }
+
+        if (const auto savedFormat = catalogDb.getAppSetting("results.filter.format"))
+        {
+            if (*savedFormat == "audio")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::AudioOnly;
+            else if (*savedFormat == "indexed")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::IndexedPresetOnly;
+            else if (*savedFormat == "wav")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Wav;
+            else if (*savedFormat == "aiff")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Aiff;
+            else if (*savedFormat == "flac")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Flac;
+            else if (*savedFormat == "mp3")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Mp3;
+            else if (*savedFormat == "ogg")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Ogg;
+            else if (*savedFormat == "rex")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Rex;
+            else if (*savedFormat == "sfz")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Sfz;
+            else
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Any;
+        }
+
+        if (const auto savedChannels = catalogDb.getAppSetting("results.filter.channels"))
+        {
+            if (*savedChannels == "mono")
+                currentFacetFilters.channels = ResultsPanel::ChannelsFilter::Mono;
+            else if (*savedChannels == "stereo")
+                currentFacetFilters.channels = ResultsPanel::ChannelsFilter::Stereo;
+            else if (*savedChannels == "multi")
+                currentFacetFilters.channels = ResultsPanel::ChannelsFilter::MultiChannel;
+            else
+                currentFacetFilters.channels = ResultsPanel::ChannelsFilter::Any;
+        }
+
+        if (const auto savedLoop = catalogDb.getAppSetting("results.filter.loop"))
+        {
+            if (*savedLoop == "looped")
+                currentFacetFilters.loop = ResultsPanel::LoopFilter::LoopedOnly;
+            else if (*savedLoop == "oneshot")
+                currentFacetFilters.loop = ResultsPanel::LoopFilter::OneShotOnly;
+            else
+                currentFacetFilters.loop = ResultsPanel::LoopFilter::Any;
+        }
+
+        resultsPanel.setViewMode(currentResultsViewMode);
+        resultsPanel.setSortMode(currentResultsSortMode);
+        resultsPanel.setFacetFilters(currentFacetFilters);
+    }
+
+    void MainComponent::persistResultsViewMode(ResultsPanel::ViewMode mode)
+    {
+        switch (mode)
+        {
+        case ResultsPanel::ViewMode::Favorites:
+            catalogDb.setAppSetting("results.viewMode", "favorites");
+            break;
+        case ResultsPanel::ViewMode::Duplicates:
+            catalogDb.setAppSetting("results.viewMode", "duplicates");
+            break;
+        case ResultsPanel::ViewMode::Recent:
+        default:
+            catalogDb.setAppSetting("results.viewMode", "recent");
+            break;
+        }
+    }
+
+    void MainComponent::persistResultsSortMode(ResultsPanel::SortMode mode)
+    {
+        switch (mode)
+        {
+        case ResultsPanel::SortMode::NameDesc:
+            catalogDb.setAppSetting("results.sortMode", "name.desc");
+            break;
+        case ResultsPanel::SortMode::NewestFirst:
+            catalogDb.setAppSetting("results.sortMode", "date.newest");
+            break;
+        case ResultsPanel::SortMode::OldestFirst:
+            catalogDb.setAppSetting("results.sortMode", "date.oldest");
+            break;
+        case ResultsPanel::SortMode::SizeLargestFirst:
+            catalogDb.setAppSetting("results.sortMode", "size.largest");
+            break;
+        case ResultsPanel::SortMode::SizeSmallestFirst:
+            catalogDb.setAppSetting("results.sortMode", "size.smallest");
+            break;
+        case ResultsPanel::SortMode::NameAsc:
+        default:
+            catalogDb.setAppSetting("results.sortMode", "name.asc");
+            break;
+        }
+    }
+
+    void MainComponent::persistResultsFacetFilters(const ResultsPanel::FacetFilters &filters)
+    {
+        switch (filters.format)
+        {
+        case ResultsPanel::FormatFilter::AudioOnly:
+            catalogDb.setAppSetting("results.filter.format", "audio");
+            break;
+        case ResultsPanel::FormatFilter::IndexedPresetOnly:
+            catalogDb.setAppSetting("results.filter.format", "indexed");
+            break;
+        case ResultsPanel::FormatFilter::Wav:
+            catalogDb.setAppSetting("results.filter.format", "wav");
+            break;
+        case ResultsPanel::FormatFilter::Aiff:
+            catalogDb.setAppSetting("results.filter.format", "aiff");
+            break;
+        case ResultsPanel::FormatFilter::Flac:
+            catalogDb.setAppSetting("results.filter.format", "flac");
+            break;
+        case ResultsPanel::FormatFilter::Mp3:
+            catalogDb.setAppSetting("results.filter.format", "mp3");
+            break;
+        case ResultsPanel::FormatFilter::Ogg:
+            catalogDb.setAppSetting("results.filter.format", "ogg");
+            break;
+        case ResultsPanel::FormatFilter::Rex:
+            catalogDb.setAppSetting("results.filter.format", "rex");
+            break;
+        case ResultsPanel::FormatFilter::Sfz:
+            catalogDb.setAppSetting("results.filter.format", "sfz");
+            break;
+        case ResultsPanel::FormatFilter::Any:
+        default:
+            catalogDb.setAppSetting("results.filter.format", "any");
+            break;
+        }
+
+        switch (filters.channels)
+        {
+        case ResultsPanel::ChannelsFilter::Mono:
+            catalogDb.setAppSetting("results.filter.channels", "mono");
+            break;
+        case ResultsPanel::ChannelsFilter::Stereo:
+            catalogDb.setAppSetting("results.filter.channels", "stereo");
+            break;
+        case ResultsPanel::ChannelsFilter::MultiChannel:
+            catalogDb.setAppSetting("results.filter.channels", "multi");
+            break;
+        case ResultsPanel::ChannelsFilter::Any:
+        default:
+            catalogDb.setAppSetting("results.filter.channels", "any");
+            break;
+        }
+
+        switch (filters.loop)
+        {
+        case ResultsPanel::LoopFilter::LoopedOnly:
+            catalogDb.setAppSetting("results.filter.loop", "looped");
+            break;
+        case ResultsPanel::LoopFilter::OneShotOnly:
+            catalogDb.setAppSetting("results.filter.loop", "oneshot");
+            break;
+        case ResultsPanel::LoopFilter::Any:
+        default:
+            catalogDb.setAppSetting("results.filter.loop", "any");
+            break;
+        }
     }
 
     void MainComponent::applyThemeMode(bool darkMode, bool persist)

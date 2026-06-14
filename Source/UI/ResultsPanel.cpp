@@ -6,18 +6,38 @@ namespace
 {
     constexpr int kViewRecentId = 1;
     constexpr int kViewFavoritesId = 2;
+    constexpr int kViewDuplicatesId = 3;
     constexpr int kSortNameAscId = 1;
     constexpr int kSortNameDescId = 2;
     constexpr int kSortNewestId = 3;
     constexpr int kSortOldestId = 4;
     constexpr int kSortSizeLargestId = 5;
     constexpr int kSortSizeSmallestId = 6;
+    constexpr int kFormatAnyId = 1;
+    constexpr int kFormatAudioOnlyId = 2;
+    constexpr int kFormatIndexedPresetId = 3;
+    constexpr int kFormatWavId = 4;
+    constexpr int kFormatAiffId = 5;
+    constexpr int kFormatFlacId = 6;
+    constexpr int kFormatMp3Id = 7;
+    constexpr int kFormatOggId = 8;
+    constexpr int kFormatRexId = 9;
+    constexpr int kFormatSfzId = 10;
+    constexpr int kChannelsAnyId = 1;
+    constexpr int kChannelsMonoId = 2;
+    constexpr int kChannelsStereoId = 3;
+    constexpr int kChannelsMultiId = 4;
+    constexpr int kLoopAnyId = 1;
+    constexpr int kLoopLoopedOnlyId = 2;
+    constexpr int kLoopOneShotOnlyId = 3;
     constexpr int kWaveformColumnWidth = 120;
 
     int selectorIdForViewMode(sw::ResultsPanel::ViewMode mode)
     {
         switch (mode)
         {
+        case sw::ResultsPanel::ViewMode::Duplicates:
+            return kViewDuplicatesId;
         case sw::ResultsPanel::ViewMode::Favorites:
             return kViewFavoritesId;
         case sw::ResultsPanel::ViewMode::Recent:
@@ -30,6 +50,8 @@ namespace
     {
         switch (id)
         {
+        case kViewDuplicatesId:
+            return sw::ResultsPanel::ViewMode::Duplicates;
         case kViewFavoritesId:
             return sw::ResultsPanel::ViewMode::Favorites;
         case kViewRecentId:
@@ -75,6 +97,122 @@ namespace
         case kSortNameAscId:
         default:
             return sw::ResultsPanel::SortMode::NameAsc;
+        }
+    }
+
+    int selectorIdForFormatFilter(sw::ResultsPanel::FormatFilter filter)
+    {
+        switch (filter)
+        {
+        case sw::ResultsPanel::FormatFilter::AudioOnly:
+            return kFormatAudioOnlyId;
+        case sw::ResultsPanel::FormatFilter::IndexedPresetOnly:
+            return kFormatIndexedPresetId;
+        case sw::ResultsPanel::FormatFilter::Wav:
+            return kFormatWavId;
+        case sw::ResultsPanel::FormatFilter::Aiff:
+            return kFormatAiffId;
+        case sw::ResultsPanel::FormatFilter::Flac:
+            return kFormatFlacId;
+        case sw::ResultsPanel::FormatFilter::Mp3:
+            return kFormatMp3Id;
+        case sw::ResultsPanel::FormatFilter::Ogg:
+            return kFormatOggId;
+        case sw::ResultsPanel::FormatFilter::Rex:
+            return kFormatRexId;
+        case sw::ResultsPanel::FormatFilter::Sfz:
+            return kFormatSfzId;
+        case sw::ResultsPanel::FormatFilter::Any:
+        default:
+            return kFormatAnyId;
+        }
+    }
+
+    sw::ResultsPanel::FormatFilter formatFilterForSelectorId(int id)
+    {
+        switch (id)
+        {
+        case kFormatAudioOnlyId:
+            return sw::ResultsPanel::FormatFilter::AudioOnly;
+        case kFormatIndexedPresetId:
+            return sw::ResultsPanel::FormatFilter::IndexedPresetOnly;
+        case kFormatWavId:
+            return sw::ResultsPanel::FormatFilter::Wav;
+        case kFormatAiffId:
+            return sw::ResultsPanel::FormatFilter::Aiff;
+        case kFormatFlacId:
+            return sw::ResultsPanel::FormatFilter::Flac;
+        case kFormatMp3Id:
+            return sw::ResultsPanel::FormatFilter::Mp3;
+        case kFormatOggId:
+            return sw::ResultsPanel::FormatFilter::Ogg;
+        case kFormatRexId:
+            return sw::ResultsPanel::FormatFilter::Rex;
+        case kFormatSfzId:
+            return sw::ResultsPanel::FormatFilter::Sfz;
+        case kFormatAnyId:
+        default:
+            return sw::ResultsPanel::FormatFilter::Any;
+        }
+    }
+
+    int selectorIdForChannelsFilter(sw::ResultsPanel::ChannelsFilter filter)
+    {
+        switch (filter)
+        {
+        case sw::ResultsPanel::ChannelsFilter::Mono:
+            return kChannelsMonoId;
+        case sw::ResultsPanel::ChannelsFilter::Stereo:
+            return kChannelsStereoId;
+        case sw::ResultsPanel::ChannelsFilter::MultiChannel:
+            return kChannelsMultiId;
+        case sw::ResultsPanel::ChannelsFilter::Any:
+        default:
+            return kChannelsAnyId;
+        }
+    }
+
+    sw::ResultsPanel::ChannelsFilter channelsFilterForSelectorId(int id)
+    {
+        switch (id)
+        {
+        case kChannelsMonoId:
+            return sw::ResultsPanel::ChannelsFilter::Mono;
+        case kChannelsStereoId:
+            return sw::ResultsPanel::ChannelsFilter::Stereo;
+        case kChannelsMultiId:
+            return sw::ResultsPanel::ChannelsFilter::MultiChannel;
+        case kChannelsAnyId:
+        default:
+            return sw::ResultsPanel::ChannelsFilter::Any;
+        }
+    }
+
+    int selectorIdForLoopFilter(sw::ResultsPanel::LoopFilter filter)
+    {
+        switch (filter)
+        {
+        case sw::ResultsPanel::LoopFilter::LoopedOnly:
+            return kLoopLoopedOnlyId;
+        case sw::ResultsPanel::LoopFilter::OneShotOnly:
+            return kLoopOneShotOnlyId;
+        case sw::ResultsPanel::LoopFilter::Any:
+        default:
+            return kLoopAnyId;
+        }
+    }
+
+    sw::ResultsPanel::LoopFilter loopFilterForSelectorId(int id)
+    {
+        switch (id)
+        {
+        case kLoopLoopedOnlyId:
+            return sw::ResultsPanel::LoopFilter::LoopedOnly;
+        case kLoopOneShotOnlyId:
+            return sw::ResultsPanel::LoopFilter::OneShotOnly;
+        case kLoopAnyId:
+        default:
+            return sw::ResultsPanel::LoopFilter::Any;
         }
     }
 
@@ -282,6 +420,7 @@ namespace sw
 
         viewSelector.addItem("All Files", kViewRecentId);
         viewSelector.addItem("Favorites", kViewFavoritesId);
+        viewSelector.addItem("Duplicates", kViewDuplicatesId);
         viewSelector.setSelectedId(kViewRecentId, juce::dontSendNotification);
         viewSelector.onChange = [this]
         {
@@ -331,6 +470,48 @@ namespace sw
         };
         addAndMakeVisible(sortSelector);
 
+        const auto facetChanged = [this]
+        {
+            if (suppressControlCallbacks)
+                return;
+
+            facetFilters.format = formatFilterForSelectorId(formatSelector.getSelectedId());
+            facetFilters.channels = channelsFilterForSelectorId(channelsSelector.getSelectedId());
+            facetFilters.loop = loopFilterForSelectorId(loopSelector.getSelectedId());
+
+            if (onFacetFiltersChanged)
+                onFacetFiltersChanged(facetFilters);
+        };
+
+        formatSelector.addItem("Format: Any", kFormatAnyId);
+        formatSelector.addItem("Format: Audio", kFormatAudioOnlyId);
+        formatSelector.addItem("Format: Indexed", kFormatIndexedPresetId);
+        formatSelector.addItem("WAV", kFormatWavId);
+        formatSelector.addItem("AIFF", kFormatAiffId);
+        formatSelector.addItem("FLAC", kFormatFlacId);
+        formatSelector.addItem("MP3", kFormatMp3Id);
+        formatSelector.addItem("OGG", kFormatOggId);
+        formatSelector.addItem("REX/RX2", kFormatRexId);
+        formatSelector.addItem("SFZ", kFormatSfzId);
+        formatSelector.setSelectedId(kFormatAnyId, juce::dontSendNotification);
+        formatSelector.onChange = facetChanged;
+        addAndMakeVisible(formatSelector);
+
+        channelsSelector.addItem("Channels: Any", kChannelsAnyId);
+        channelsSelector.addItem("Mono", kChannelsMonoId);
+        channelsSelector.addItem("Stereo", kChannelsStereoId);
+        channelsSelector.addItem("Multi", kChannelsMultiId);
+        channelsSelector.setSelectedId(kChannelsAnyId, juce::dontSendNotification);
+        channelsSelector.onChange = facetChanged;
+        addAndMakeVisible(channelsSelector);
+
+        loopSelector.addItem("Loop: Any", kLoopAnyId);
+        loopSelector.addItem("Looped", kLoopLoopedOnlyId);
+        loopSelector.addItem("One-shot", kLoopOneShotOnlyId);
+        loopSelector.setSelectedId(kLoopAnyId, juce::dontSendNotification);
+        loopSelector.onChange = facetChanged;
+        addAndMakeVisible(loopSelector);
+
         favoriteToggle.onClick = [this]
         {
             if (suppressControlCallbacks)
@@ -361,6 +542,9 @@ namespace sw
         auto metadataRow = area.removeFromTop(28);
         constexpr int viewWidth = 110;
         constexpr int sortWidth = 130;
+        constexpr int formatWidth = 140;
+        constexpr int channelsWidth = 120;
+        constexpr int loopWidth = 120;
         constexpr int favoriteWidth = 88;
         constexpr int controlGap = 6;
 
@@ -371,6 +555,12 @@ namespace sw
         searchBox.setBounds(topRow);
 
         favoriteToggle.setBounds(metadataRow.removeFromRight(favoriteWidth));
+        metadataRow.removeFromRight(controlGap);
+        loopSelector.setBounds(metadataRow.removeFromLeft(loopWidth));
+        metadataRow.removeFromLeft(controlGap);
+        channelsSelector.setBounds(metadataRow.removeFromLeft(channelsWidth));
+        metadataRow.removeFromLeft(controlGap);
+        formatSelector.setBounds(metadataRow.removeFromLeft(formatWidth));
 
         area.removeFromTop(4);
         resultsList.setBounds(area);
@@ -425,6 +615,21 @@ namespace sw
     ResultsPanel::SortMode ResultsPanel::getSortMode() const noexcept
     {
         return sortMode;
+    }
+
+    void ResultsPanel::setFacetFilters(FacetFilters filters)
+    {
+        facetFilters = filters;
+        suppressControlCallbacks = true;
+        formatSelector.setSelectedId(selectorIdForFormatFilter(facetFilters.format), juce::dontSendNotification);
+        channelsSelector.setSelectedId(selectorIdForChannelsFilter(facetFilters.channels), juce::dontSendNotification);
+        loopSelector.setSelectedId(selectorIdForLoopFilter(facetFilters.loop), juce::dontSendNotification);
+        suppressControlCallbacks = false;
+    }
+
+    ResultsPanel::FacetFilters ResultsPanel::getFacetFilters() const noexcept
+    {
+        return facetFilters;
     }
 
     void ResultsPanel::setSelectedFileMetadata(std::optional<FileUserDataRecord> userData)
@@ -658,6 +863,21 @@ namespace sw
         sortSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
         sortSelector.setColour(juce::ComboBox::outlineColourId, outline);
         sortSelector.setColour(juce::ComboBox::arrowColourId, textColour);
+
+        formatSelector.setColour(juce::ComboBox::textColourId, textColour);
+        formatSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
+        formatSelector.setColour(juce::ComboBox::outlineColourId, outline);
+        formatSelector.setColour(juce::ComboBox::arrowColourId, textColour);
+
+        channelsSelector.setColour(juce::ComboBox::textColourId, textColour);
+        channelsSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
+        channelsSelector.setColour(juce::ComboBox::outlineColourId, outline);
+        channelsSelector.setColour(juce::ComboBox::arrowColourId, textColour);
+
+        loopSelector.setColour(juce::ComboBox::textColourId, textColour);
+        loopSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
+        loopSelector.setColour(juce::ComboBox::outlineColourId, outline);
+        loopSelector.setColour(juce::ComboBox::arrowColourId, textColour);
 
         favoriteToggle.setColour(juce::ToggleButton::textColourId, textColour);
 

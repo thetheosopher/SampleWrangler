@@ -50,6 +50,7 @@ namespace sw
         void restorePreviewSettings();
         void restoreMidiInputSettings();
         void restoreThemeSettings();
+        void restoreBrowserSettings();
         void restoreLastSelection();
         void restoreLayoutSettings();
         void restoreScanSummaryStatus();
@@ -63,6 +64,9 @@ namespace sw
         void persistPreviewStretchEnabled(bool enabled);
         void persistPreviewStretchHighQualityEnabled(bool enabled);
         void persistThemeMode(bool darkMode);
+        void persistResultsViewMode(ResultsPanel::ViewMode mode);
+        void persistResultsSortMode(ResultsPanel::SortMode mode);
+        void persistResultsFacetFilters(const ResultsPanel::FacetFilters &filters);
         void persistLastSelectedFile(const FileRecord &file);
         void persistScanSummaryStatus(const juce::String &statusText);
         void setScanStatusText(const juce::String &statusText);
@@ -209,6 +213,8 @@ namespace sw
         uint64_t previewLoadingRequestId = 0;
         std::string currentSearchQuery;
         ResultsPanel::ViewMode currentResultsViewMode = ResultsPanel::ViewMode::Recent;
+        ResultsPanel::SortMode currentResultsSortMode = ResultsPanel::SortMode::NameAsc;
+        ResultsPanel::FacetFilters currentFacetFilters{};
         juce::String selectedMidiInputIdentifier;
         juce::StringArray lastKnownMidiInputIdentifiers;
         int midiDeviceRefreshCounter = 0;

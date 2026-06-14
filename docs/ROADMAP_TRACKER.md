@@ -35,6 +35,9 @@ Build the most compelling desktop sample librarian possible while complementing 
 - `SampleWrangler` builds successfully with CMake Tools.
 - The shipped results workflow is intentionally limited to text search plus `All Files` and `Favorites`; ratings, tags, and saved searches were removed in 1.1.
 - Sortable browser results are now implemented: the results panel includes a sort selector with name, date, and size modes that apply across `All Files` and `Favorites` views.
+- Lightweight facet filters are now implemented in the results panel for format, channels, and loop presence, and they apply across `All Files` and `Favorites` views.
+- Duplicate browser support is now implemented via a `Duplicates` results view backed by `listDuplicateFiles`, with existing root, search, sort, and facet filters applied.
+- Browser workflow controls now persist and restore across relaunch: results view mode, sort mode, and facet filters are stored in app settings and reapplied on startup.
 - The current sampler-engine follow-up build is clean after moving Rubber Band state and helpers out of `Source/Audio/Voice.h` into `Source/Audio/Voice.cpp` and tightening the preserve-length render path.
 - `SampleWranglerVoiceManagerRenderTests` now builds successfully and gives the sampler engine an offline render harness that exercises primary playback completion, direct and preserve-length loop behavior, preserve-length loop-boundary wrapping, scrub resets, preserve-length duration behavior, source-sample-rate handling, stereo direct steady-state and fade-in channel separation, short-clip HQ fallback audibility, fresh-start HQ preserve-length playback, and deterministic live HQ-toggle deferral to the next note through the public `VoiceManager` API.
 - `SampleWranglerVoiceManagerRenderTests` now also cover repeated preserve-length loop-wrap stress plus wider-channel generic fallback routing for both preserve-length and direct playback paths.

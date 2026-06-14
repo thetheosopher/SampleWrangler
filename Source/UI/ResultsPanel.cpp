@@ -6,6 +6,12 @@ namespace
 {
     constexpr int kViewRecentId = 1;
     constexpr int kViewFavoritesId = 2;
+    constexpr int kSortNameAscId = 1;
+    constexpr int kSortNameDescId = 2;
+    constexpr int kSortNewestId = 3;
+    constexpr int kSortOldestId = 4;
+    constexpr int kSortSizeLargestId = 5;
+    constexpr int kSortSizeSmallestId = 6;
     constexpr int kWaveformColumnWidth = 120;
 
     int selectorIdForViewMode(sw::ResultsPanel::ViewMode mode)
@@ -29,6 +35,46 @@ namespace
         case kViewRecentId:
         default:
             return sw::ResultsPanel::ViewMode::Recent;
+        }
+    }
+
+    int selectorIdForSortMode(sw::ResultsPanel::SortMode mode)
+    {
+        switch (mode)
+        {
+        case sw::ResultsPanel::SortMode::NameDesc:
+            return kSortNameDescId;
+        case sw::ResultsPanel::SortMode::NewestFirst:
+            return kSortNewestId;
+        case sw::ResultsPanel::SortMode::OldestFirst:
+            return kSortOldestId;
+        case sw::ResultsPanel::SortMode::SizeLargestFirst:
+            return kSortSizeLargestId;
+        case sw::ResultsPanel::SortMode::SizeSmallestFirst:
+            return kSortSizeSmallestId;
+        case sw::ResultsPanel::SortMode::NameAsc:
+        default:
+            return kSortNameAscId;
+        }
+    }
+
+    sw::ResultsPanel::SortMode sortModeForSelectorId(int id)
+    {
+        switch (id)
+        {
+        case kSortNameDescId:
+            return sw::ResultsPanel::SortMode::NameDesc;
+        case kSortNewestId:
+            return sw::ResultsPanel::SortMode::NewestFirst;
+        case kSortOldestId:
+            return sw::ResultsPanel::SortMode::OldestFirst;
+        case kSortSizeLargestId:
+            return sw::ResultsPanel::SortMode::SizeLargestFirst;
+        case kSortSizeSmallestId:
+            return sw::ResultsPanel::SortMode::SizeSmallestFirst;
+        case kSortNameAscId:
+        default:
+            return sw::ResultsPanel::SortMode::NameAsc;
         }
     }
 
@@ -249,6 +295,42 @@ namespace sw
         };
         addAndMakeVisible(viewSelector);
 
+        sortSelector.addItem("Name A-Z", kSortNameAscId);
+        sortSelector.addItem("Name Z-A", kSortNameDescId);
+        sortSelector.addItem("Date Newest", kSortNewestId);
+        sortSelector.addItem("Date Oldest", kSortOldestId);
+        sortSelector.addItem("Size Largest", kSortSizeLargestId);
+        sortSelector.addItem("Size Smallest", kSortSizeSmallestId);
+        sortSelector.setSelectedId(kSortNameAscId, juce::dontSendNotification);
+        sortSelector.onChange = [this]
+        {
+            if (suppressControlCallbacks)
+                return;
+
+            const int selectedRow = resultsList.getSelectedRow();
+            const int64_t selectedFileId = (selectedRow >= 0 && selectedRow < static_cast<int>(results.size()))
+                                               ? results[static_cast<size_t>(selectedRow)].id
+                                               : -1;
+
+            sortMode = sortModeForSelectorId(sortSelector.getSelectedId());
+            applySort();
+            resultsList.updateContent();
+
+            if (selectedFileId >= 0)
+            {
+                const auto it = std::find_if(results.begin(), results.end(), [selectedFileId](const FileRecord &file)
+                                             { return file.id == selectedFileId; });
+                if (it != results.end())
+                    resultsList.selectRow(static_cast<int>(std::distance(results.begin(), it)));
+            }
+
+            if (onSortModeChanged)
+                onSortModeChanged(sortMode);
+
+            repaint();
+        };
+        addAndMakeVisible(sortSelector);
+
         favoriteToggle.onClick = [this]
         {
             if (suppressControlCallbacks)
@@ -278,10 +360,13 @@ namespace sw
         auto topRow = area.removeFromTop(28);
         auto metadataRow = area.removeFromTop(28);
         constexpr int viewWidth = 110;
+        constexpr int sortWidth = 130;
         constexpr int favoriteWidth = 88;
         constexpr int controlGap = 6;
 
         viewSelector.setBounds(topRow.removeFromRight(viewWidth));
+        topRow.removeFromRight(controlGap);
+        sortSelector.setBounds(topRow.removeFromRight(sortWidth));
         topRow.removeFromRight(controlGap);
         searchBox.setBounds(topRow);
 
@@ -326,6 +411,22 @@ namespace sw
         return viewMode;
     }
 
+    void ResultsPanel::setSortMode(SortMode mode)
+    {
+        sortMode = mode;
+        suppressControlCallbacks = true;
+        sortSelector.setSelectedId(selectorIdForSortMode(mode), juce::dontSendNotification);
+        suppressControlCallbacks = false;
+        applySort();
+        resultsList.updateContent();
+        repaint();
+    }
+
+    ResultsPanel::SortMode ResultsPanel::getSortMode() const noexcept
+    {
+        return sortMode;
+    }
+
     void ResultsPanel::setSelectedFileMetadata(std::optional<FileUserDataRecord> userData)
     {
         suppressControlCallbacks = true;
@@ -336,8 +437,8 @@ namespace sw
 
     void ResultsPanel::applySort()
     {
-        std::sort(results.begin(), results.end(), [](const FileRecord &a, const FileRecord &b)
-                  {
+        auto compareNameAsc = [](const FileRecord &a, const FileRecord &b)
+        {
             const auto nameCmp = juce::String(a.filename).compareIgnoreCase(juce::String(b.filename));
             if (nameCmp != 0)
                 return nameCmp < 0;
@@ -346,7 +447,72 @@ namespace sw
             if (relCmp != 0)
                 return relCmp < 0;
 
-            return a.id < b.id; });
+            return a.id < b.id;
+        };
+
+        auto compareNameDesc = [compareNameAsc](const FileRecord &a, const FileRecord &b)
+        {
+            if (compareNameAsc(a, b))
+                return false;
+            if (compareNameAsc(b, a))
+                return true;
+            return false;
+        };
+
+        auto compareNewestFirst = [compareNameAsc](const FileRecord &a, const FileRecord &b)
+        {
+            if (a.modifiedTime != b.modifiedTime)
+                return a.modifiedTime > b.modifiedTime;
+
+            return compareNameAsc(a, b);
+        };
+
+        auto compareOldestFirst = [compareNameAsc](const FileRecord &a, const FileRecord &b)
+        {
+            if (a.modifiedTime != b.modifiedTime)
+                return a.modifiedTime < b.modifiedTime;
+
+            return compareNameAsc(a, b);
+        };
+
+        auto compareSizeLargestFirst = [compareNameAsc](const FileRecord &a, const FileRecord &b)
+        {
+            if (a.sizeBytes != b.sizeBytes)
+                return a.sizeBytes > b.sizeBytes;
+
+            return compareNameAsc(a, b);
+        };
+
+        auto compareSizeSmallestFirst = [compareNameAsc](const FileRecord &a, const FileRecord &b)
+        {
+            if (a.sizeBytes != b.sizeBytes)
+                return a.sizeBytes < b.sizeBytes;
+
+            return compareNameAsc(a, b);
+        };
+
+        switch (sortMode)
+        {
+        case SortMode::NameDesc:
+            std::sort(results.begin(), results.end(), compareNameDesc);
+            break;
+        case SortMode::NewestFirst:
+            std::sort(results.begin(), results.end(), compareNewestFirst);
+            break;
+        case SortMode::OldestFirst:
+            std::sort(results.begin(), results.end(), compareOldestFirst);
+            break;
+        case SortMode::SizeLargestFirst:
+            std::sort(results.begin(), results.end(), compareSizeLargestFirst);
+            break;
+        case SortMode::SizeSmallestFirst:
+            std::sort(results.begin(), results.end(), compareSizeSmallestFirst);
+            break;
+        case SortMode::NameAsc:
+        default:
+            std::sort(results.begin(), results.end(), compareNameAsc);
+            break;
+        }
     }
 
     const std::vector<float> *ResultsPanel::loadWaveformPeaksForFile(const FileRecord &file)
@@ -487,6 +653,11 @@ namespace sw
         viewSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
         viewSelector.setColour(juce::ComboBox::outlineColourId, outline);
         viewSelector.setColour(juce::ComboBox::arrowColourId, textColour);
+
+        sortSelector.setColour(juce::ComboBox::textColourId, textColour);
+        sortSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
+        sortSelector.setColour(juce::ComboBox::outlineColourId, outline);
+        sortSelector.setColour(juce::ComboBox::arrowColourId, textColour);
 
         favoriteToggle.setColour(juce::ToggleButton::textColourId, textColour);
 

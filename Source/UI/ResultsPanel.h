@@ -25,6 +25,16 @@ namespace sw
             Favorites
         };
 
+        enum class SortMode
+        {
+            NameAsc,
+            NameDesc,
+            NewestFirst,
+            OldestFirst,
+            SizeLargestFirst,
+            SizeSmallestFirst
+        };
+
         ResultsPanel();
         ~ResultsPanel() override = default;
 
@@ -35,6 +45,8 @@ namespace sw
         void setSearchQuery(const std::string &query);
         void setViewMode(ViewMode mode);
         ViewMode getViewMode() const noexcept;
+        void setSortMode(SortMode mode);
+        SortMode getSortMode() const noexcept;
         void setSelectedFileMetadata(std::optional<FileUserDataRecord> userData);
         void selectFirstRowIfNoneSelected();
         bool selectFile(int64_t rootId, const std::string &relativePath);
@@ -46,6 +58,7 @@ namespace sw
 
         std::function<void(const std::string &query)> onSearchQueryChanged;
         std::function<void(ViewMode mode)> onViewModeChanged;
+        std::function<void(SortMode mode)> onSortModeChanged;
         std::function<void(bool isFavorite)> onSelectedFileFavoriteChanged;
         std::function<void(const FileRecord &file)> onFileSelected;
         std::function<void(const FileRecord &file)> onFileActivated;
@@ -72,12 +85,14 @@ namespace sw
 
         juce::TextEditor searchBox;
         juce::ComboBox viewSelector;
+        juce::ComboBox sortSelector;
         juce::ToggleButton favoriteToggle{"Favorite"};
         juce::ListBox resultsList;
         std::vector<FileRecord> results;
         std::unordered_map<int64_t, std::vector<float>> waveformPeaksByFileId;
         std::unordered_set<int64_t> waveformCacheMisses;
         ViewMode viewMode = ViewMode::Recent;
+        SortMode sortMode = SortMode::NameAsc;
         bool darkModeEnabled = false;
         bool suppressControlCallbacks = false;
 

@@ -1162,21 +1162,25 @@ namespace sw
                     constexpr int kGenericGranularCachedSources = 64;
                     constexpr int kGenericGranularGroupedSourceLimit = 64;
                     constexpr uint16_t kInvalidReadIndex = std::numeric_limits<uint16_t>::max();
-                    std::array<double, kGenericGranularChunkSize> grainReadPosAChunk{};
-                    std::array<double, kGenericGranularChunkSize> grainReadPosBChunk{};
-                    std::array<float, kGenericGranularChunkSize> gainWeightAChunk{};
-                    std::array<float, kGenericGranularChunkSize> gainWeightBChunk{};
-                    std::array<uint16_t, kGenericGranularChunkSize> idxAChunk{};
-                    std::array<uint16_t, kGenericGranularChunkSize> idxBChunk{};
-                    std::array<uint16_t, kGenericGranularChunkSize> idxA1Chunk{};
-                    std::array<uint16_t, kGenericGranularChunkSize> idxB1Chunk{};
-                    std::array<int16_t, kGenericGranularChunkSize> idxAM1Chunk{};
-                    std::array<int16_t, kGenericGranularChunkSize> idxBM1Chunk{};
-                    std::array<uint16_t, kGenericGranularChunkSize> idxA2Chunk{};
-                    std::array<uint16_t, kGenericGranularChunkSize> idxB2Chunk{};
-                    std::array<float, kGenericGranularChunkSize> fracAChunk{};
-                    std::array<float, kGenericGranularChunkSize> fracBChunk{};
-                    std::array<float, kGenericGranularChunkSize> fallbackMixedSamples{};
+                    std::array<double, kGenericGranularChunkSize> grainReadPosAChunk;
+                    std::array<double, kGenericGranularChunkSize> grainReadPosBChunk;
+                    std::array<float, kGenericGranularChunkSize> gainWeightAChunk;
+                    std::array<float, kGenericGranularChunkSize> gainWeightBChunk;
+                    std::array<uint16_t, kGenericGranularChunkSize> idxAChunk;
+                    std::array<uint16_t, kGenericGranularChunkSize> idxBChunk;
+                    std::array<uint16_t, kGenericGranularChunkSize> idxA1Chunk;
+                    std::array<uint16_t, kGenericGranularChunkSize> idxB1Chunk;
+                    std::array<uint16_t, kGenericGranularChunkSize> idxAM1Chunk;
+                    std::array<uint16_t, kGenericGranularChunkSize> idxBM1Chunk;
+                    std::array<uint16_t, kGenericGranularChunkSize> idxA2Chunk;
+                    std::array<uint16_t, kGenericGranularChunkSize> idxB2Chunk;
+                    std::array<float, kGenericGranularChunkSize> fracAChunk;
+                    std::array<float, kGenericGranularChunkSize> fracBChunk;
+                    std::array<float, kGenericGranularChunkSize> fallbackMixedSamples;
+                    std::array<std::array<float, kGenericGranularChunkSize>, kGenericGranularCachedSources> cachedMixedSamples;
+                    std::array<int, kGenericGranularCachedSources> cachedSourceToSlot;
+                    std::array<uint16_t, kGenericGranularCachedSources> cachedSourceStamp{};
+                    uint16_t cachedSourceStampEpoch = 1;
 
                     bool useGroupedSourceFanout = (numOutChannels <= kGenericGranularGroupedSourceLimit) &&
                                                   (numSrcChannels <= kGenericGranularGroupedSourceLimit);
@@ -1184,6 +1188,9 @@ namespace sw
                     std::array<int, kGenericGranularGroupedSourceLimit> groupedSourceChannels{};
                     std::array<uint32_t, kGenericGranularGroupedSourceLimit> groupedDirectMasks{};
                     std::array<uint32_t, kGenericGranularGroupedSourceLimit> groupedTailMasks{};
+
+                    const bool shouldCacheMixedBySource = (numOutChannels > numSrcChannels) &&
+                                                          ((numSrcChannels <= 16) || ((numOutChannels - numSrcChannels) >= 4));
 
                     if (useGroupedSourceFanout)
                     {
@@ -1232,6 +1239,8 @@ namespace sw
                         }
                     }
 
+                    cachedSourceToSlot.fill(-1);
+
                     int spanRendered = 0;
                     while (spanRendered < spanSamples)
                     {
@@ -1273,48 +1282,51 @@ namespace sw
                         if (produced > 0)
                         {
                             const int outputStart = outputBase + spanRendered;
-                            const bool shouldCacheMixedBySource = (numOutChannels > numSrcChannels) &&
-                                                                  ((numSrcChannels <= 16) || ((numOutChannels - numSrcChannels) >= 4));
                             const bool useHermiteInGeneric = useHighQualityInterpolation && (srcLength >= 4);
 
                             const auto fillMixedSamples = [&](const float *srcRead, float *mixedSampleTarget)
                             {
                                 if (useHermiteInGeneric)
                                 {
+                                    const auto readHermitePrepared = [&](uint16_t idx0,
+                                                                         uint16_t idxM1,
+                                                                         uint16_t idx1,
+                                                                         uint16_t idx2,
+                                                                         float frac)
+                                    {
+                                        const float xm1 = srcRead[idxM1];
+                                        const float x0 = srcRead[idx0];
+                                        const float x1 = srcRead[idx1];
+                                        const float x2 = srcRead[idx2];
+                                        const float c0 = x0;
+                                        const float c1 = 0.5f * (x1 - xm1);
+                                        const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+                                        const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+                                        return ((c3 * frac + c2) * frac + c1) * frac + c0;
+                                    };
+
                                     for (int sampleIndex = 0; sampleIndex < produced; ++sampleIndex)
                                     {
                                         const uint16_t idxA = idxAChunk[static_cast<size_t>(sampleIndex)];
                                         float sampleA = 0.0f;
                                         if (idxA != kInvalidReadIndex)
                                         {
-                                            const float fracA = fracAChunk[static_cast<size_t>(sampleIndex)];
-                                            const int xm1Index = static_cast<int>(idxAM1Chunk[static_cast<size_t>(sampleIndex)]);
-                                            const float xm1 = srcRead[xm1Index];
-                                            const float x0 = srcRead[idxA];
-                                            const float x1 = srcRead[idxA1Chunk[static_cast<size_t>(sampleIndex)]];
-                                            const float x2 = srcRead[idxA2Chunk[static_cast<size_t>(sampleIndex)]];
-                                            const float c0 = x0;
-                                            const float c1 = 0.5f * (x1 - xm1);
-                                            const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
-                                            const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
-                                            sampleA = ((c3 * fracA + c2) * fracA + c1) * fracA + c0;
+                                            sampleA = readHermitePrepared(idxA,
+                                                                          idxAM1Chunk[static_cast<size_t>(sampleIndex)],
+                                                                          idxA1Chunk[static_cast<size_t>(sampleIndex)],
+                                                                          idxA2Chunk[static_cast<size_t>(sampleIndex)],
+                                                                          fracAChunk[static_cast<size_t>(sampleIndex)]);
                                         }
 
                                         const uint16_t idxB = idxBChunk[static_cast<size_t>(sampleIndex)];
                                         float sampleB = 0.0f;
                                         if (idxB != kInvalidReadIndex)
                                         {
-                                            const float fracB = fracBChunk[static_cast<size_t>(sampleIndex)];
-                                            const int xm1Index = static_cast<int>(idxBM1Chunk[static_cast<size_t>(sampleIndex)]);
-                                            const float xm1 = srcRead[xm1Index];
-                                            const float x0 = srcRead[idxB];
-                                            const float x1 = srcRead[idxB1Chunk[static_cast<size_t>(sampleIndex)]];
-                                            const float x2 = srcRead[idxB2Chunk[static_cast<size_t>(sampleIndex)]];
-                                            const float c0 = x0;
-                                            const float c1 = 0.5f * (x1 - xm1);
-                                            const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
-                                            const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
-                                            sampleB = ((c3 * fracB + c2) * fracB + c1) * fracB + c0;
+                                            sampleB = readHermitePrepared(idxB,
+                                                                          idxBM1Chunk[static_cast<size_t>(sampleIndex)],
+                                                                          idxB1Chunk[static_cast<size_t>(sampleIndex)],
+                                                                          idxB2Chunk[static_cast<size_t>(sampleIndex)],
+                                                                          fracBChunk[static_cast<size_t>(sampleIndex)]);
                                         }
 
                                         mixedSampleTarget[static_cast<size_t>(sampleIndex)] = (sampleA * gainWeightAChunk[static_cast<size_t>(sampleIndex)]) +
@@ -1323,26 +1335,33 @@ namespace sw
                                 }
                                 else
                                 {
+                                    const auto readLinearPrepared = [&](uint16_t idx0,
+                                                                        uint16_t idx1,
+                                                                        float frac)
+                                    {
+                                        const float s0 = srcRead[idx0];
+                                        const float s1 = srcRead[idx1];
+                                        return s0 + frac * (s1 - s0);
+                                    };
+
                                     for (int sampleIndex = 0; sampleIndex < produced; ++sampleIndex)
                                     {
                                         const uint16_t idxA = idxAChunk[static_cast<size_t>(sampleIndex)];
                                         float sampleA = 0.0f;
                                         if (idxA != kInvalidReadIndex)
                                         {
-                                            const float s0 = srcRead[idxA];
-                                            const float s1 = srcRead[idxA1Chunk[static_cast<size_t>(sampleIndex)]];
-                                            const float fracA = fracAChunk[static_cast<size_t>(sampleIndex)];
-                                            sampleA = s0 + fracA * (s1 - s0);
+                                            sampleA = readLinearPrepared(idxA,
+                                                                         idxA1Chunk[static_cast<size_t>(sampleIndex)],
+                                                                         fracAChunk[static_cast<size_t>(sampleIndex)]);
                                         }
 
                                         const uint16_t idxB = idxBChunk[static_cast<size_t>(sampleIndex)];
                                         float sampleB = 0.0f;
                                         if (idxB != kInvalidReadIndex)
                                         {
-                                            const float s0 = srcRead[idxB];
-                                            const float s1 = srcRead[idxB1Chunk[static_cast<size_t>(sampleIndex)]];
-                                            const float fracB = fracBChunk[static_cast<size_t>(sampleIndex)];
-                                            sampleB = s0 + fracB * (s1 - s0);
+                                            sampleB = readLinearPrepared(idxB,
+                                                                         idxB1Chunk[static_cast<size_t>(sampleIndex)],
+                                                                         fracBChunk[static_cast<size_t>(sampleIndex)]);
                                         }
 
                                         mixedSampleTarget[static_cast<size_t>(sampleIndex)] = (sampleA * gainWeightAChunk[static_cast<size_t>(sampleIndex)]) +
@@ -1366,7 +1385,7 @@ namespace sw
                                     const int idxA = static_cast<int>(wrappedA);
                                     idxAChunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(idxA);
                                     idxA1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmin(idxA + 1, srcLength - 1));
-                                    idxAM1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<int16_t>(juce::jmax(0, idxA - 1));
+                                    idxAM1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmax(0, idxA - 1));
                                     idxA2Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmin(idxA + 2, srcLength - 1));
                                     fracAChunk[static_cast<size_t>(sampleIndex)] = static_cast<float>(wrappedA - static_cast<double>(idxA));
                                 }
@@ -1381,7 +1400,7 @@ namespace sw
                                     const int idxB = static_cast<int>(wrappedB);
                                     idxBChunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(idxB);
                                     idxB1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmin(idxB + 1, srcLength - 1));
-                                    idxBM1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<int16_t>(juce::jmax(0, idxB - 1));
+                                    idxBM1Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmax(0, idxB - 1));
                                     idxB2Chunk[static_cast<size_t>(sampleIndex)] = static_cast<uint16_t>(juce::jmin(idxB + 2, srcLength - 1));
                                     fracBChunk[static_cast<size_t>(sampleIndex)] = static_cast<float>(wrappedB - static_cast<double>(idxB));
                                 }
@@ -1389,18 +1408,25 @@ namespace sw
 
                             if (shouldCacheMixedBySource)
                             {
+                                ++cachedSourceStampEpoch;
+                                if (cachedSourceStampEpoch == 0)
+                                {
+                                    cachedSourceStamp.fill(0);
+                                    cachedSourceStampEpoch = 1;
+                                }
+
                                 int cachedSourceCount = 0;
-                                std::array<std::array<float, kGenericGranularChunkSize>, kGenericGranularCachedSources> cachedMixedSamples{};
-                                std::array<int, kGenericGranularCachedSources> cachedSourceToSlot;
-                                cachedSourceToSlot.fill(-1);
 
                                 const auto getOrComputeCachedMixedSamplesForSource = [&](int srcCh)
                                 {
                                     if (srcCh >= 0 && srcCh < kGenericGranularCachedSources)
                                     {
-                                        const int cachedSlot = cachedSourceToSlot[static_cast<size_t>(srcCh)];
-                                        if (cachedSlot >= 0)
+                                        const size_t cacheIndex = static_cast<size_t>(srcCh);
+                                        if (cachedSourceStamp[cacheIndex] == cachedSourceStampEpoch)
+                                        {
+                                            const int cachedSlot = cachedSourceToSlot[cacheIndex];
                                             return cachedMixedSamples[static_cast<size_t>(cachedSlot)].data();
+                                        }
                                     }
 
                                     if (cachedSourceCount < kGenericGranularCachedSources)
@@ -1408,7 +1434,11 @@ namespace sw
                                         auto &mixedForSource = cachedMixedSamples[static_cast<size_t>(cachedSourceCount)];
                                         fillMixedSamples(getGenericSrcReadPtr(srcCh), mixedForSource.data());
                                         if (srcCh >= 0 && srcCh < kGenericGranularCachedSources)
-                                            cachedSourceToSlot[static_cast<size_t>(srcCh)] = cachedSourceCount;
+                                        {
+                                            const size_t cacheIndex = static_cast<size_t>(srcCh);
+                                            cachedSourceToSlot[cacheIndex] = cachedSourceCount;
+                                            cachedSourceStamp[cacheIndex] = cachedSourceStampEpoch;
+                                        }
                                         ++cachedSourceCount;
                                         return mixedForSource.data();
                                     }

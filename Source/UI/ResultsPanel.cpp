@@ -23,6 +23,7 @@ namespace
     constexpr int kFormatOggId = 8;
     constexpr int kFormatRexId = 9;
     constexpr int kFormatSfzId = 10;
+    constexpr int kFormatSf2Id = 11;
     constexpr int kChannelsAnyId = 1;
     constexpr int kChannelsMonoId = 2;
     constexpr int kChannelsStereoId = 3;
@@ -122,6 +123,8 @@ namespace
             return kFormatRexId;
         case sw::ResultsPanel::FormatFilter::Sfz:
             return kFormatSfzId;
+        case sw::ResultsPanel::FormatFilter::Sf2:
+            return kFormatSf2Id;
         case sw::ResultsPanel::FormatFilter::Any:
         default:
             return kFormatAnyId;
@@ -150,6 +153,8 @@ namespace
             return sw::ResultsPanel::FormatFilter::Rex;
         case kFormatSfzId:
             return sw::ResultsPanel::FormatFilter::Sfz;
+        case kFormatSf2Id:
+            return sw::ResultsPanel::FormatFilter::Sf2;
         case kFormatAnyId:
         default:
             return sw::ResultsPanel::FormatFilter::Any;
@@ -218,12 +223,12 @@ namespace
 
     bool isAcidizedLoop(const sw::FileRecord &item)
     {
-        return item.loopType.has_value() && *item.loopType == "acidized";
+        return item.metadataSource.has_value() && *item.metadataSource == "acidized";
     }
 
     bool isAppleLoop(const sw::FileRecord &item)
     {
-        return item.loopType.has_value() && *item.loopType == "apple-loop";
+        return item.metadataSource.has_value() && *item.metadataSource == "apple-loop";
     }
 
     juce::String formatDuration(const std::optional<double> &durationSec)
@@ -303,6 +308,12 @@ namespace
         std::vector<MetadataToken> tokens;
         tokens.reserve(32);
 
+        if (item.duplicateClusterSize > 0)
+            appendMetadataPair(tokens, "Exact cluster: ", juce::String(item.duplicateClusterSize));
+        if (item.featureMatchScore.has_value())
+            appendMetadataPair(tokens, "Feature-match heuristic: ",
+                               juce::String(*item.featureMatchScore, 0) + "%");
+
         const juce::String sampleRate = valueOrDash(item.sampleRate, " Hz");
         const juce::String channels = valueOrDash(item.channels);
         const juce::String bitDepth = valueOrDash(item.bitDepth);
@@ -315,10 +326,48 @@ namespace
         appendMetadataPair(tokens, "Bit Depth: ", bitDepth);
         appendMetadataPair(tokens, "Bitrate: ", bitrate);
         appendMetadataPair(tokens, "Duration: ", formatDuration(item.durationSec));
+        if (item.bpm.has_value())
+            appendMetadataPair(tokens, "Tempo: ", juce::String(*item.bpm, 2));
+        else if (item.inferredBpm.has_value())
+            appendMetadataPair(tokens, "Tempo est.: ",
+                               juce::String(*item.inferredBpm, 1) + " BPM (" +
+                                   juce::String(item.inferredBpmConfidence.value_or(0.0) * 100.0, 0) + "%)");
+        if (item.key.has_value())
+            appendMetadataPair(tokens, "Key: ", juce::String(*item.key));
+        else if (item.inferredKey.has_value())
+            appendMetadataPair(tokens, "Key est.: ",
+                               juce::String(*item.inferredKey) + " (" +
+                                   juce::String(item.inferredKeyConfidence.value_or(0.0) * 100.0, 0) + "%)");
+        if (item.inferredTransientCount.has_value())
+            appendMetadataPair(tokens, "Transients est.: ", juce::String(*item.inferredTransientCount));
+        if (item.loopRegions.empty() && item.suggestedLoopStartSample && item.suggestedLoopEndSample)
+            appendMetadataPair(tokens, "Loop suggestion: ",
+                               juce::String(*item.suggestedLoopStartSample) + "-" +
+                                   juce::String(*item.suggestedLoopEndSample) + " (" +
+                                   juce::String(item.suggestedLoopConfidence.value_or(0.0) * 100.0, 0) + "%)");
         appendMetadataPair(tokens, "Samples: ", totalSamples);
         appendMetadataPair(tokens, "Codec/Enc: ", codec);
 
-        if (item.presetName.has_value())
+        if (!item.presetPrograms.empty())
+        {
+            appendMetadataPair(tokens, "Programs: ", juce::String(static_cast<int>(item.presetPrograms.size())));
+
+            juce::String programSummary;
+            const auto visiblePrograms = std::min<size_t>(3, item.presetPrograms.size());
+            for (size_t i = 0; i < visiblePrograms; ++i)
+            {
+                if (programSummary.isNotEmpty())
+                    programSummary += ", ";
+                const auto &program = item.presetPrograms[i];
+                programSummary += juce::String(program.bank) + ":" + juce::String(program.program + 1);
+                if (!program.name.empty())
+                    programSummary += " " + juce::String(program.name);
+            }
+            if (item.presetPrograms.size() > visiblePrograms)
+                programSummary += ", ...";
+            appendMetadataPair(tokens, "Bank/Program: ", programSummary);
+        }
+        else if (item.presetName.has_value())
             appendMetadataPair(tokens, "Preset: ", juce::String(*item.presetName));
 
         if (item.zoneCount.has_value())
@@ -330,23 +379,42 @@ namespace
         if (item.velocityLow.has_value() || item.velocityHigh.has_value())
             appendMetadataPair(tokens, "Vel: ", formatIntegerRange(item.velocityLow, item.velocityHigh));
 
-        if (isAcidizedLoop(item) || isAppleLoop(item))
+        if (isAcidizedLoop(item) || isAppleLoop(item) ||
+            item.rootMidiNote.has_value() || !item.loopRegions.empty())
         {
-            const juce::String acidRoot = item.acidRootNote.has_value() ? midiNoteToName(*item.acidRootNote) : juce::String("--");
+            juce::String rootPitch = item.rootMidiNote.has_value() ? midiNoteToName(*item.rootMidiNote) : juce::String("--");
+            if (item.rootTuneCents.has_value() && std::abs(*item.rootTuneCents) > 0.001)
+                rootPitch += " " + juce::String::formatted("%+.2fc", *item.rootTuneCents);
             const juce::String acidBeats = item.acidBeats.has_value() ? juce::String(*item.acidBeats) : juce::String("--");
-            const juce::String acidBpm = item.bpm.has_value() ? juce::String(*item.bpm, 2) : juce::String("--");
-            const juce::String loopStart = item.loopStartSample.has_value() ? juce::String(*item.loopStartSample) : juce::String("--");
-            const juce::String loopEnd = item.loopEndSample.has_value() ? juce::String(*item.loopEndSample) : juce::String("--");
-
-            appendMetadataPair(tokens,
-                               isAcidizedLoop(item) ? "Acid: " : "Apple Loop: ",
-                               "yes");
-            appendMetadataPair(tokens, "Root: ", acidRoot);
+            if (isAcidizedLoop(item) || isAppleLoop(item))
+                appendMetadataPair(tokens,
+                                   isAcidizedLoop(item) ? "Acid: " : "Apple Loop: ",
+                                   "yes");
+            if (item.rootMidiNote.has_value())
+                appendMetadataPair(tokens, "Root: ", rootPitch);
             if (isAcidizedLoop(item))
                 appendMetadataPair(tokens, "Beats: ", acidBeats);
-            if (item.bpm.has_value())
-                appendMetadataPair(tokens, "Tempo: ", acidBpm);
-            appendMetadataPair(tokens, "Loop: ", loopStart + "-" + loopEnd);
+            if (!item.loopRegions.empty())
+            {
+                appendMetadataPair(tokens, "Loops: ", juce::String(static_cast<int>(item.loopRegions.size())));
+                if (const auto *loop = item.previewLoop())
+                {
+                    const auto mode = loop->mode == sw::LoopMode::Forward
+                                          ? "forward"
+                                          : (loop->mode == sw::LoopMode::Alternating
+                                                 ? "alternating"
+                                                 : (loop->mode == sw::LoopMode::Backward ? "backward" : "unknown"));
+                    const auto endMarker = loop->endInclusive ? "]" : ")";
+                    appendMetadataPair(tokens,
+                                       "Loop: ",
+                                       juce::String(loop->startSample) + "-" + juce::String(loop->endSample) +
+                                           endMarker + " " + mode);
+                    if (!loop->source.empty())
+                        appendMetadataPair(tokens, "Loop source: ", juce::String(loop->source));
+                }
+            }
+            if (item.rootPitchSource.has_value())
+                appendMetadataPair(tokens, "Pitch source: ", juce::String(*item.rootPitchSource));
         }
 
         return tokens;
@@ -493,6 +561,7 @@ namespace sw
         formatSelector.addItem("OGG", kFormatOggId);
         formatSelector.addItem("REX/RX2", kFormatRexId);
         formatSelector.addItem("SFZ", kFormatSfzId);
+        formatSelector.addItem("SF2", kFormatSf2Id);
         formatSelector.setSelectedId(kFormatAnyId, juce::dontSendNotification);
         formatSelector.onChange = facetChanged;
         addAndMakeVisible(formatSelector);
@@ -522,6 +591,21 @@ namespace sw
         };
         addAndMakeVisible(favoriteToggle);
 
+        findSimilarButton.setTooltip("Rank candidates by coarse feature similarity; this does not confirm they are duplicates.");
+        findSimilarButton.onClick = [this]
+        {
+            if (const auto *selectedFile = getResultAt(getSelectedRow()); selectedFile != nullptr && onFindSimilarRequested)
+                onFindSimilarRequested(*selectedFile);
+        };
+        addAndMakeVisible(findSimilarButton);
+
+        revealButton.onClick = [this]
+        {
+            if (const auto *selectedFile = getResultAt(getSelectedRow()); selectedFile != nullptr && onRevealFileRequested)
+                onRevealFileRequested(*selectedFile);
+        };
+        addAndMakeVisible(revealButton);
+
         resultsList.setModel(this);
         resultsList.setRowHeight(40);
         addAndMakeVisible(resultsList);
@@ -546,6 +630,8 @@ namespace sw
         constexpr int channelsWidth = 120;
         constexpr int loopWidth = 120;
         constexpr int favoriteWidth = 88;
+        constexpr int findSimilarWidth = 100;
+        constexpr int revealWidth = 72;
         constexpr int controlGap = 6;
 
         viewSelector.setBounds(topRow.removeFromRight(viewWidth));
@@ -555,6 +641,10 @@ namespace sw
         searchBox.setBounds(topRow);
 
         favoriteToggle.setBounds(metadataRow.removeFromRight(favoriteWidth));
+        metadataRow.removeFromRight(controlGap);
+        revealButton.setBounds(metadataRow.removeFromRight(revealWidth));
+        metadataRow.removeFromRight(controlGap);
+        findSimilarButton.setBounds(metadataRow.removeFromRight(findSimilarWidth));
         metadataRow.removeFromRight(controlGap);
         loopSelector.setBounds(metadataRow.removeFromLeft(loopWidth));
         metadataRow.removeFromLeft(controlGap);
@@ -573,6 +663,8 @@ namespace sw
         waveformCacheMisses.clear();
 
         results = std::move(newResults);
+        nearDuplicateResultsActive = std::any_of(results.begin(), results.end(), [](const FileRecord &file)
+                                                 { return file.featureMatchScore.has_value(); });
         applySort();
 
         resultsList.updateContent();
@@ -696,26 +788,47 @@ namespace sw
             return compareNameAsc(a, b);
         };
 
+        if (nearDuplicateResultsActive)
+        {
+            std::stable_sort(results.begin(), results.end(), [compareNameAsc](const FileRecord &a, const FileRecord &b)
+                             {
+                                 if (a.featureMatchScore != b.featureMatchScore)
+                                     return a.featureMatchScore.value_or(0.0) > b.featureMatchScore.value_or(0.0);
+                                 return compareNameAsc(a, b);
+                             });
+            return;
+        }
+
+        const auto sortWithDuplicateGroups = [this](const auto &comparator)
+        {
+            std::sort(results.begin(), results.end(), [this, &comparator](const FileRecord &a, const FileRecord &b)
+                      {
+                          if (viewMode == ViewMode::Duplicates && a.contentHash != b.contentHash)
+                              return a.contentHash.value_or("") < b.contentHash.value_or("");
+                          return comparator(a, b);
+                      });
+        };
+
         switch (sortMode)
         {
         case SortMode::NameDesc:
-            std::sort(results.begin(), results.end(), compareNameDesc);
+            sortWithDuplicateGroups(compareNameDesc);
             break;
         case SortMode::NewestFirst:
-            std::sort(results.begin(), results.end(), compareNewestFirst);
+            sortWithDuplicateGroups(compareNewestFirst);
             break;
         case SortMode::OldestFirst:
-            std::sort(results.begin(), results.end(), compareOldestFirst);
+            sortWithDuplicateGroups(compareOldestFirst);
             break;
         case SortMode::SizeLargestFirst:
-            std::sort(results.begin(), results.end(), compareSizeLargestFirst);
+            sortWithDuplicateGroups(compareSizeLargestFirst);
             break;
         case SortMode::SizeSmallestFirst:
-            std::sort(results.begin(), results.end(), compareSizeSmallestFirst);
+            sortWithDuplicateGroups(compareSizeSmallestFirst);
             break;
         case SortMode::NameAsc:
         default:
-            std::sort(results.begin(), results.end(), compareNameAsc);
+            sortWithDuplicateGroups(compareNameAsc);
             break;
         }
     }
@@ -890,6 +1003,8 @@ namespace sw
     {
         const bool hasSelectedFile = getSelectedRow() >= 0;
         favoriteToggle.setEnabled(hasSelectedFile);
+        findSimilarButton.setEnabled(hasSelectedFile);
+        revealButton.setEnabled(hasSelectedFile);
     }
 
     int ResultsPanel::getNumRows()

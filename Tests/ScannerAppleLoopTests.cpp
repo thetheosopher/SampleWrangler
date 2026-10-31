@@ -8,11 +8,13 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -98,21 +100,21 @@ namespace
 
         std::vector<uint8_t> inst;
         inst.push_back(60);
-        inst.push_back(0);
+        inst.push_back(static_cast<uint8_t>(-3));
         inst.push_back(0);
         inst.push_back(127);
         inst.push_back(1);
         inst.push_back(127);
         appendU16BE(inst, 0);
-        appendU16BE(inst, 1);
+        appendU16BE(inst, 2);
         appendU16BE(inst, 1);
         appendU16BE(inst, 2);
-        appendU16BE(inst, 0);
-        appendU16BE(inst, 0);
-        appendU16BE(inst, 0);
+        appendU16BE(inst, 1);
+        appendU16BE(inst, 3);
+        appendU16BE(inst, 4);
 
         std::vector<uint8_t> mark;
-        appendU16BE(mark, 2);
+        appendU16BE(mark, 4);
         appendU16BE(mark, 1);
         appendU32BE(mark, 0);
         mark.push_back(5);
@@ -121,6 +123,14 @@ namespace
         appendU32BE(mark, 1);
         mark.push_back(3);
         mark.insert(mark.end(), {'e', 'n', 'd'});
+        appendU16BE(mark, 3);
+        appendU32BE(mark, 0);
+        mark.push_back(13);
+        mark.insert(mark.end(), {'r', 'e', 'l', 'e', 'a', 's', 'e', ' ', 's', 't', 'a', 'r', 't'});
+        appendU16BE(mark, 4);
+        appendU32BE(mark, 1);
+        mark.push_back(11);
+        mark.insert(mark.end(), {'r', 'e', 'l', 'e', 'a', 's', 'e', ' ', 'e', 'n', 'd'});
 
         std::vector<uint8_t> appl;
         appl.insert(appl.end(), {'s', 't', 'o', 'c'});
@@ -143,6 +153,146 @@ namespace
         if (!out)
             return false;
 
+        out.write(reinterpret_cast<const char *>(fileData.data()), static_cast<std::streamsize>(fileData.size()));
+        return out.good();
+    }
+
+    bool writeWavWithMetadata(const std::filesystem::path &filePath,
+                              const std::vector<std::pair<std::string, std::vector<uint8_t>>> &metadataChunks)
+    {
+        constexpr uint16_t numChannels = 1;
+        constexpr uint32_t sampleRate = 44100;
+        constexpr uint16_t bitsPerSample = 16;
+        constexpr uint16_t blockAlign = numChannels * (bitsPerSample / 8);
+        constexpr uint32_t byteRate = sampleRate * blockAlign;
+        const std::array<int16_t, 8> samples = {0, 4096, -4096, 2048, -2048, 1024, -1024, 0};
+
+        std::vector<uint8_t> fileData;
+        fileData.insert(fileData.end(), {'R', 'I', 'F', 'F'});
+        appendU32LE(fileData, 0);
+        fileData.insert(fileData.end(), {'W', 'A', 'V', 'E'});
+
+        std::vector<uint8_t> fmt;
+        appendU16LE(fmt, 1);
+        appendU16LE(fmt, numChannels);
+        appendU32LE(fmt, sampleRate);
+        appendU32LE(fmt, byteRate);
+        appendU16LE(fmt, blockAlign);
+        appendU16LE(fmt, bitsPerSample);
+        appendChunkLE(fileData, "fmt ", fmt);
+
+        for (const auto &[chunkId, chunkData] : metadataChunks)
+            appendChunkLE(fileData, chunkId.c_str(), chunkData);
+
+        std::vector<uint8_t> audioData;
+        for (const auto sample : samples)
+            appendU16LE(audioData, static_cast<uint16_t>(sample));
+        appendChunkLE(fileData, "data", audioData);
+
+        const auto riffSize = static_cast<uint32_t>(fileData.size() - 8);
+        fileData[4] = static_cast<uint8_t>(riffSize & 0xFF);
+        fileData[5] = static_cast<uint8_t>((riffSize >> 8) & 0xFF);
+        fileData[6] = static_cast<uint8_t>((riffSize >> 16) & 0xFF);
+        fileData[7] = static_cast<uint8_t>((riffSize >> 24) & 0xFF);
+
+        std::ofstream out(filePath, std::ios::binary);
+        if (!out)
+            return false;
+        out.write(reinterpret_cast<const char *>(fileData.data()), static_cast<std::streamsize>(fileData.size()));
+        return out.good();
+    }
+
+    std::vector<uint8_t> makeSamplerChunk()
+    {
+        std::vector<uint8_t> smpl;
+        appendU32LE(smpl, 0);
+        appendU32LE(smpl, 0);
+        appendU32LE(smpl, 22675);
+        appendU32LE(smpl, 60);
+        appendU32LE(smpl, 0x80000000u);
+        appendU32LE(smpl, 0);
+        appendU32LE(smpl, 0);
+        appendU32LE(smpl, 2);
+        appendU32LE(smpl, 0);
+
+        appendU32LE(smpl, 7);
+        appendU32LE(smpl, 0);
+        appendU32LE(smpl, 2);
+        appendU32LE(smpl, 5);
+        appendU32LE(smpl, 0x20000000u);
+        appendU32LE(smpl, 0);
+
+        appendU32LE(smpl, 9);
+        appendU32LE(smpl, 1);
+        appendU32LE(smpl, 6);
+        appendU32LE(smpl, 7);
+        appendU32LE(smpl, 0);
+        appendU32LE(smpl, 3);
+        return smpl;
+    }
+
+    std::vector<uint8_t> makeCueChunk()
+    {
+        std::vector<uint8_t> cue;
+        appendU32LE(cue, 2);
+        for (const auto [cueId, sampleOffset] : {std::pair<uint32_t, uint32_t>{1, 1}, {2, 6}})
+        {
+            appendU32LE(cue, cueId);
+            appendU32LE(cue, sampleOffset);
+            cue.insert(cue.end(), {'d', 'a', 't', 'a'});
+            appendU32LE(cue, 0);
+            appendU32LE(cue, 0);
+            appendU32LE(cue, sampleOffset);
+        }
+        return cue;
+    }
+
+    bool writeRf64WavWithSamplerLoop(const std::filesystem::path &filePath)
+    {
+        constexpr uint16_t numChannels = 1;
+        constexpr uint32_t sampleRate = 44100;
+        constexpr uint16_t bitsPerSample = 16;
+        constexpr uint16_t blockAlign = numChannels * (bitsPerSample / 8);
+        constexpr uint32_t byteRate = sampleRate * blockAlign;
+        const std::array<int16_t, 8> samples = {0, 4096, -4096, 2048, -2048, 1024, -1024, 0};
+
+        std::vector<uint8_t> fileData;
+        fileData.insert(fileData.end(), {'R', 'F', '6', '4'});
+        appendU32LE(fileData, std::numeric_limits<uint32_t>::max());
+        fileData.insert(fileData.end(), {'W', 'A', 'V', 'E'});
+
+        std::vector<uint8_t> ds64;
+        appendU32LE(ds64, 0);
+        appendU32LE(ds64, 0);
+        appendU32LE(ds64, static_cast<uint32_t>(samples.size() * sizeof(int16_t)));
+        appendU32LE(ds64, 0);
+        appendU32LE(ds64, static_cast<uint32_t>(samples.size()));
+        appendU32LE(ds64, 0);
+        appendU32LE(ds64, 0);
+        appendChunkLE(fileData, "ds64", ds64);
+
+        std::vector<uint8_t> fmt;
+        appendU16LE(fmt, 1);
+        appendU16LE(fmt, numChannels);
+        appendU32LE(fmt, sampleRate);
+        appendU32LE(fmt, byteRate);
+        appendU16LE(fmt, blockAlign);
+        appendU16LE(fmt, bitsPerSample);
+        appendChunkLE(fileData, "fmt ", fmt);
+
+        fileData.insert(fileData.end(), {'d', 'a', 't', 'a'});
+        appendU32LE(fileData, std::numeric_limits<uint32_t>::max());
+        for (const auto sample : samples)
+            appendU16LE(fileData, static_cast<uint16_t>(sample));
+        appendChunkLE(fileData, "smpl", makeSamplerChunk());
+
+        const auto riffSize = static_cast<uint64_t>(fileData.size() - 8);
+        for (size_t i = 0; i < 8; ++i)
+            fileData[20 + i] = static_cast<uint8_t>((riffSize >> (i * 8)) & 0xFF);
+
+        std::ofstream out(filePath, std::ios::binary);
+        if (!out)
+            return false;
         out.write(reinterpret_cast<const char *>(fileData.data()), static_cast<std::streamsize>(fileData.size()));
         return out.good();
     }
@@ -185,6 +335,126 @@ namespace
         return out.good();
     }
 
+    bool waitForScanCompletion(sw::Scanner &scanner, int64_t rootId, const std::string &rootPath);
+
+    bool testWavLoopMetadataExtraction()
+    {
+        const auto uniqueSuffix = std::to_string(
+            static_cast<long long>(std::chrono::steady_clock::now().time_since_epoch().count()));
+        const auto testRoot = std::filesystem::temp_directory_path() / ("SampleWranglerWavLoopsTest_" + uniqueSuffix);
+
+        std::error_code ec;
+        std::filesystem::create_directories(testRoot, ec);
+        if (ec)
+            return false;
+
+        const auto cueFilePath = testRoot / "cue_markers.wav";
+        const auto smplFilePath = testRoot / "sampler_loops.wav";
+        if (!writeWavWithMetadata(cueFilePath, {{"cue ", makeCueChunk()}}) ||
+            !writeWavWithMetadata(smplFilePath, {{"smpl", makeSamplerChunk()}, {"cue ", makeCueChunk()}}))
+        {
+            std::filesystem::remove_all(testRoot, ec);
+            return false;
+        }
+
+        sw::CatalogDb db;
+        if (!db.open(":memory:") || !db.addRoot(testRoot.string(), "WavLoopsRoot"))
+        {
+            std::filesystem::remove_all(testRoot, ec);
+            return false;
+        }
+
+        const auto roots = db.allRoots();
+        if (roots.empty())
+        {
+            std::filesystem::remove_all(testRoot, ec);
+            return false;
+        }
+
+        sw::JobQueue queue(1);
+        sw::Scanner scanner(db, queue);
+        if (!waitForScanCompletion(scanner, roots.front().id, testRoot.string()))
+        {
+            queue.shutdown();
+            std::filesystem::remove_all(testRoot, ec);
+            return false;
+        }
+        queue.shutdown();
+
+        const auto cueFile = db.fileByRootAndRelativePath(roots.front().id, "cue_markers.wav");
+        const auto smplFile = db.fileByRootAndRelativePath(roots.front().id, "sampler_loops.wav");
+        std::filesystem::remove_all(testRoot, ec);
+
+        if (!cueFile.has_value() || !smplFile.has_value() || !cueFile->loopRegions.empty())
+            return false;
+
+        if (smplFile->metadataSource != std::optional<std::string>{"wave.smpl"} ||
+            smplFile->rootMidiNote != std::optional<int>{60} ||
+            !smplFile->rootTuneCents.has_value() ||
+            std::abs(*smplFile->rootTuneCents - 50.0) > 0.0001 ||
+            smplFile->loopRegions.size() != 2)
+            return false;
+
+        const auto &forwardLoop = smplFile->loopRegions[0];
+        const auto &alternatingLoop = smplFile->loopRegions[1];
+        return forwardLoop.mode == sw::LoopMode::Forward &&
+               forwardLoop.startSample == 2 && forwardLoop.endSample == 5 &&
+               forwardLoop.endInclusive && forwardLoop.sourceId == std::optional<uint32_t>{7} &&
+               alternatingLoop.mode == sw::LoopMode::Alternating &&
+               alternatingLoop.startSample == 6 && alternatingLoop.endSample == 7 &&
+               alternatingLoop.playCount == std::optional<uint32_t>{3};
+    }
+
+    bool testRf64SamplerMetadataExtraction()
+    {
+        const auto uniqueSuffix = std::to_string(
+            static_cast<long long>(std::chrono::steady_clock::now().time_since_epoch().count()));
+        const auto testRoot = std::filesystem::temp_directory_path() / ("SampleWranglerRf64Test_" + uniqueSuffix);
+
+        std::error_code ec;
+        std::filesystem::create_directories(testRoot, ec);
+        if (ec)
+            return false;
+
+        if (!writeRf64WavWithSamplerLoop(testRoot / "rf64_sampler.wav"))
+        {
+            std::filesystem::remove_all(testRoot, ec);
+            return false;
+        }
+
+        sw::CatalogDb db;
+        if (!db.open(":memory:") || !db.addRoot(testRoot.string(), "Rf64Root"))
+        {
+            std::filesystem::remove_all(testRoot, ec);
+            return false;
+        }
+
+        const auto roots = db.allRoots();
+        if (roots.empty())
+        {
+            std::filesystem::remove_all(testRoot, ec);
+            return false;
+        }
+
+        sw::JobQueue queue(1);
+        sw::Scanner scanner(db, queue);
+        if (!waitForScanCompletion(scanner, roots.front().id, testRoot.string()))
+        {
+            queue.shutdown();
+            std::filesystem::remove_all(testRoot, ec);
+            return false;
+        }
+        queue.shutdown();
+
+        const auto file = db.fileByRootAndRelativePath(roots.front().id, "rf64_sampler.wav");
+        std::filesystem::remove_all(testRoot, ec);
+        return file.has_value() &&
+               file->totalSamples == std::optional<int64_t>{8} &&
+               file->metadataSource == std::optional<std::string>{"wave.smpl"} &&
+               file->loopRegions.size() == 2 &&
+               file->loopRegions[1].mode == sw::LoopMode::Alternating;
+    }
+
     bool writeTextFile(const std::filesystem::path &filePath, const std::string &contents)
     {
         std::ofstream out(filePath, std::ios::binary);
@@ -222,10 +492,18 @@ namespace
         appendU32LE(phdr, 0);
         appendU32LE(phdr, 0);
 
+        appendFixedString(phdr, "Bright Piano", 20);
+        appendU16LE(phdr, 5);
+        appendU16LE(phdr, 2);
+        appendU16LE(phdr, 1);
+        appendU32LE(phdr, 0);
+        appendU32LE(phdr, 0);
+        appendU32LE(phdr, 0);
+
         appendFixedString(phdr, "EOP", 20);
         appendU16LE(phdr, 0);
         appendU16LE(phdr, 0);
-        appendU16LE(phdr, 1);
+        appendU16LE(phdr, 2);
         appendU32LE(phdr, 0);
         appendU32LE(phdr, 0);
         appendU32LE(phdr, 0);
@@ -235,8 +513,12 @@ namespace
         appendU16LE(pbag, 0);
         appendU16LE(pbag, 1);
         appendU16LE(pbag, 0);
+        appendU16LE(pbag, 2);
+        appendU16LE(pbag, 0);
 
         std::vector<uint8_t> pgen;
+        appendU16LE(pgen, 41);
+        appendU16LE(pgen, 0);
         appendU16LE(pgen, 41);
         appendU16LE(pgen, 0);
 
@@ -400,16 +682,33 @@ namespace
         if (!file.has_value())
             return false;
 
-        if (!file->loopType.has_value() || *file->loopType != "apple-loop")
+        if (file->metadataSource != std::optional<std::string>{"apple-loop"})
             return false;
 
-        if (!file->acidRootNote.has_value() || *file->acidRootNote != 60)
+        if (!file->rootMidiNote.has_value() || *file->rootMidiNote != 60 ||
+            !file->rootTuneCents.has_value() || *file->rootTuneCents != -3.0 ||
+            file->rootPitchSource != std::optional<std::string>{"aiff.INST"})
             return false;
 
-        if (!file->loopStartSample.has_value() || *file->loopStartSample != 0)
+        if (file->loopRegions.size() != 2)
             return false;
 
-        if (!file->loopEndSample.has_value() || *file->loopEndSample != 1)
+        const auto &sustainLoop = file->loopRegions[0];
+        const auto &releaseLoop = file->loopRegions[1];
+        if (sustainLoop.role != sw::LoopRegionRole::Sustain ||
+            sustainLoop.mode != sw::LoopMode::Alternating ||
+            sustainLoop.startSample != 0 || sustainLoop.endSample != 1 ||
+            !sustainLoop.endInclusive ||
+            sustainLoop.startMarkerId != std::optional<uint16_t>{1} ||
+            sustainLoop.endMarkerId != std::optional<uint16_t>{2})
+            return false;
+
+        if (releaseLoop.role != sw::LoopRegionRole::Release ||
+            releaseLoop.mode != sw::LoopMode::Forward ||
+            releaseLoop.startSample != 0 || releaseLoop.endSample != 1 ||
+            !releaseLoop.endInclusive ||
+            releaseLoop.startMarkerId != std::optional<uint16_t>{3} ||
+            releaseLoop.endMarkerId != std::optional<uint16_t>{4})
             return false;
 
         return true;
@@ -919,6 +1218,7 @@ namespace
                                                                        file->relativePath,
                                                                        file->sizeBytes,
                                                                        file->modifiedTime));
+        const auto programSearch = db.searchFiles("Bright");
         std::filesystem::remove_all(testRoot, ec);
 
         if (!file->indexOnly)
@@ -957,7 +1257,23 @@ namespace
         if (!file->velocityHigh.has_value() || *file->velocityHigh != 120)
             return false;
 
-        if (!file->loopType.has_value() || *file->loopType != "sf2")
+        if (file->metadataSource != std::optional<std::string>{"sf2"})
+            return false;
+
+        if (file->presetPrograms.size() != 2 ||
+            file->presetPrograms[0].bank != 0 || file->presetPrograms[0].program != 0 ||
+            file->presetPrograms[0].name != "Warm Pad" ||
+            file->presetPrograms[1].bank != 2 || file->presetPrograms[1].program != 5 ||
+            file->presetPrograms[1].name != "Bright Piano" ||
+            file->presetPrograms[1].zoneCount != std::optional<int>{1})
+            return false;
+
+        if (programSearch.size() != 1 || programSearch.front().id != file->id)
+            return false;
+
+        if (file->loopRegions.size() != 1 ||
+            file->loopRegions.front().mode != sw::LoopMode::Forward ||
+            file->loopRegions.front().endInclusive)
             return false;
 
         if (!peaks.has_value() || peaks->empty())
@@ -1153,6 +1469,18 @@ namespace
 
 int main()
 {
+    if (!testWavLoopMetadataExtraction())
+    {
+        std::cerr << "testWavLoopMetadataExtraction failed.\n";
+        return 1;
+    }
+
+    if (!testRf64SamplerMetadataExtraction())
+    {
+        std::cerr << "testRf64SamplerMetadataExtraction failed.\n";
+        return 1;
+    }
+
     if (!testAppleLoopAiffMetadataExtraction())
     {
         std::cerr << "testAppleLoopAiffMetadataExtraction failed.\n";

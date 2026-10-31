@@ -47,7 +47,8 @@ namespace sw
             Mp3,
             Ogg,
             Rex,
-            Sfz
+            Sfz,
+            Sf2
         };
 
         enum class ChannelsFilter
@@ -100,6 +101,8 @@ namespace sw
         std::function<void(SortMode mode)> onSortModeChanged;
         std::function<void(FacetFilters filters)> onFacetFiltersChanged;
         std::function<void(bool isFavorite)> onSelectedFileFavoriteChanged;
+        std::function<void(const FileRecord &file)> onFindSimilarRequested;
+        std::function<void(const FileRecord &file)> onRevealFileRequested;
         std::function<void(const FileRecord &file)> onFileSelected;
         std::function<void(const FileRecord &file)> onFileActivated;
         std::function<std::optional<juce::String>(const FileRecord &file)> onResolveAbsolutePathForFile;
@@ -130,6 +133,8 @@ namespace sw
         juce::ComboBox channelsSelector;
         juce::ComboBox loopSelector;
         juce::ToggleButton favoriteToggle{"Favorite"};
+        juce::TextButton findSimilarButton{"Find Similar"};
+        juce::TextButton revealButton{"Reveal"};
         juce::ListBox resultsList;
         std::vector<FileRecord> results;
         std::unordered_map<int64_t, std::vector<float>> waveformPeaksByFileId;
@@ -137,6 +142,7 @@ namespace sw
         ViewMode viewMode = ViewMode::Recent;
         SortMode sortMode = SortMode::NameAsc;
         FacetFilters facetFilters{};
+        bool nearDuplicateResultsActive = false;
         bool darkModeEnabled = false;
         bool suppressControlCallbacks = false;
 

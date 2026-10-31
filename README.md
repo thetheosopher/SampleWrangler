@@ -124,14 +124,14 @@ If you find SampleWrangler useful and want to support continued development, you
 
 ## Supported Formats
 
-- `WAV (incl. ACID)`: playback plus duration, sample rate, channels, bit depth, bitrate, codec, BPM, root note, and loop-marker metadata.
-- `AIFF / AIF (incl. Apple Loop)`: playback plus duration, sample rate, channels, bit depth, bitrate, codec, root note, and loop-marker metadata.
+- `WAV (incl. ACID/RF64)`: playback plus duration, sample rate, channels, bit depth, bitrate, codec, BPM, root pitch/tuning, and all `smpl` loop records. Cue points remain markers and are not treated as loops.
+- `AIFF / AIF (incl. Apple Loop)`: playback plus duration, sample rate, channels, bit depth, bitrate, codec, root pitch/tuning, and separate sustain/release loop records with their endpoint convention preserved.
 - `FLAC`: playback with standard JUCE reader metadata.
 - `MP3`: playback with standard JUCE reader metadata.
 - `OGG`: playback with standard JUCE reader metadata.
 - `Audiocity ACP`: preset indexing plus preview from embedded audio or a resolved external sample reference.
 - `REX / RX2`: playback plus sample rate, channels, bit depth, duration, BPM, and slice count when the REX SDK DLL is available.
-- `SFZ`, `DecentSampler DSPRESET`, `Bitwig MULTISAMPLE`, `Korg KORGMULTISAMPLE`, `SoundFont SF2`, `TAL TALSMPL`, and `TX16Wx TXPROG`: index-only preset support with representative metadata and waveform thumbnails when a source sample can be resolved or probed.
+- `SFZ`, `DecentSampler DSPRESET`, `Bitwig MULTISAMPLE`, `Korg KORGMULTISAMPLE`, `SoundFont SF2`, `TAL TALSMPL`, and `TX16Wx TXPROG`: index-only preset support with representative metadata and waveform thumbnails when a source sample can be resolved or probed. SoundFont indexing records every bank/program for search; synthesis/playback is not supported.
 
 > **Note:** REX/RX2 support requires the Propellerhead REX SDK DLL at runtime.
 > MP3 reading is enabled via `JUCE_USE_MP3AUDIOFORMAT=1`. See the [JUCE MP3 legal disclaimer](https://docs.juce.com/develop/classjuce_1_1MP3AudioFormat.html).

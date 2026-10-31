@@ -3,6 +3,7 @@
 #include "RexManager.h"
 #include "WaveformPeak.h"
 #include "Util/Hashing.h"
+#include "Util/Logging.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <filesystem>
 #include <algorithm>
@@ -19,6 +20,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 namespace fs = std::filesystem;
 
@@ -1017,6 +1019,8 @@ namespace sw
         struct Sf2PresetHeader
         {
             std::string name;
+            uint16_t program = 0;
+            uint16_t bank = 0;
             uint16_t bagIndex = 0;
         };
 
@@ -1046,6 +1050,7 @@ namespace sw
             uint32_t endLoop = 0;
             uint32_t sampleRate = 0;
             uint8_t originalPitch = 60;
+            int pitchCorrectionCents = 0;
         };
 
         struct Sf2LinkedZone
@@ -1060,21 +1065,22 @@ namespace sw
             std::optional<int> rootMidiNote;
         };
 
+        struct Sf2ProgramInfo
+        {
+            PresetProgramRecord catalogRecord;
+            std::optional<int> rootMidiNote;
+            std::optional<double> rootTuneCents;
+            std::optional<Sf2SampleHeader> representativeSample;
+        };
+
         struct Sf2IndexedInfo
         {
-            std::string presetName;
-            std::optional<int> rootMidiNote;
-            std::optional<int> zoneCount;
-            std::optional<int> keyLow;
-            std::optional<int> keyHigh;
-            std::optional<int> velocityLow;
-            std::optional<int> velocityHigh;
+            std::vector<Sf2ProgramInfo> programs;
             std::optional<int64_t> totalSamples;
             std::optional<int> sampleRate;
             std::optional<int> channels;
             std::optional<int> bitDepth;
-            std::optional<int64_t> loopStartSample;
-            std::optional<int64_t> loopEndSample;
+            std::optional<LoopRegionRecord> representativeLoop;
             std::vector<float> overviewPeaks;
         };
 
@@ -1098,6 +1104,10 @@ namespace sw
             {
                 Sf2PresetHeader header;
                 header.name = readFixedAsciiString(data.data(), data.size(), offset, 20);
+                if (const auto program = readU16LE(data.data(), data.size(), offset + 20); program.has_value())
+                    header.program = *program;
+                if (const auto bank = readU16LE(data.data(), data.size(), offset + 22); bank.has_value())
+                    header.bank = *bank;
                 if (const auto bagIndex = readU16LE(data.data(), data.size(), offset + 24); bagIndex.has_value())
                     header.bagIndex = *bagIndex;
                 presets.push_back(std::move(header));
@@ -1170,6 +1180,13 @@ namespace sw
                     sample.sampleRate = *sampleRate;
                 if (offset + 40 < data.size())
                     sample.originalPitch = data[offset + 40];
+                if (offset + 41 < data.size())
+                {
+                    const auto rawPitchCorrection = data[offset + 41];
+                    sample.pitchCorrectionCents = rawPitchCorrection < 0x80
+                                                      ? static_cast<int>(rawPitchCorrection)
+                                                      : static_cast<int>(rawPitchCorrection) - 0x100;
+                }
                 samples.push_back(std::move(sample));
             }
             return samples;
@@ -1425,85 +1442,120 @@ namespace sw
             if (presets.size() < 2 || instruments.size() < 2 || samples.size() < 2 || presetBags.size() < 2 || instrumentBags.size() < 2)
                 return std::nullopt;
 
-            const auto &preset = presets.front();
             Sf2IndexedInfo info;
-            info.presetName = preset.name.empty() ? path.stem().string() : preset.name;
+            info.programs.reserve(presets.size() - 1);
+            for (size_t presetIndex = 0; presetIndex + 1 < presets.size(); ++presetIndex)
+            {
+                const auto &preset = presets[presetIndex];
+                Sf2ProgramInfo programInfo;
+                auto &catalogProgram = programInfo.catalogRecord;
+                catalogProgram.ordinal = static_cast<int>(presetIndex);
+                catalogProgram.bank = preset.bank;
+                catalogProgram.program = preset.program;
+                catalogProgram.name = preset.name;
 
-            const auto presetZones = parseSf2LinkedZones(presetBags,
-                                                         presetGenerators,
-                                                         preset.bagIndex,
-                                                         presets[1].bagIndex,
-                                                         41);
-            if (presetZones.empty())
+                const auto presetZones = parseSf2LinkedZones(presetBags,
+                                                             presetGenerators,
+                                                             preset.bagIndex,
+                                                             presets[presetIndex + 1].bagIndex,
+                                                             41);
+
+                int zoneCount = 0;
+                for (const auto &presetZone : presetZones)
+                {
+                    if (presetZone.linkIndex < 0 ||
+                        static_cast<size_t>(presetZone.linkIndex + 1) >= instruments.size())
+                        continue;
+
+                    const auto &instrument = instruments[static_cast<size_t>(presetZone.linkIndex)];
+                    const auto instrumentZones = parseSf2LinkedZones(instrumentBags,
+                                                                     instrumentGenerators,
+                                                                     instrument.bagIndex,
+                                                                     instruments[static_cast<size_t>(presetZone.linkIndex) + 1].bagIndex,
+                                                                     53);
+                    for (const auto &instrumentZone : instrumentZones)
+                    {
+                        if (instrumentZone.linkIndex < 0 ||
+                            static_cast<size_t>(instrumentZone.linkIndex) >= samples.size() - 1)
+                            continue;
+
+                        const int lowKey = std::max(presetZone.keyLow, instrumentZone.keyLow);
+                        const int highKey = std::min(presetZone.keyHigh, instrumentZone.keyHigh);
+                        const int lowVelocity = std::max(presetZone.velocityLow, instrumentZone.velocityLow);
+                        const int highVelocity = std::min(presetZone.velocityHigh, instrumentZone.velocityHigh);
+                        if (highKey < lowKey || highVelocity < lowVelocity)
+                            continue;
+
+                        ++zoneCount;
+                        updateOptionalMin(catalogProgram.keyLow, lowKey);
+                        updateOptionalMax(catalogProgram.keyHigh, highKey);
+                        updateOptionalMin(catalogProgram.velocityLow, lowVelocity);
+                        updateOptionalMax(catalogProgram.velocityHigh, highVelocity);
+
+                        const auto &sample = samples[static_cast<size_t>(instrumentZone.linkIndex)];
+                        if (!programInfo.rootMidiNote.has_value())
+                        {
+                            if (instrumentZone.rootMidiNote.has_value())
+                                programInfo.rootMidiNote = instrumentZone.rootMidiNote;
+                            else if (sample.originalPitch <= 127)
+                                programInfo.rootMidiNote = static_cast<int>(sample.originalPitch);
+                            programInfo.rootTuneCents = static_cast<double>(sample.pitchCorrectionCents);
+                            catalogProgram.rootMidiNote = programInfo.rootMidiNote;
+                            catalogProgram.rootTuneCents = programInfo.rootTuneCents;
+                        }
+
+                        if (!programInfo.representativeSample.has_value())
+                            programInfo.representativeSample = sample;
+                    }
+                }
+
+                catalogProgram.zoneCount = zoneCount;
+                info.programs.push_back(std::move(programInfo));
+            }
+
+            if (info.programs.empty())
                 return std::nullopt;
 
-            std::optional<Sf2SampleHeader> chosenSample;
-            int zoneCount = 0;
-
-            for (const auto &presetZone : presetZones)
+            const auto representative = std::find_if(info.programs.begin(),
+                                                     info.programs.end(),
+                                                     [](const Sf2ProgramInfo &program)
+                                                     { return program.representativeSample.has_value(); });
+            if (representative != info.programs.end())
             {
-                if (presetZone.linkIndex < 0 || static_cast<size_t>(presetZone.linkIndex + 1) >= instruments.size())
-                    continue;
-
-                const auto &instrument = instruments[static_cast<size_t>(presetZone.linkIndex)];
-                const auto instrumentZones = parseSf2LinkedZones(instrumentBags,
-                                                                 instrumentGenerators,
-                                                                 instrument.bagIndex,
-                                                                 instruments[static_cast<size_t>(presetZone.linkIndex) + 1].bagIndex,
-                                                                 53);
-                for (const auto &instrumentZone : instrumentZones)
+                const auto &sample = *representative->representativeSample;
+                const int64_t availableSamples = static_cast<int64_t>(smplDataSize / sizeof(int16_t));
+                const int64_t sampleStart = std::min<int64_t>(sample.start, availableSamples);
+                const int64_t sampleEnd = std::min<int64_t>(sample.end, availableSamples);
+                if (sampleEnd > sampleStart)
                 {
-                    if (instrumentZone.linkIndex < 0 || static_cast<size_t>(instrumentZone.linkIndex) >= samples.size() - 1)
-                        continue;
+                    info.totalSamples = sampleEnd - sampleStart;
+                    info.sampleRate = static_cast<int>(sample.sampleRate);
+                    info.channels = 1;
+                    info.bitDepth = 16;
 
-                    const int lowKey = std::max(presetZone.keyLow, instrumentZone.keyLow);
-                    const int highKey = std::min(presetZone.keyHigh, instrumentZone.keyHigh);
-                    const int lowVelocity = std::max(presetZone.velocityLow, instrumentZone.velocityLow);
-                    const int highVelocity = std::min(presetZone.velocityHigh, instrumentZone.velocityHigh);
-                    if (highKey < lowKey || highVelocity < lowVelocity)
-                        continue;
+                    if (sample.startLoop > sample.start && sample.endLoop > sample.startLoop)
+                    {
+                        LoopRegionRecord loop;
+                        loop.index = 0;
+                        loop.mode = LoopMode::Forward;
+                        loop.startSample = static_cast<int64_t>(sample.startLoop) - static_cast<int64_t>(sample.start);
+                        loop.endSample = std::min<int64_t>(static_cast<int64_t>(sample.endLoop) - static_cast<int64_t>(sample.start),
+                                                           *info.totalSamples);
+                        loop.endInclusive = false;
+                        loop.source = "sf2.shdr.representative-sample";
+                        loop.presetBank = representative->catalogRecord.bank;
+                        loop.presetProgram = representative->catalogRecord.program;
+                        info.representativeLoop = loop;
+                    }
 
-                    ++zoneCount;
-                    updateOptionalMin(info.keyLow, lowKey);
-                    updateOptionalMax(info.keyHigh, highKey);
-                    updateOptionalMin(info.velocityLow, lowVelocity);
-                    updateOptionalMax(info.velocityHigh, highVelocity);
-
-                    const auto &sample = samples[static_cast<size_t>(instrumentZone.linkIndex)];
-                    if (!info.rootMidiNote.has_value())
-                        info.rootMidiNote = instrumentZone.rootMidiNote.value_or(static_cast<int>(sample.originalPitch));
-
-                    if (!chosenSample.has_value())
-                        chosenSample = sample;
+                    info.overviewPeaks = buildOverviewPeaksFromSf2Sample(in,
+                                                                         smplDataOffset,
+                                                                         sample.start,
+                                                                         *info.totalSamples,
+                                                                         256);
                 }
             }
 
-            if (zoneCount <= 0 || !chosenSample.has_value())
-                return std::nullopt;
-
-            info.zoneCount = zoneCount;
-            info.channels = 1;
-            info.bitDepth = 16;
-
-            const int64_t availableSamples = static_cast<int64_t>(smplDataSize / sizeof(int16_t));
-            const int64_t sampleStart = std::min<int64_t>(chosenSample->start, availableSamples);
-            const int64_t sampleEnd = std::min<int64_t>(chosenSample->end, availableSamples);
-            if (sampleEnd <= sampleStart)
-                return info;
-
-            info.totalSamples = sampleEnd - sampleStart;
-            info.sampleRate = static_cast<int>(chosenSample->sampleRate);
-            if (chosenSample->startLoop > chosenSample->start && chosenSample->endLoop > chosenSample->startLoop)
-            {
-                info.loopStartSample = static_cast<int64_t>(chosenSample->startLoop) - static_cast<int64_t>(chosenSample->start);
-                info.loopEndSample = std::min<int64_t>(static_cast<int64_t>(chosenSample->endLoop) - static_cast<int64_t>(chosenSample->start), *info.totalSamples - 1);
-            }
-
-            info.overviewPeaks = buildOverviewPeaksFromSf2Sample(in,
-                                                                 smplDataOffset,
-                                                                 chosenSample->start,
-                                                                 *info.totalSamples,
-                                                                 256);
             return info;
         }
 
@@ -1587,33 +1639,43 @@ namespace sw
                                  std::vector<float> &overviewPeaks)
         {
             rec.codec = "SoundFont 2";
+            rec.metadataSource = "sf2";
 
             if (!info.has_value())
                 return;
 
-            if (!info->presetName.empty())
-                rec.presetName = info->presetName;
+            rec.presetPrograms.clear();
+            rec.presetPrograms.reserve(info->programs.size());
+            for (const auto &program : info->programs)
+                rec.presetPrograms.push_back(program.catalogRecord);
 
-            rec.zoneCount = info->zoneCount;
-            rec.keyLow = info->keyLow;
-            rec.keyHigh = info->keyHigh;
-            rec.velocityLow = info->velocityLow;
-            rec.velocityHigh = info->velocityHigh;
+            if (!info->programs.empty())
+            {
+                const auto &firstProgram = info->programs.front();
+                if (!firstProgram.catalogRecord.name.empty())
+                    rec.presetName = firstProgram.catalogRecord.name;
+                rec.zoneCount = firstProgram.catalogRecord.zoneCount;
+                rec.keyLow = firstProgram.catalogRecord.keyLow;
+                rec.keyHigh = firstProgram.catalogRecord.keyHigh;
+                rec.velocityLow = firstProgram.catalogRecord.velocityLow;
+                rec.velocityHigh = firstProgram.catalogRecord.velocityHigh;
+                rec.rootMidiNote = firstProgram.rootMidiNote;
+                rec.rootTuneCents = firstProgram.rootTuneCents;
+                if (rec.rootMidiNote.has_value())
+                {
+                    rec.rootPitchSource = "sf2.shdr";
+                    const auto keyName = midiNoteName(*rec.rootMidiNote);
+                    if (keyName.isNotEmpty())
+                        rec.key = keyName.toStdString();
+                }
+            }
+
             rec.totalSamples = info->totalSamples;
             rec.sampleRate = info->sampleRate;
             rec.channels = info->channels;
             rec.bitDepth = info->bitDepth;
-            rec.loopStartSample = info->loopStartSample;
-            rec.loopEndSample = info->loopEndSample;
-            if (info->loopStartSample.has_value() && info->loopEndSample.has_value())
-                rec.loopType = "sf2";
-
-            if (info->rootMidiNote.has_value())
-            {
-                const auto keyName = midiNoteName(*info->rootMidiNote);
-                if (keyName.isNotEmpty())
-                    rec.key = keyName.toStdString();
-            }
+            if (info->representativeLoop.has_value())
+                rec.loopRegions.push_back(*info->representativeLoop);
 
             if (rec.totalSamples.has_value() && rec.sampleRate.has_value() && *rec.sampleRate > 0)
                 rec.durationSec = static_cast<double>(*rec.totalSamples) / static_cast<double>(*rec.sampleRate);
@@ -1630,251 +1692,479 @@ namespace sw
             overviewPeaks = info->overviewPeaks;
         }
 
-        void parseWavAcidAndLoopMetadata(const std::filesystem::path &path, FileRecord &rec)
+        bool parseWavSamplerMetadata(const std::filesystem::path &path, FileRecord &rec)
         {
             std::ifstream in(path, std::ios::binary);
             if (!in)
-                return;
+                return false;
 
-            std::array<char, 12> riffHeader{};
-            in.read(riffHeader.data(), static_cast<std::streamsize>(riffHeader.size()));
+            in.seekg(0, std::ios::end);
+            const auto fileEnd = static_cast<std::streamoff>(in.tellg());
+            if (fileEnd < 12)
+                return false;
+            const auto fileSize = static_cast<uint64_t>(fileEnd);
+            in.seekg(0, std::ios::beg);
+
+            std::array<uint8_t, 12> riffHeader{};
+            in.read(reinterpret_cast<char *>(riffHeader.data()), static_cast<std::streamsize>(riffHeader.size()));
             if (in.gcount() != static_cast<std::streamsize>(riffHeader.size()))
-                return;
+                return false;
 
-            if (std::memcmp(riffHeader.data(), "RIFF", 4) != 0 || std::memcmp(riffHeader.data() + 8, "WAVE", 4) != 0)
-                return;
+            const bool isRiff = std::memcmp(riffHeader.data(), "RIFF", 4) == 0;
+            const bool isRf64 = std::memcmp(riffHeader.data(), "RF64", 4) == 0;
+            if ((!isRiff && !isRf64) || std::memcmp(riffHeader.data() + 8, "WAVE", 4) != 0)
+                return false;
 
-            std::vector<int64_t> cueSampleOffsets;
-
-            while (in)
+            const auto readU64LEBytes = [](const uint8_t *data, size_t size, size_t offset) -> std::optional<uint64_t>
             {
-                std::array<char, 8> chunkHeader{};
-                in.read(chunkHeader.data(), static_cast<std::streamsize>(chunkHeader.size()));
-                if (in.gcount() != static_cast<std::streamsize>(chunkHeader.size()))
-                    break;
+                if (offset > size || size - offset < 8)
+                    return std::nullopt;
 
-                const char *chunkId = chunkHeader.data();
-                const uint32_t chunkSize = static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[4])) |
-                                           (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[5])) << 8) |
-                                           (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[6])) << 16) |
-                                           (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[7])) << 24);
+                uint64_t value = 0;
+                for (size_t i = 0; i < 8; ++i)
+                    value |= static_cast<uint64_t>(data[offset + i]) << (i * 8);
+                return value;
+            };
 
-                std::vector<uint8_t> chunkData(chunkSize);
-                if (chunkSize > 0)
+            uint64_t rootEnd = 0;
+            uint64_t rf64DataSize = 0;
+            bool rf64DataSizeUsed = false;
+            std::unordered_map<std::string, std::vector<uint64_t>> rf64TableSizes;
+            std::unordered_map<std::string, size_t> rf64TableIndices;
+
+            if (isRiff)
+            {
+                const auto riffSize = readU32LE(riffHeader.data(), riffHeader.size(), 4);
+                if (!riffSize.has_value() || static_cast<uint64_t>(*riffSize) > fileSize - 8)
+                    return false;
+                rootEnd = 8 + static_cast<uint64_t>(*riffSize);
+            }
+            else
+            {
+                std::array<uint8_t, 8> ds64Header{};
+                in.read(reinterpret_cast<char *>(ds64Header.data()), static_cast<std::streamsize>(ds64Header.size()));
+                if (in.gcount() != static_cast<std::streamsize>(ds64Header.size()) ||
+                    std::memcmp(ds64Header.data(), "ds64", 4) != 0)
+                    return false;
+
+                const auto ds64Size = readU32LE(ds64Header.data(), ds64Header.size(), 4);
+                if (!ds64Size.has_value() || *ds64Size < 28 ||
+                    static_cast<uint64_t>(*ds64Size) > fileSize - 20)
+                    return false;
+
+                std::array<uint8_t, 28> ds64{};
+                in.read(reinterpret_cast<char *>(ds64.data()), static_cast<std::streamsize>(ds64.size()));
+                if (in.gcount() != static_cast<std::streamsize>(ds64.size()))
+                    return false;
+
+                const auto riffSize = readU64LEBytes(ds64.data(), ds64.size(), 0);
+                const auto dataSize = readU64LEBytes(ds64.data(), ds64.size(), 8);
+                const auto tableLength = readU32LE(ds64.data(), ds64.size(), 24);
+                if (!riffSize.has_value() || !dataSize.has_value() || !tableLength.has_value() ||
+                    *tableLength > (*ds64Size - 28) / 12 || *tableLength > 4096 ||
+                    *riffSize > fileSize - 8)
+                    return false;
+
+                rootEnd = 8 + *riffSize;
+                rf64DataSize = *dataSize;
+
+                for (uint32_t i = 0; i < *tableLength; ++i)
                 {
-                    in.read(reinterpret_cast<char *>(chunkData.data()), static_cast<std::streamsize>(chunkSize));
-                    if (in.gcount() != static_cast<std::streamsize>(chunkSize))
-                        break;
+                    std::array<uint8_t, 12> entry{};
+                    in.read(reinterpret_cast<char *>(entry.data()), static_cast<std::streamsize>(entry.size()));
+                    if (in.gcount() != static_cast<std::streamsize>(entry.size()))
+                        return false;
+
+                    const auto chunkSize = readU64LEBytes(entry.data(), entry.size(), 4);
+                    if (!chunkSize.has_value())
+                        return false;
+                    const std::string chunkId(reinterpret_cast<const char *>(entry.data()), 4);
+                    rf64TableSizes[chunkId].push_back(*chunkSize);
                 }
 
-                if ((chunkSize & 1u) != 0u)
-                    in.seekg(1, std::ios::cur);
+                const uint64_t ds64End = 20 + static_cast<uint64_t>(*ds64Size) + (*ds64Size & 1u);
+                if (ds64End > rootEnd || ds64End > fileSize)
+                    return false;
+                in.seekg(static_cast<std::streamoff>(ds64End), std::ios::beg);
+            }
 
-                if (std::memcmp(chunkId, "acid", 4) == 0)
+            if (rootEnd < 12 || rootEnd > fileSize)
+                return false;
+
+            const auto resolveChunkSize = [&](const std::array<uint8_t, 4> &chunkId,
+                                              uint32_t size32) -> std::optional<uint64_t>
+            {
+                if (size32 != std::numeric_limits<uint32_t>::max())
+                    return static_cast<uint64_t>(size32);
+                if (!isRf64)
+                    return std::nullopt;
+
+                const std::string id(reinterpret_cast<const char *>(chunkId.data()), chunkId.size());
+                if (id == "data" && !rf64DataSizeUsed)
                 {
-                    rec.loopType = std::string("acidized");
+                    rf64DataSizeUsed = true;
+                    return rf64DataSize;
+                }
 
-                    if (const auto rootNote = readU16LE(chunkData.data(), chunkData.size(), 4))
+                const auto sizes = rf64TableSizes.find(id);
+                if (sizes == rf64TableSizes.end())
+                    return std::nullopt;
+                auto &nextIndex = rf64TableIndices[id];
+                if (nextIndex >= sizes->second.size())
+                    return std::nullopt;
+                return sizes->second[nextIndex++];
+            };
+
+            std::optional<int> smplRootNote;
+            std::optional<double> smplRootTuneCents;
+            std::optional<int> acidRootNote;
+            bool sawAcidChunk = false;
+            bool sawSmplChunk = false;
+            uint64_t position = static_cast<uint64_t>(static_cast<std::streamoff>(in.tellg()));
+
+            while (position < rootEnd)
+            {
+                if (rootEnd - position < 8)
+                    return false;
+
+                std::array<uint8_t, 8> chunkHeader{};
+                in.read(reinterpret_cast<char *>(chunkHeader.data()), static_cast<std::streamsize>(chunkHeader.size()));
+                if (in.gcount() != static_cast<std::streamsize>(chunkHeader.size()))
+                    return false;
+                position += chunkHeader.size();
+
+                std::array<uint8_t, 4> chunkId{};
+                std::copy_n(chunkHeader.data(), chunkId.size(), chunkId.data());
+                const auto size32Value = readU32LE(chunkHeader.data(), chunkHeader.size(), 4);
+                if (!size32Value.has_value())
+                    return false;
+                const auto chunkSize = resolveChunkSize(chunkId, *size32Value);
+                if (!chunkSize.has_value() || *chunkSize > rootEnd - position)
+                    return false;
+
+                const uint64_t payloadStart = position;
+                const uint64_t payloadEnd = payloadStart + *chunkSize;
+                const uint64_t paddedEnd = payloadEnd + (*chunkSize & 1u);
+                if (paddedEnd > rootEnd || paddedEnd > fileSize)
+                    return false;
+
+                if (std::memcmp(chunkId.data(), "acid", 4) == 0)
+                {
+                    sawAcidChunk = true;
+                    rec.metadataSource = "acidized";
+
+                    std::array<uint8_t, 24> acidData{};
+                    const auto bytesToRead = static_cast<size_t>(std::min<uint64_t>(*chunkSize, acidData.size()));
+                    if (bytesToRead > 0)
                     {
-                        rec.acidRootNote = static_cast<int>(*rootNote);
-                        if (!rec.key.has_value())
-                        {
-                            const auto noteName = midiNoteName(static_cast<int>(*rootNote));
-                            if (noteName.isNotEmpty())
-                                rec.key = noteName.toStdString();
-                        }
+                        in.seekg(static_cast<std::streamoff>(payloadStart), std::ios::beg);
+                        in.read(reinterpret_cast<char *>(acidData.data()), static_cast<std::streamsize>(bytesToRead));
+                        if (in.gcount() != static_cast<std::streamsize>(bytesToRead))
+                            return false;
                     }
 
-                    if (const auto beats = readU32LE(chunkData.data(), chunkData.size(), 8))
+                    if (const auto rootNote = readU16LE(acidData.data(), bytesToRead, 4);
+                        rootNote.has_value() && *rootNote <= 127)
+                        acidRootNote = static_cast<int>(*rootNote);
+
+                    if (const auto beats = readU32LE(acidData.data(), bytesToRead, 8))
                         rec.acidBeats = static_cast<int>(*beats);
 
                     std::optional<float> tempo;
-                    if (chunkData.size() >= 16)
-                        tempo = readF32LE(chunkData.data(), chunkData.size(), 12);
-                    if ((!tempo.has_value() || *tempo <= 0.0f || *tempo > 400.0f) && chunkData.size() >= 24)
-                        tempo = readF32LE(chunkData.data(), chunkData.size(), 20);
-
-                    if (tempo.has_value())
-                    {
-                        const double bpm = static_cast<double>(*tempo);
-                        if (bpm > 0.0 && bpm < 400.0)
-                            rec.bpm = bpm;
-                    }
+                    if (bytesToRead >= 16)
+                        tempo = readF32LE(acidData.data(), bytesToRead, 12);
+                    if ((!tempo.has_value() || *tempo <= 0.0f || *tempo > 400.0f) && bytesToRead >= 24)
+                        tempo = readF32LE(acidData.data(), bytesToRead, 20);
+                    if (tempo.has_value() && *tempo > 0.0f && *tempo < 400.0f)
+                        rec.bpm = static_cast<double>(*tempo);
                 }
-                else if (std::memcmp(chunkId, "smpl", 4) == 0)
+                else if (std::memcmp(chunkId.data(), "smpl", 4) == 0)
                 {
-                    const auto numLoops = readU32LE(chunkData.data(), chunkData.size(), 28);
-                    if (!numLoops.has_value() || *numLoops == 0)
-                        continue;
+                    sawSmplChunk = true;
+                    std::array<uint8_t, 36> smplHeader{};
+                    if (*chunkSize < smplHeader.size())
+                        return false;
 
-                    const size_t firstLoopOffset = 36;
-                    if (firstLoopOffset + 24 > chunkData.size())
-                        continue;
+                    in.seekg(static_cast<std::streamoff>(payloadStart), std::ios::beg);
+                    in.read(reinterpret_cast<char *>(smplHeader.data()), static_cast<std::streamsize>(smplHeader.size()));
+                    if (in.gcount() != static_cast<std::streamsize>(smplHeader.size()))
+                        return false;
 
-                    const auto loopStart = readU32LE(chunkData.data(), chunkData.size(), firstLoopOffset + 8);
-                    const auto loopEnd = readU32LE(chunkData.data(), chunkData.size(), firstLoopOffset + 12);
-                    if (loopStart.has_value() && loopEnd.has_value() && *loopEnd >= *loopStart)
+                    const auto unityNote = readU32LE(smplHeader.data(), smplHeader.size(), 12);
+                    const auto pitchFraction = readU32LE(smplHeader.data(), smplHeader.size(), 16);
+                    const auto loopCount = readU32LE(smplHeader.data(), smplHeader.size(), 28);
+                    const auto samplerDataBytes = readU32LE(smplHeader.data(), smplHeader.size(), 32);
+                    if (!loopCount.has_value() || !samplerDataBytes.has_value() ||
+                        *loopCount > 65536 ||
+                        static_cast<uint64_t>(*loopCount) * 24 + 36 + *samplerDataBytes > *chunkSize)
+                        return false;
+
+                    if (unityNote.has_value() && *unityNote <= 127)
                     {
-                        rec.loopStartSample = static_cast<int64_t>(*loopStart);
-                        rec.loopEndSample = static_cast<int64_t>(*loopEnd);
+                        smplRootNote = static_cast<int>(*unityNote);
+                        if (pitchFraction.has_value())
+                            smplRootTuneCents = static_cast<double>(*pitchFraction) * (100.0 / 4294967296.0);
+                    }
+
+                    uint64_t loopPosition = payloadStart + 36;
+                    for (uint32_t loopIndex = 0; loopIndex < *loopCount; ++loopIndex)
+                    {
+                        std::array<uint8_t, 24> loopData{};
+                        in.seekg(static_cast<std::streamoff>(loopPosition), std::ios::beg);
+                        in.read(reinterpret_cast<char *>(loopData.data()), static_cast<std::streamsize>(loopData.size()));
+                        if (in.gcount() != static_cast<std::streamsize>(loopData.size()))
+                            return false;
+                        loopPosition += loopData.size();
+
+                        const auto loopId = readU32LE(loopData.data(), loopData.size(), 0);
+                        const auto rawMode = readU32LE(loopData.data(), loopData.size(), 4);
+                        const auto loopStart = readU32LE(loopData.data(), loopData.size(), 8);
+                        const auto loopEnd = readU32LE(loopData.data(), loopData.size(), 12);
+                        const auto fraction = readU32LE(loopData.data(), loopData.size(), 16);
+                        const auto playCount = readU32LE(loopData.data(), loopData.size(), 20);
+                        if (!loopId.has_value() || !rawMode.has_value() ||
+                            !loopStart.has_value() || !loopEnd.has_value() ||
+                            *loopEnd < *loopStart ||
+                            (rec.totalSamples.has_value() && *loopEnd >= static_cast<uint64_t>(*rec.totalSamples)))
+                            continue;
+
+                        LoopRegionRecord loop;
+                        loop.index = static_cast<int>(rec.loopRegions.size());
+                        loop.mode = *rawMode == 0 ? LoopMode::Forward
+                                                  : (*rawMode == 1 ? LoopMode::Alternating
+                                                                   : (*rawMode == 2 ? LoopMode::Backward : LoopMode::Unknown));
+                        loop.rawMode = *rawMode;
+                        loop.startSample = static_cast<int64_t>(*loopStart);
+                        loop.endSample = static_cast<int64_t>(*loopEnd);
+                        loop.endInclusive = true;
+                        loop.fractionalPosition = fraction;
+                        loop.playCount = playCount;
+                        loop.sourceId = loopId;
+                        loop.source = "wave.smpl";
+                        rec.loopRegions.push_back(std::move(loop));
                     }
                 }
-                else if (std::memcmp(chunkId, "cue ", 4) == 0)
+                else if (std::memcmp(chunkId.data(), "cue ", 4) == 0)
                 {
-                    const auto numCuePoints = readU32LE(chunkData.data(), chunkData.size(), 0);
-                    if (!numCuePoints.has_value() || *numCuePoints == 0)
-                        continue;
-
-                    constexpr size_t cueHeaderSize = 4;
-                    constexpr size_t cueEntrySize = 24;
-                    const size_t availableEntries = (chunkData.size() > cueHeaderSize)
-                                                        ? ((chunkData.size() - cueHeaderSize) / cueEntrySize)
-                                                        : 0;
-                    const size_t entriesToRead = std::min<size_t>(*numCuePoints, availableEntries);
-
-                    for (size_t i = 0; i < entriesToRead; ++i)
-                    {
-                        const size_t entryOffset = cueHeaderSize + i * cueEntrySize;
-                        const auto sampleOffset = readU32LE(chunkData.data(), chunkData.size(), entryOffset + 20);
-                        if (sampleOffset.has_value())
-                            cueSampleOffsets.push_back(static_cast<int64_t>(*sampleOffset));
-                    }
+                    // Cue points are markers, not playback loops.
                 }
+
+                position = paddedEnd;
+                if (position > static_cast<uint64_t>(std::numeric_limits<std::streamoff>::max()))
+                    return false;
+                in.clear();
+                in.seekg(static_cast<std::streamoff>(position), std::ios::beg);
+                if (!in.good() && position < rootEnd)
+                    return false;
             }
 
-            if ((!rec.loopStartSample.has_value() || !rec.loopEndSample.has_value()) && cueSampleOffsets.size() >= 2)
+            if (acidRootNote.has_value())
             {
-                std::sort(cueSampleOffsets.begin(), cueSampleOffsets.end());
-                rec.loopStartSample = cueSampleOffsets.front();
-                rec.loopEndSample = cueSampleOffsets.back();
+                rec.rootMidiNote = acidRootNote;
+                rec.rootTuneCents = 0.0;
+                rec.rootPitchSource = "wave.acid";
+                const auto noteName = midiNoteName(*acidRootNote);
+                if (!rec.key.has_value() && noteName.isNotEmpty())
+                    rec.key = noteName.toStdString();
+            }
+            else if (smplRootNote.has_value())
+            {
+                rec.rootMidiNote = smplRootNote;
+                rec.rootTuneCents = smplRootTuneCents;
+                rec.rootPitchSource = "wave.smpl";
+                const auto noteName = midiNoteName(*smplRootNote);
+                if (!rec.key.has_value() && noteName.isNotEmpty())
+                    rec.key = noteName.toStdString();
             }
 
-            if (rec.loopType.has_value() && *rec.loopType == "acidized" &&
-                !rec.loopStartSample.has_value() && rec.acidBeats.has_value() &&
+            if (!sawAcidChunk && sawSmplChunk)
+                rec.metadataSource = "wave.smpl";
+
+            if (sawAcidChunk && rec.loopRegions.empty() && rec.acidBeats.has_value() &&
                 rec.bpm.has_value() && rec.sampleRate.has_value())
             {
                 const double estimatedSeconds = (60.0 * static_cast<double>(*rec.acidBeats)) / *rec.bpm;
                 const auto estimatedSamples = static_cast<int64_t>(std::round(estimatedSeconds * static_cast<double>(*rec.sampleRate)));
                 if (estimatedSamples > 1)
                 {
-                    rec.loopStartSample = 0;
-                    rec.loopEndSample = estimatedSamples - 1;
+                    LoopRegionRecord loop;
+                    loop.index = static_cast<int>(rec.loopRegions.size());
+                    loop.mode = LoopMode::Forward;
+                    loop.startSample = 0;
+                    loop.endSample = estimatedSamples - 1;
+                    loop.endInclusive = true;
+                    loop.source = "wave.acid.estimated";
+                    rec.loopRegions.push_back(std::move(loop));
                 }
             }
+
+            return true;
         }
 
-        void parseAiffAppleLoopMetadata(const std::filesystem::path &path, FileRecord &rec)
+        bool parseAiffAppleLoopMetadata(const std::filesystem::path &path, FileRecord &rec)
         {
             std::ifstream in(path, std::ios::binary);
             if (!in)
-                return;
+                return false;
 
-            std::array<char, 12> formHeader{};
-            in.read(formHeader.data(), static_cast<std::streamsize>(formHeader.size()));
+            in.seekg(0, std::ios::end);
+            const auto fileEnd = static_cast<std::streamoff>(in.tellg());
+            if (fileEnd < 12)
+                return false;
+            const auto fileSize = static_cast<uint64_t>(fileEnd);
+            in.seekg(0, std::ios::beg);
+
+            std::array<uint8_t, 12> formHeader{};
+            in.read(reinterpret_cast<char *>(formHeader.data()), static_cast<std::streamsize>(formHeader.size()));
             if (in.gcount() != static_cast<std::streamsize>(formHeader.size()))
-                return;
+                return false;
 
             if (std::memcmp(formHeader.data(), "FORM", 4) != 0)
-                return;
+                return false;
 
             const bool isAiff = std::memcmp(formHeader.data() + 8, "AIFF", 4) == 0 ||
                                 std::memcmp(formHeader.data() + 8, "AIFC", 4) == 0;
             if (!isAiff)
-                return;
+                return false;
 
             std::unordered_map<uint16_t, int64_t> markerIdToSample;
-            std::optional<uint16_t> sustainLoopBeginMarkerId;
-            std::optional<uint16_t> sustainLoopEndMarkerId;
-            std::optional<int> rootMidiNote;
-            bool hasAppleApplicationChunk = false;
-
-            while (in)
+            struct AiffLoopReference
             {
-                std::array<char, 8> chunkHeader{};
-                in.read(chunkHeader.data(), static_cast<std::streamsize>(chunkHeader.size()));
+                LoopRegionRole role = LoopRegionRole::Unspecified;
+                uint16_t mode = 0;
+                uint16_t beginMarkerId = 0;
+                uint16_t endMarkerId = 0;
+            };
+            std::vector<AiffLoopReference> loopReferences;
+            std::optional<int> rootMidiNote;
+            std::optional<int> rootTuneCents;
+            bool hasAppleApplicationChunk = false;
+            const auto formSize = readU32BE(formHeader.data(), formHeader.size(), 4);
+            if (!formSize.has_value() || static_cast<uint64_t>(*formSize) > fileSize - 8)
+                return false;
+            const uint64_t formEnd = 8 + static_cast<uint64_t>(*formSize);
+            if (formEnd < 12)
+                return false;
+
+            uint64_t position = 12;
+            while (position < formEnd)
+            {
+                if (formEnd - position < 8)
+                    return false;
+
+                std::array<uint8_t, 8> chunkHeader{};
+                in.seekg(static_cast<std::streamoff>(position), std::ios::beg);
+                in.read(reinterpret_cast<char *>(chunkHeader.data()), static_cast<std::streamsize>(chunkHeader.size()));
                 if (in.gcount() != static_cast<std::streamsize>(chunkHeader.size()))
-                    break;
+                    return false;
 
-                const char *chunkId = chunkHeader.data();
-                const uint32_t chunkSize = (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[4])) << 24) |
-                                           (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[5])) << 16) |
-                                           (static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[6])) << 8) |
-                                           static_cast<uint32_t>(static_cast<uint8_t>(chunkHeader[7]));
+                const auto chunkSizeValue = readU32BE(chunkHeader.data(), chunkHeader.size(), 4);
+                if (!chunkSizeValue.has_value())
+                    return false;
+                const uint64_t chunkSize = *chunkSizeValue;
+                const uint64_t payloadStart = position + chunkHeader.size();
+                if (chunkSize > formEnd - payloadStart)
+                    return false;
+                const uint64_t payloadEnd = payloadStart + chunkSize;
+                const uint64_t paddedEnd = payloadEnd + (chunkSize & 1u);
+                if (paddedEnd > formEnd || paddedEnd > fileSize)
+                    return false;
 
-                std::vector<uint8_t> chunkData(chunkSize);
-                if (chunkSize > 0)
+                if (std::memcmp(chunkHeader.data(), "INST", 4) == 0)
                 {
-                    in.read(reinterpret_cast<char *>(chunkData.data()), static_cast<std::streamsize>(chunkSize));
-                    if (in.gcount() != static_cast<std::streamsize>(chunkSize))
-                        break;
-                }
+                    if (chunkSize < 20)
+                        return false;
 
-                if ((chunkSize & 1u) != 0u)
-                    in.seekg(1, std::ios::cur);
+                    std::array<uint8_t, 20> instrumentData{};
+                    in.seekg(static_cast<std::streamoff>(payloadStart), std::ios::beg);
+                    in.read(reinterpret_cast<char *>(instrumentData.data()), static_cast<std::streamsize>(instrumentData.size()));
+                    if (in.gcount() != static_cast<std::streamsize>(instrumentData.size()))
+                        return false;
 
-                if (std::memcmp(chunkId, "INST", 4) == 0)
-                {
-                    if (chunkData.size() >= 20)
+                    if (instrumentData[0] <= 127)
+                        rootMidiNote = static_cast<int>(instrumentData[0]);
+                    const auto rawDetune = instrumentData[1];
+                    rootTuneCents = rawDetune < 0x80 ? static_cast<int>(rawDetune)
+                                                     : static_cast<int>(rawDetune) - 0x100;
+
+                    const auto addLoopReference = [&instrumentData, &loopReferences](size_t offset,
+                                                                                      LoopRegionRole role)
                     {
-                        rootMidiNote = static_cast<int>(chunkData[0]);
-
-                        const auto sustainPlayMode = readU16BE(chunkData.data(), chunkData.size(), 8);
-                        const auto beginMarkerId = readU16BE(chunkData.data(), chunkData.size(), 10);
-                        const auto endMarkerId = readU16BE(chunkData.data(), chunkData.size(), 12);
-
-                        if (sustainPlayMode.has_value() && *sustainPlayMode != 0 &&
+                        const auto mode = readU16BE(instrumentData.data(), instrumentData.size(), offset);
+                        const auto beginMarkerId = readU16BE(instrumentData.data(), instrumentData.size(), offset + 2);
+                        const auto endMarkerId = readU16BE(instrumentData.data(), instrumentData.size(), offset + 4);
+                        if (mode.has_value() && *mode != 0 &&
                             beginMarkerId.has_value() && endMarkerId.has_value() &&
-                            *beginMarkerId > 0 && *endMarkerId > 0)
+                            *beginMarkerId != 0 && *endMarkerId != 0)
                         {
-                            sustainLoopBeginMarkerId = beginMarkerId;
-                            sustainLoopEndMarkerId = endMarkerId;
+                            loopReferences.push_back({role, *mode, *beginMarkerId, *endMarkerId});
                         }
-                    }
-                }
-                else if (std::memcmp(chunkId, "MARK", 4) == 0)
-                {
-                    const auto markerCount = readU16BE(chunkData.data(), chunkData.size(), 0);
-                    if (!markerCount.has_value() || *markerCount == 0)
-                        continue;
+                    };
 
-                    size_t offset = 2;
+                    addLoopReference(8, LoopRegionRole::Sustain);
+                    addLoopReference(14, LoopRegionRole::Release);
+                }
+                else if (std::memcmp(chunkHeader.data(), "MARK", 4) == 0)
+                {
+                    if (chunkSize < 2)
+                        return false;
+
+                    std::array<uint8_t, 2> markerCountBytes{};
+                    in.seekg(static_cast<std::streamoff>(payloadStart), std::ios::beg);
+                    in.read(reinterpret_cast<char *>(markerCountBytes.data()), static_cast<std::streamsize>(markerCountBytes.size()));
+                    if (in.gcount() != static_cast<std::streamsize>(markerCountBytes.size()))
+                        return false;
+                    const auto markerCount = readU16BE(markerCountBytes.data(), markerCountBytes.size(), 0);
+                    if (!markerCount.has_value() || *markerCount > (chunkSize - 2) / 7)
+                        return false;
+
+                    uint64_t markerPosition = payloadStart + 2;
                     for (uint16_t markerIndex = 0; markerIndex < *markerCount; ++markerIndex)
                     {
-                        if (offset + 7 > chunkData.size())
-                            break;
+                        std::array<uint8_t, 7> marker{};
+                        in.seekg(static_cast<std::streamoff>(markerPosition), std::ios::beg);
+                        in.read(reinterpret_cast<char *>(marker.data()), static_cast<std::streamsize>(marker.size()));
+                        if (in.gcount() != static_cast<std::streamsize>(marker.size()))
+                            return false;
 
-                        const auto markerId = readU16BE(chunkData.data(), chunkData.size(), offset);
-                        const auto markerPosition = readU32BE(chunkData.data(), chunkData.size(), offset + 2);
-                        if (!markerId.has_value() || !markerPosition.has_value())
-                            break;
+                        const auto markerId = readU16BE(marker.data(), marker.size(), 0);
+                        const auto samplePosition = readU32BE(marker.data(), marker.size(), 2);
+                        if (!markerId.has_value() || !samplePosition.has_value())
+                            return false;
+                        markerIdToSample[*markerId] = static_cast<int64_t>(*samplePosition);
 
-                        markerIdToSample[*markerId] = static_cast<int64_t>(*markerPosition);
-
-                        const size_t markerNameLengthOffset = offset + 6;
-                        const uint8_t markerNameLength = chunkData[markerNameLengthOffset];
-                        size_t markerRecordSize = static_cast<size_t>(2 + 4 + 1 + markerNameLength);
-                        if ((markerRecordSize & 1u) != 0u)
-                            ++markerRecordSize;
-
-                        offset += markerRecordSize;
+                        const uint8_t markerNameLength = marker[6];
+                        const uint64_t markerRecordSize = 7 + markerNameLength + ((7 + markerNameLength) & 1u);
+                        if (markerRecordSize > payloadEnd - markerPosition)
+                            return false;
+                        markerPosition += markerRecordSize;
                     }
                 }
-                else if (std::memcmp(chunkId, "APPL", 4) == 0)
+                else if (std::memcmp(chunkHeader.data(), "APPL", 4) == 0)
                 {
-                    if (chunkData.size() >= 4)
+                    if (chunkSize >= 4)
                     {
-                        if (std::memcmp(chunkData.data(), "stoc", 4) == 0 ||
-                            std::memcmp(chunkData.data(), "AAPL", 4) == 0)
+                        std::array<uint8_t, 4> applicationId{};
+                        in.seekg(static_cast<std::streamoff>(payloadStart), std::ios::beg);
+                        in.read(reinterpret_cast<char *>(applicationId.data()), static_cast<std::streamsize>(applicationId.size()));
+                        if (in.gcount() != static_cast<std::streamsize>(applicationId.size()))
+                            return false;
+                        if (std::memcmp(applicationId.data(), "stoc", 4) == 0 ||
+                            std::memcmp(applicationId.data(), "AAPL", 4) == 0)
                         {
                             hasAppleApplicationChunk = true;
                         }
                     }
                 }
+
+                position = paddedEnd;
             }
 
-            if (rootMidiNote.has_value() && *rootMidiNote >= 0 && *rootMidiNote <= 127)
+            if (rootMidiNote.has_value())
             {
-                rec.acidRootNote = *rootMidiNote;
+                rec.rootMidiNote = rootMidiNote;
+                rec.rootTuneCents = static_cast<double>(rootTuneCents.value_or(0));
+                rec.rootPitchSource = "aiff.INST";
                 if (!rec.key.has_value())
                 {
                     const auto noteName = midiNoteName(*rootMidiNote);
@@ -1883,24 +2173,36 @@ namespace sw
                 }
             }
 
-            if (sustainLoopBeginMarkerId.has_value() && sustainLoopEndMarkerId.has_value())
+            for (const auto &loopReference : loopReferences)
             {
-                const auto beginIt = markerIdToSample.find(*sustainLoopBeginMarkerId);
-                const auto endIt = markerIdToSample.find(*sustainLoopEndMarkerId);
+                const auto beginIt = markerIdToSample.find(loopReference.beginMarkerId);
+                const auto endIt = markerIdToSample.find(loopReference.endMarkerId);
                 if (beginIt != markerIdToSample.end() && endIt != markerIdToSample.end())
                 {
-                    const int64_t loopStart = std::min(beginIt->second, endIt->second);
-                    const int64_t loopEnd = std::max(beginIt->second, endIt->second);
-                    if (loopEnd > loopStart)
+                    if (endIt->second >= beginIt->second)
                     {
-                        rec.loopStartSample = loopStart;
-                        rec.loopEndSample = loopEnd;
+                        LoopRegionRecord loop;
+                        loop.index = static_cast<int>(rec.loopRegions.size());
+                        loop.role = loopReference.role;
+                        loop.mode = loopReference.mode == 1 ? LoopMode::Forward
+                                                            : (loopReference.mode == 2 ? LoopMode::Alternating
+                                                                                       : LoopMode::Unknown);
+                        loop.rawMode = loopReference.mode;
+                        loop.startSample = beginIt->second;
+                        loop.endSample = endIt->second;
+                        loop.endInclusive = true;
+                        loop.startMarkerId = loopReference.beginMarkerId;
+                        loop.endMarkerId = loopReference.endMarkerId;
+                        loop.source = "aiff.INST/MARK";
+                        rec.loopRegions.push_back(std::move(loop));
                     }
                 }
             }
 
-            if (hasAppleApplicationChunk || rec.acidRootNote.has_value() || rec.loopStartSample.has_value())
-                rec.loopType = std::string("apple-loop");
+            if (hasAppleApplicationChunk || rec.rootMidiNote.has_value() || !rec.loopRegions.empty())
+                rec.metadataSource = "apple-loop";
+
+            return true;
         }
     }
 
@@ -2173,17 +2475,28 @@ namespace sw
                             const juce::File presetFile(candidate.absolutePath.string());
                             if (auto preset = AcpPresetReader::readPreset(presetFile))
                             {
-                                rec.acidRootNote = preset->rootMidiNote;
-                                rec.loopStartSample = preset->loopStartSample;
-                                rec.loopEndSample = preset->loopEndSample;
                                 rec.bpm = preset->bpm;
 
                                 const bool hasExplicitLoopRegion = preset->loopStartSample.has_value() &&
                                                                    preset->loopEndSample.has_value() &&
                                                                    *preset->loopEndSample > *preset->loopStartSample;
-                                rec.loopType = (preset->loopPlayback || hasExplicitLoopRegion)
-                                                   ? std::optional<std::string>{"audiocity-preset-loop"}
-                                                   : std::optional<std::string>{"audiocity-preset"};
+                                rec.metadataSource = (preset->loopPlayback || hasExplicitLoopRegion)
+                                                         ? std::optional<std::string>{"audiocity-preset-loop"}
+                                                         : std::optional<std::string>{"audiocity-preset"};
+                                rec.rootMidiNote = preset->rootMidiNote;
+                                rec.rootTuneCents = 0.0;
+                                rec.rootPitchSource = "audiocity.acp";
+                                if (hasExplicitLoopRegion)
+                                {
+                                    LoopRegionRecord loop;
+                                    loop.index = static_cast<int>(rec.loopRegions.size());
+                                    loop.mode = LoopMode::Forward;
+                                    loop.startSample = *preset->loopStartSample;
+                                    loop.endSample = *preset->loopEndSample;
+                                    loop.endInclusive = true;
+                                    loop.source = "audiocity.acp";
+                                    rec.loopRegions.push_back(std::move(loop));
+                                }
 
                                 if (preset->sampleRate > 0.0)
                                     rec.sampleRate = static_cast<int>(std::round(preset->sampleRate));
@@ -2251,7 +2564,7 @@ namespace sw
                                 rec.durationSec = rexInfo->durationSec;
                                 rec.bpm = rexInfo->bpm;
                                 rec.sliceCount = rexInfo->sliceCount;
-                                rec.loopType = "rex";
+                                rec.metadataSource = "rex";
 
                                 rec.codec = (candidate.extension == "rx2") ? "REX2" : "REX";
 
@@ -2289,9 +2602,15 @@ namespace sw
                                 }
 
                                 if (candidate.extension == "wav")
-                                    parseWavAcidAndLoopMetadata(candidate.absolutePath, rec);
+                                {
+                                    if (!parseWavSamplerMetadata(candidate.absolutePath, rec))
+                                        SW_LOG_WARN("Scanner: could not read WAVE metadata from " << candidate.absolutePath.string());
+                                }
                                 else if (candidate.extension == "aif" || candidate.extension == "aiff")
-                                    parseAiffAppleLoopMetadata(candidate.absolutePath, rec);
+                                {
+                                    if (!parseAiffAppleLoopMetadata(candidate.absolutePath, rec))
+                                        SW_LOG_WARN("Scanner: could not read AIFF metadata from " << candidate.absolutePath.string());
+                                }
 
                                 if (waveCacheBlobDb != nullptr && waveCacheBlobDb->isOpen())
                                     overviewPeaks = buildOverviewPeaks(*reader, 256);
@@ -2331,7 +2650,7 @@ namespace sw
 
                 markJobFinished();
             },
-            JobPriority::Low});
+            JobPriority::Normal});
     }
 
 } // namespace sw

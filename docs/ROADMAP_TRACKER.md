@@ -33,7 +33,7 @@ Build the most compelling desktop sample librarian possible while complementing 
 ## Current Validation State
 
 - `SampleWrangler` builds successfully with CMake Tools.
-- The shipped results workflow is intentionally limited to text search plus `All Files` and `Favorites`; ratings, tags, and saved searches were removed in 1.1.
+- The shipped results workflow is intentionally focused on text search and three browse modes (`All Files`, `Favorites`, `Duplicates`); ratings, tags, and saved searches were removed in 1.1.
 - Sortable browser results are now implemented: the results panel includes a sort selector with name, date, and size modes that apply across `All Files` and `Favorites` views.
 - Lightweight facet filters are now implemented in the results panel for format, channels, and loop presence, and they apply across `All Files` and `Favorites` views.
 - Duplicate browser support is now implemented via a `Duplicates` results view backed by `listDuplicateFiles`, with existing root, search, sort, and facet filters applied.
@@ -127,7 +127,13 @@ Highest-value additions:
 - Korg `.korgmultisample`. Landed with zip/XML manifest parsing, embedded sample probing, and preset-zone summary metadata.
 - TAL `.talsmpl`. Landed as an indexed preset format that resolves its first referenced sample and extracts basic key/audio metadata.
 - TX16Wx `.txprog`. Landed as an indexed preset format that resolves its first referenced sample and extracts basic key/audio metadata.
-- SF2. Landed as an index-only SoundFont probe that extracts the first preset name, representative sample metadata, key/velocity coverage, loop information, and a lightweight waveform overview from the embedded `smpl` PCM data.
+- SF2. Landed as an index-only SoundFont probe that indexes every bank/program, extracts preset summaries and representative sample metadata, and persists lightweight waveform overviews from embedded `smpl` PCM data.
+
+Recent metadata-fidelity work:
+
+- WAVE parsing preserves complete `smpl` loop records, treats cue points as markers rather than implicit loops, and traverses RF64 metadata.
+- AIFF sustain/release loops preserve their endpoint convention separately from WAVE loop semantics.
+- Root pitch, tuning, loop records, and metadata provenance are stored in format-neutral catalog fields.
 
 Later candidates:
 
@@ -140,16 +146,16 @@ Later candidates:
 
 ### Sprint D: Audio Intelligence and Discovery Features
 
-Status: Not started
+Status: In progress (analysis substrate, duplicate discovery, and DSP inference complete)
 
 Detailed execution plan: see `docs/SPRINT_D_TRACKER.md`.
 
 Recommended landing order:
 
-- Analysis substrate and persistence
-- Duplicate and near-duplicate discovery
-- BPM, key, transient, and loop inference
-- Similarity search
+- Analysis substrate and persistence (complete)
+- Duplicate and near-duplicate discovery (complete)
+- BPM, key, transient, and loop inference (complete)
+- Similarity search (next)
 - ML-assisted classification as a stretch goal
 
 - BPM detection
@@ -173,9 +179,8 @@ Status: Partially started through `.acp` preview support
 
 ### Library UX
 
-- Keep the primary browse flow simple: text search, source-tree scoping, and favorites.
-- Consider lightweight secondary filters for format, BPM, key, duration, channels, and loop availability only if they earn their keep.
-- Duplicate finder
+- Keep the primary browse flow simple: text search, source-tree scoping, favorites, and duplicates.
+- Continue refining secondary filters (currently format/channels/loop) and only add more (for example BPM/key/duration) if they demonstrably improve browse speed.
 - Recently added / recently previewed panes
 
 ### Preview UX
@@ -245,20 +250,19 @@ Status: Partially started through `.acp` preview support
 
 ## Suggested Next Session Order
 
-1. Keep Sprint C paused for now and continue sampler-core work by targeting the widened preserve-length path first; the new release benchmark shows widened direct playback is already cheap enough relative to preserve-length playback.
-2. Revisit the non-Rubber-Band preserve-length fallback after listening tests and profiling, especially around grain sizing, spacing, denormal safety, crossfade-weight generation, and any further fixed-phase opportunities.
-3. Use the expanded offline `VoiceManager` render tests plus the new `SampleWranglerVoiceManagerBenchmark` target as the safety net for any further wider-channel or generic-path optimization work.
-4. Resume Sprint C only after the sampler engine slice is stable enough to support more ambitious preview workflows.
-5. Expose richer preset-specific metadata in the UI beyond the new summary row once format breadth work resumes.
+1. Start Sprint D Slice 4: similarity search over the versioned analysis results, measure ranking quality on a small curated corpus, and decide whether to extend the persisted feature vector.
+2. Continue sampler-core performance work on widened preserve-length paths (`>32` source channels), with benchmark and render-test evidence.
+3. Resume Sprint C later-candidate format breadth (`.exs`, `.sxt`, `.adv`/`.adg`, `.xpm`) once Sprint D's discovery workflows are stable.
+4. Expand UI metadata surfacing where it improves browse speed (preset summaries, duplicate-cluster cues, and recently used panes).
 
 ## Sprint B Completion Notes
 
 - Catalog schema evolution now uses `PRAGMA user_version` migrations instead of only ad hoc `ALTER TABLE` checks.
 - The `files` table stores `content_hash` and indexes it.
 - Scanner ingestion computes a sampled content fingerprint from file size plus the first/last 64 KB.
-- `CatalogDb::listDuplicateFiles()` is available for future duplicate-browser UI work.
+- `CatalogDb::listDuplicateFiles()` now powers the shipped `Duplicates` results mode.
 - `file_user_data` now persists favorites only; schema migration 6 removes the older ratings, tags, and saved-search tables.
-- Results browsing is intentionally limited to text search plus `All Files` and `Favorites`, with per-root scoping coming from the source browser.
+- Results browsing now supports text search plus `All Files`, `Favorites`, and `Duplicates`, with per-root scoping, sortable results, and lightweight facet filters (format/channels/loop).
 - Source roots now rebuild Windows directory watchers and queue automatic rescans when the library changes on disk.
 - Results/runtime waveform reads now treat `WaveCacheBlobDb` as authoritative instead of falling back to legacy `.peak` files.
 
@@ -269,6 +273,17 @@ Status: Partially started through `.acp` preview support
 - Indexed preset files now persist a richer sampler summary into the catalog (`preset_name`, `zone_count`, `key_low/high`, `velocity_low/high`) and surface that summary in the results metadata row.
 - Indexed sampler preset resolution is more tolerant of real-world layouts via SFZ `default_path` support and broader relative `Samples/` path fallback handling.
 - Indexed sampler presets now persist blob-backed waveform peaks so the results list can still render a waveform thumbnail even before preset playback exists.
+- WAVE/AIFF metadata fidelity now preserves loop semantics and provenance, including RF64 metadata traversal and distinct AIFF sustain/release endpoint conventions.
+- SF2 discovery now indexes every non-terminal bank/program rather than only the first preset.
+
+## Sprint D Progress Notes
+
+- The versioned analysis substrate is shipped: schema migration 8 stores fingerprints, outcomes, optional future inference fields, and a versioned little-endian feature vector.
+- Background analysis is scheduled at low priority on the shared worker queue after startup backfill and root-scan completion, including watcher-triggered rescans. It persists the v1 duration/RMS/peak/zero-crossing features plus version-2 BPM/key/transient/loop estimates.
+- Exact duplicate browsing now keeps hash clusters together and shows each cluster size, with Reveal and Find Similar actions while retaining root, text, and facet filtering.
+- Near-duplicate candidates use migration 9's prefilter index, current analysis fingerprints, bounded format-neutral metadata blocking, and a visibly labeled feature-match heuristic. They are ranked candidates, not confirmed duplicates or probabilities.
+- Analysis version 2 adds worker-thread tempo, key, transient, and loop estimates without overwriting embedded BPM/key/loop metadata. Only current, fingerprint-matched results are hydrated into browsing records.
+- Inference is deliberately bounded: an 11 kHz mono signal capped at 180 seconds; tempo autocorrelation over 60-200 BPM; Goertzel/chroma-template key estimation over MIDI notes 36-83; and conservative start-at-zero loop suggestions from repeated frame-RMS patterns.
 
 ## Files Touched in Sprint A
 

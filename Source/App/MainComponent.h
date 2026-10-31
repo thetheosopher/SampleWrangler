@@ -9,6 +9,7 @@
 #include "Catalog/WaveCacheBlobDb.h"
 #include "Pipeline/JobQueue.h"
 #include "Pipeline/Scanner.h"
+#include "Pipeline/Analyzer.h"
 #include "Pipeline/RexManager.h"
 #include "Audio/AudioEngine.h"
 #include "Audio/MidiInputRouter.h"
@@ -200,6 +201,7 @@ namespace sw
                               return juce::jlimit(2, 8, workers);
                           }()};
         Scanner scanner{catalogDb, jobQueue};
+        Analyzer analyzer{catalogDb, jobQueue};
         AudioEngine audioEngine;
         MidiInputRouter midiRouter;
         std::unique_ptr<juce::FileChooser> rootChooser;
@@ -212,6 +214,7 @@ namespace sw
         bool previewLoading = false;
         uint64_t previewLoadingRequestId = 0;
         std::string currentSearchQuery;
+        std::optional<int64_t> nearDuplicateReferenceFileId;
         ResultsPanel::ViewMode currentResultsViewMode = ResultsPanel::ViewMode::Recent;
         ResultsPanel::SortMode currentResultsSortMode = ResultsPanel::SortMode::NameAsc;
         ResultsPanel::FacetFilters currentFacetFilters{};

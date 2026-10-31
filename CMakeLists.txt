@@ -462,6 +462,31 @@ target_link_libraries(SampleWranglerCatalogDbTests PRIVATE
 
 add_test(NAME SampleWrangler.CatalogDb COMMAND SampleWranglerCatalogDbTests)
 
+add_executable(SampleWranglerAnalyzerTests
+    Tests/AnalyzerTests.cpp
+    Source/Pipeline/Analyzer.cpp
+    Source/Pipeline/JobQueue.cpp
+    Source/Catalog/CatalogDb.cpp
+    Source/Catalog/CatalogSchema.cpp
+    Source/Util/Paths.cpp
+)
+
+target_include_directories(SampleWranglerAnalyzerTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    ${CMAKE_CURRENT_BINARY_DIR}/SampleWrangler_artefacts/JuceLibraryCode
+)
+
+target_link_libraries(SampleWranglerAnalyzerTests PRIVATE
+    sqlite3
+    juce::juce_core
+    juce::juce_data_structures
+    juce::juce_audio_basics
+    juce::juce_audio_formats
+    juce::juce_gui_basics
+)
+
+add_test(NAME SampleWrangler.Analyzer COMMAND SampleWranglerAnalyzerTests)
+
 add_executable(SampleWranglerScannerAppleLoopTests
     Tests/ScannerAppleLoopTests.cpp
     Source/Pipeline/Scanner.cpp
@@ -580,6 +605,10 @@ endif()
 
 if(MSVC)
     target_link_options(SampleWranglerCatalogDbTests PRIVATE
+        /NODEFAULTLIB:MSVCRT
+        /NODEFAULTLIB:MSVCRTD
+    )
+    target_link_options(SampleWranglerAnalyzerTests PRIVATE
         /NODEFAULTLIB:MSVCRT
         /NODEFAULTLIB:MSVCRTD
     )

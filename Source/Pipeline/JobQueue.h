@@ -14,8 +14,8 @@ namespace sw
     /// Priority levels for background jobs.
     enum class JobPriority
     {
-        Low,    // idle / bulk scanning
-        Normal, // analysis
+        Low,    // offline analysis
+        Normal, // scans and general background work
         High    // user-selected item (on-demand)
     };
 

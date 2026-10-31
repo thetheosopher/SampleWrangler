@@ -16,9 +16,9 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
 
 | Slice | Status | Why it comes first | Notes |
 | --- | --- | --- | --- |
-| Analysis substrate and persistence | Planned | Everything else depends on a durable background-analysis path. | Wire analysis jobs after scan completion and store derived features with versioning. |
-| Duplicate and near-duplicate discovery | Planned | Immediate user value; exact duplicates already have catalog support. | Introduce a dedicated duplicates workflow without complicating the default `All Files` / `Favorites` results model. |
-| BPM, key, transient, and loop inference | Planned | Extends metadata the UI already knows how to render. | Use offline analysis only for playable audio and never on the audio thread. |
+| Analysis substrate and persistence | Done | Everything else depends on a durable background-analysis path. | Migration 8, stale-result invalidation, and low-priority streaming feature extraction are in place. |
+| Duplicate and near-duplicate discovery | Done | Immediate user value; exact duplicates already have catalog support. | Cluster-aware exact duplicate browsing and bounded, explicitly heuristic near-duplicate candidates are in place. |
+| BPM, key, transient, and loop inference | Done | Extends metadata the UI already knows how to render. | Versioned worker-thread analysis keeps heuristic estimates separate from embedded metadata and exposes only current results. |
 | Similarity search | Planned | Needs persisted features and a query flow first. | Start with deterministic feature vectors and ranked search, not embeddings. |
 | ML-assisted classification | Stretch | Highest uncertainty and weakest current foundation. | Defer until feature quality and UX prove out. |
 
@@ -39,35 +39,48 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
 - Keep canonical user-facing metadata in `files` for existing search and rendering.
 - Only backfill `files.bpm` or `files.key` from analysis when those fields are currently empty.
 - Use `content_hash`, `modified_time`, and `analysis_version` to invalidate stale analysis rows cheaply after rescans.
+- Include a separate feature-vector version so changes to the persisted vector also trigger re-analysis.
+- Keep the analysis job below scan priority and decode in bounded blocks with cancellation checks between blocks.
+
+#### Slice 1 Completion Notes
+
+- Schema migration 8 adds `analysis_results`, keyed to `files`, with source fingerprints, analysis status/failure reason, nullable future inference fields, and an analyzed timestamp.
+- Feature-vector version 1 stores four little-endian float32 values in a documented order: duration seconds, RMS, peak, and zero-crossing rate.
+- Analysis is scheduled on the shared worker queue at startup for stale catalog rows and after scan completion, including root-watch rescans. It does not run in the scanner or audio callback.
+- BPM/key/transient/loop inference remains intentionally unset in this slice. Existing embedded BPM/key values are left untouched.
+- Focused tests cover persistence, status handling, version/mtime/hash invalidation, multi-block extraction, and preserving embedded BPM/key.
 
 ### 2. Duplicate and Near-Duplicate Discovery
 
-- Reuse the exact-duplicate foundation already present in `CatalogDb::listDuplicateFiles()`; Sprint D will need to add a dedicated duplicates workflow because the current results UI intentionally ships with only `All Files` and `Favorites`.
-- Improve the duplicates UX before attempting near-duplicate ranking:
-  - group duplicate rows by hash cluster
-  - show cluster counts
-  - keep root filtering and text filtering working
-  - add quick compare or reveal actions if the UI cost stays low
-- Add a near-duplicate prefilter instead of naive all-pairs comparison. Use blocking keys such as duration bucket, channel count, sample-rate bucket, and one-shot/loop classification to keep the search space manageable.
+- Reuse the exact-duplicate foundation already present in `CatalogDb::listDuplicateFiles()`.
+- Group exact duplicate rows by hash and show each cluster's size while preserving root, text, sort, and facet filtering.
+- Provide `Find Similar` and `Reveal` actions for selected files.
+- Require current, complete analysis with matching file modification time and content fingerprint before returning near-duplicate candidates.
+- Use a bounded SQL prefilter: same channel count and loop-presence classification, sample rate within 10%, and duration within `max(0.25 seconds, 2%)`. Rank at most 500 coarse candidates using the v1 duration/RMS/peak/zero-crossing feature vector and return at most 200.
+- Label the result as a feature-match heuristic, not a probability or confirmation of duplication. This is an initial discovery workflow, not semantic similarity search.
+
+#### Slice 2 Completion Notes
+
+- Exact duplicate rows include their global hash-cluster size and remain adjacent when sorted.
+- The candidate query excludes matching non-empty content hashes, stale or unsupported analysis, index-only entries, and candidates that fail the blocking filters. Root, text, and facet filters remain available in the browser.
+- Candidate scores use normalized differences across the four v1 features. They are for ranking only and do not establish that two files contain the same audio.
+- Catalog tests cover cluster counts, candidate ranking and limits, exact-hash exclusion, blocking rules, stale fingerprints, and root scoping.
 
 ### 3. BPM, Key, Transient, and Loop Analysis
 
 - Limit analysis to playable audio formats and decode them on worker threads through JUCE readers.
-- Normalize decoded audio to a mono analysis stream at a fixed sample rate to keep algorithms stable and testable.
-- BPM detection approach:
-  - build an onset envelope
-  - run autocorrelation or tempogram scoring
-  - normalize obvious double/half-tempo cases
-  - emit a confidence score
-- Key detection approach:
-  - accumulate chroma/HPCP-style energy over tonal frames
-  - compare against major/minor templates
-  - emit both key label and confidence
-- Transient and loop analysis approach:
-  - count onset candidates
-  - derive onset density for one-shot vs loop heuristics
-  - score candidate loop boundaries using envelope continuity and short-window similarity
-- Prefer suggested loop metadata in the analysis table instead of overwriting embedded loop points.
+- Resample mono analysis input to 11 kHz and cap retained signal data at the first 180 seconds. Catalog duration and basic feature extraction still cover the full file.
+- Estimate tempo from a high-pass RMS onset envelope with autocorrelation over 60-200 BPM; persist a heuristic confidence score.
+- Estimate key by accumulating Goertzel energy for MIDI notes 36-83 into a chroma profile and comparing rotated profiles against major/minor templates. Low-confidence estimates are omitted.
+- Count thresholded onset candidates with minimum spacing and persist onset density.
+- Suggest a start-at-zero loop only when smoothed frame-RMS autocorrelation finds at least three repetitions of a 1-10 second period with correlation >= 0.92. These are suggestions only; they do not change embedded loop records or preview behavior.
+- Analysis version 2 invalidates prior feature-only results. Analysis values remain in `analysis_results`; query-time hydration exposes them only when status, analysis/vector versions, mtime, and content fingerprint are current. Embedded BPM/key remain authoritative and are never overwritten.
+
+#### Slice 3 Completion Notes
+
+- Added deterministic synthetic WAV tests for a 120 BPM click track over a C-major chord, onset counts, a repeating two-second motif, stale-fingerprint suppression, re-analysis, and preserving embedded BPM/key.
+- Current UI results show inferred BPM/key with confidence labels and display transient counts and suggested loop endpoints separately from embedded metadata.
+- All four inference outputs are heuristic. The loop detector only proposes a start-at-zero period, key estimation is limited to MIDI notes 36-83, and long files use the first 180 seconds for these signal-based estimates.
 
 ### 4. Similarity Search
 
@@ -113,7 +126,7 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
 1. Wire the analysis lifecycle and persistence layer first.
 2. Upgrade the exact-duplicate browser and add cluster-aware UX.
 3. Land BPM/key/transient/loop inference with synthetic test fixtures.
-4. Add similarity search over persisted features.
+4. Add similarity search over persisted features and evaluate whether the v1 vector is sufficient for useful ranking.
 5. Reassess whether ML-assisted classification still belongs in Sprint D or should become Sprint E/F material.
 
 ## Acceptance Checks
@@ -121,7 +134,9 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
 - Full source scans remain responsive and do not block on heavy analysis work.
 - Root-watch rescans invalidate and refresh stale analysis only when needed.
 - Exact duplicates are grouped and browseable through a dedicated Sprint D duplicates workflow without disturbing the default `All Files` / `Favorites` flow.
+- Near-duplicate candidates are bounded, fingerprint-current, root-scopable, and visibly distinguished from confirmed exact duplicates.
 - Missing BPM/key values can be inferred for playable files without overwriting embedded authoritative metadata.
+- Transient counts and loop suggestions are persisted with confidence, remain distinct from embedded metadata, and are hidden when their source fingerprint is stale.
 - Similarity search returns stable, explainable top results for a small curated test corpus.
 - The app still builds cleanly, and focused tests cover migrations, invalidation, duplicates, BPM/key inference, and similarity ranking.
 

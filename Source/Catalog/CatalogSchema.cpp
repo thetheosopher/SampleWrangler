@@ -8,7 +8,7 @@ namespace sw
 
     namespace
     {
-        constexpr int kCurrentSchemaVersion = 6;
+        constexpr int kCurrentSchemaVersion = 9;
 
         bool execSql(sqlite3 *db, const char *sql)
         {
@@ -334,6 +334,159 @@ namespace sw
         CREATE INDEX IF NOT EXISTS idx_file_user_data_favorite ON file_user_data(is_favorite);
     )SQL");
         }
+
+        bool applyMigration7(sqlite3 *db)
+        {
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN root_midi_note INTEGER;"))
+                return false;
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN root_tune_cents REAL;"))
+                return false;
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN root_pitch_source TEXT;"))
+                return false;
+            if (!addColumnIfMissing(db, "ALTER TABLE files ADD COLUMN metadata_source TEXT;"))
+                return false;
+
+            if (!execSql(db, R"SQL(
+        UPDATE files
+        SET root_midi_note = acid_root_note,
+            root_pitch_source = CASE loop_type
+                WHEN 'acidized' THEN 'wave.acid'
+                WHEN 'apple-loop' THEN 'aiff.INST'
+                WHEN 'audiocity-preset' THEN 'audiocity.acp'
+                WHEN 'audiocity-preset-loop' THEN 'audiocity.acp'
+                WHEN 'sf2' THEN 'sf2.shdr'
+                ELSE 'legacy'
+            END
+        WHERE root_midi_note IS NULL AND acid_root_note IS NOT NULL;
+
+        UPDATE files
+        SET metadata_source = loop_type
+        WHERE metadata_source IS NULL AND loop_type IS NOT NULL;
+    )SQL"))
+                return false;
+
+            if (!execSql(db, R"SQL(
+        CREATE TABLE IF NOT EXISTS file_loop_regions (
+            file_id             INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            loop_index          INTEGER NOT NULL,
+            role                INTEGER NOT NULL DEFAULT 0,
+            mode                INTEGER NOT NULL DEFAULT 0,
+            raw_mode            INTEGER,
+            start_sample        INTEGER NOT NULL,
+            end_sample          INTEGER NOT NULL,
+            end_inclusive       INTEGER NOT NULL DEFAULT 0,
+            fractional_position INTEGER,
+            play_count          INTEGER,
+            source_id           INTEGER,
+            start_marker_id     INTEGER,
+            end_marker_id       INTEGER,
+            preset_bank         INTEGER,
+            preset_program      INTEGER,
+            source              TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (file_id, loop_index)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_file_loop_regions_file
+            ON file_loop_regions(file_id);
+
+        INSERT OR IGNORE INTO file_loop_regions (
+            file_id, loop_index, role, mode, start_sample, end_sample,
+            end_inclusive, source
+        )
+        SELECT id, 0, 0, 1, loop_start_sample, loop_end_sample, 1,
+               COALESCE(loop_type, 'legacy')
+        FROM files
+        WHERE loop_start_sample IS NOT NULL
+          AND loop_end_sample IS NOT NULL
+          AND loop_end_sample >= loop_start_sample;
+
+        CREATE TABLE IF NOT EXISTS file_preset_programs (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id        INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            ordinal        INTEGER NOT NULL,
+            bank           INTEGER NOT NULL,
+            program        INTEGER NOT NULL,
+            preset_name    TEXT NOT NULL,
+            zone_count     INTEGER,
+            key_low        INTEGER,
+            key_high       INTEGER,
+            velocity_low   INTEGER,
+            velocity_high  INTEGER,
+            root_midi_note INTEGER,
+            root_tune_cents REAL,
+            UNIQUE (file_id, ordinal)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_file_preset_programs_file
+            ON file_preset_programs(file_id);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS file_preset_programs_fts
+            USING fts5(preset_name, content='file_preset_programs', content_rowid='id');
+
+        CREATE TRIGGER IF NOT EXISTS file_preset_programs_ai
+        AFTER INSERT ON file_preset_programs BEGIN
+            INSERT INTO file_preset_programs_fts(rowid, preset_name)
+                VALUES (new.id, new.preset_name);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS file_preset_programs_ad
+        AFTER DELETE ON file_preset_programs BEGIN
+            INSERT INTO file_preset_programs_fts(file_preset_programs_fts, rowid, preset_name)
+                VALUES ('delete', old.id, old.preset_name);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS file_preset_programs_au
+        AFTER UPDATE ON file_preset_programs BEGIN
+            INSERT INTO file_preset_programs_fts(file_preset_programs_fts, rowid, preset_name)
+                VALUES ('delete', old.id, old.preset_name);
+            INSERT INTO file_preset_programs_fts(rowid, preset_name)
+                VALUES (new.id, new.preset_name);
+        END;
+    )SQL"))
+                return false;
+
+            return true;
+        }
+
+        bool applyMigration8(sqlite3 *db)
+        {
+            if (!execSql(db, R"SQL(
+        CREATE TABLE IF NOT EXISTS analysis_results (
+            file_id                     INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+            analysis_version            INTEGER NOT NULL,
+            analyzed_modified_time      INTEGER NOT NULL,
+            analyzed_content_hash       TEXT,
+            status                      INTEGER NOT NULL,
+            detected_bpm                REAL,
+            bpm_confidence              REAL,
+            detected_key                TEXT,
+            key_confidence              REAL,
+            transient_count             INTEGER,
+            onset_density               REAL,
+            suggested_loop_start_sample INTEGER,
+            suggested_loop_end_sample   INTEGER,
+            loop_confidence             REAL,
+            feature_vector_version      INTEGER NOT NULL,
+            feature_vector              BLOB,
+            failure_reason              TEXT,
+            analyzed_at                 INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_analysis_results_version
+            ON analysis_results(analysis_version, analyzed_modified_time);
+    )SQL"))
+                return false;
+
+            return true;
+        }
+
+        bool applyMigration9(sqlite3 *db)
+        {
+            return execSql(db, R"SQL(
+        CREATE INDEX IF NOT EXISTS idx_files_near_duplicate_prefilter
+            ON files(index_only, channels, sample_rate, duration_sec);
+    )SQL");
+        }
     }
 
     bool CatalogSchema::exec(sqlite3 *db, const char *sql)
@@ -366,6 +519,15 @@ namespace sw
                 break;
             case 6:
                 ok = applyMigration6(db);
+                break;
+            case 7:
+                ok = applyMigration7(db);
+                break;
+            case 8:
+                ok = applyMigration8(db);
+                break;
+            case 9:
+                ok = applyMigration9(db);
                 break;
             default:
                 ok = false;

@@ -7,8 +7,7 @@
 namespace sw
 {
 
-    /// Analyses audio files to extract metadata (duration, sample rate, bpm, key, etc.).
-    /// Runs as jobs on the Pipeline JobQueue.
+    /// Computes and persists versioned offline analysis features on the Pipeline JobQueue.
     class Analyzer
     {
     public:
@@ -18,7 +17,7 @@ namespace sw
         /// Enqueue analysis for a single file by its DB id.
         void analyzeFile(int64_t fileId);
 
-        /// Enqueue analysis for all un-analyzed files in a source.
+        /// Enqueue analysis for files whose saved analysis is missing or stale.
         void analyzeRoot(int64_t rootId);
 
     private:

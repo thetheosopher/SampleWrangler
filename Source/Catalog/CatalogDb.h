@@ -44,14 +44,20 @@ namespace sw
         bool upsertFile(const FileRecord &rec);
         bool removeFilesByRoot(int64_t rootId);
         std::vector<int64_t> listFileIdsByRoot(int64_t rootId);
-        /// Ids of playable (non index-only) files in a root that have not yet been
-        /// analyzed (no duration). Lets re-analysis skip a full-catalog fetch.
-        std::vector<int64_t> listFileIdsNeedingAnalysisByRoot(int64_t rootId);
+        /// Ids whose persisted analysis is missing or stale for the requested version.
+        std::vector<int64_t> listFileIdsNeedingAnalysisByRoot(int64_t rootId,
+                                                              int analysisVersion,
+                                                              int featureVectorVersion);
+        bool upsertAnalysisResult(const AnalysisResultRecord &result);
+        std::optional<AnalysisResultRecord> analysisResultByFileId(int64_t fileId);
         std::vector<FileRecord> searchFiles(const std::string &query, int limit = 200);
         std::vector<FileRecord> listRecentFiles(int limit = 200);
         std::vector<FileRecord> searchFilesByRoot(int64_t rootId, const std::string &query, int limit = 200);
         std::vector<FileRecord> listRecentFilesByRoot(int64_t rootId, int limit = 200);
         std::vector<FileRecord> listDuplicateFiles(int limit = 200);
+        std::vector<FileRecord> findNearDuplicateCandidates(int64_t referenceFileId,
+                                                            std::optional<int64_t> rootId = std::nullopt,
+                                                            int limit = 50);
         std::pair<int64_t, int64_t> fileStatsAll();
         std::pair<int64_t, int64_t> fileStatsByRoot(int64_t rootId);
         std::pair<int64_t, int64_t> fileStatsSearch(const std::string &query);

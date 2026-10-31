@@ -20,19 +20,20 @@ namespace sw
     {
         bool hasStoredPreviewLoopMetadata(const FileRecord &file)
         {
-            if (!file.loopType.has_value())
+            if (file.previewLoop() != nullptr)
+                return true;
+
+            if (!file.loopRegions.empty() || !file.metadataSource.has_value())
                 return false;
 
-            return *file.loopType == "acidized" || *file.loopType == "apple-loop" || *file.loopType == "audiocity-preset-loop";
+            return *file.metadataSource == "acidized" ||
+                   *file.metadataSource == "apple-loop" ||
+                   *file.metadataSource == "audiocity-preset-loop";
         }
 
         bool hasStoredPreviewRootMidiNote(const FileRecord &file)
         {
-            if (!file.loopType.has_value() || !file.acidRootNote.has_value())
-                return false;
-
-            return *file.loopType == "acidized" || *file.loopType == "apple-loop" ||
-                   *file.loopType == "audiocity-preset" || *file.loopType == "audiocity-preset-loop";
+            return file.rootMidiNote.has_value() && *file.rootMidiNote >= 0 && *file.rootMidiNote <= 127;
         }
 
         constexpr int kToolbarHeight = 48;
@@ -81,13 +82,22 @@ namespace sw
                 return true;
 
             const juce::String needle(query);
-            return juce::String(file.filename).containsIgnoreCase(needle) ||
-                   juce::String(file.relativePath).containsIgnoreCase(needle);
+            if (juce::String(file.filename).containsIgnoreCase(needle) ||
+                juce::String(file.relativePath).containsIgnoreCase(needle))
+                return true;
+
+            return std::any_of(file.presetPrograms.begin(), file.presetPrograms.end(), [&needle](const PresetProgramRecord &program)
+                               { return juce::String(program.name).containsIgnoreCase(needle); });
         }
 
         bool hasLoopMetadata(const FileRecord &file)
         {
-            return file.loopType.has_value() || file.loopStartSample.has_value() || file.loopEndSample.has_value();
+            if (!file.loopRegions.empty())
+                return true;
+            if (!file.metadataSource.has_value())
+                return false;
+            return *file.metadataSource == "acidized" || *file.metadataSource == "apple-loop" ||
+                   *file.metadataSource == "audiocity-preset-loop" || *file.metadataSource == "rex";
         }
 
         bool matchesFormatFilter(const FileRecord &file, ResultsPanel::FormatFilter filter)
@@ -116,6 +126,8 @@ namespace sw
                 return ext.equalsIgnoreCase("rex") || ext.equalsIgnoreCase("rx2");
             case ResultsPanel::FormatFilter::Sfz:
                 return ext.equalsIgnoreCase("sfz");
+            case ResultsPanel::FormatFilter::Sf2:
+                return ext.equalsIgnoreCase("sf2");
             }
 
             return true;
@@ -1405,6 +1417,7 @@ namespace sw
 
         resultsPanel.onViewModeChanged = [this](ResultsPanel::ViewMode mode)
         {
+            nearDuplicateReferenceFileId.reset();
             currentResultsViewMode = mode;
             persistResultsViewMode(mode);
             refreshResults(currentSearchQuery);
@@ -1426,6 +1439,33 @@ namespace sw
         resultsPanel.onSelectedFileFavoriteChanged = [this](bool isFavorite)
         {
             persistSelectedFileUserData(isFavorite);
+        };
+
+        resultsPanel.onFindSimilarRequested = [this](const FileRecord &file)
+        {
+            nearDuplicateReferenceFileId = file.id;
+            refreshResults(currentSearchQuery);
+            if (resultsPanel.getResultCount() == 0)
+                showToolbarToast("No near-duplicate candidates match the current filters.");
+        };
+
+        resultsPanel.onRevealFileRequested = [this](const FileRecord &file)
+        {
+            const auto rootPath = rootPathForId(file.rootId);
+            if (rootPath.empty())
+            {
+                showToolbarToast("The file's source folder is unavailable.");
+                return;
+            }
+
+            const juce::File sourceFile(resolveAbsolutePath(rootPath, file.relativePath));
+            if (!sourceFile.existsAsFile())
+            {
+                showToolbarToast("The source file is unavailable on disk.");
+                return;
+            }
+
+            sourceFile.revealToUser();
         };
 
         resultsPanel.onFileSelected = [this](const FileRecord &file)
@@ -1595,6 +1635,8 @@ namespace sw
         refreshMidiInputDeviceList(true);
 
         refreshRoots();
+        for (const auto &root : catalogDb.allRoots())
+            analyzer.analyzeRoot(root.id);
         restoreBrowserSettings();
         refreshResults();
         resultsPanel.setSelectedFileMetadata(std::nullopt);
@@ -1608,6 +1650,8 @@ namespace sw
     MainComponent::~MainComponent()
     {
         rootWatchEntries.clear();
+        jobQueue.cancelAll();
+        jobQueue.shutdown();
 
         addRootToolbarButton.setLookAndFeel(nullptr);
         openSourceInExplorerToolbarButton.setLookAndFeel(nullptr);
@@ -1908,7 +1952,20 @@ namespace sw
         std::pair<int64_t, int64_t> stats{0, 0};
         const auto statsQuery = query.empty() ? std::string{} : (query + "*");
 
-        if (currentResultsViewMode == ResultsPanel::ViewMode::Recent)
+        if (nearDuplicateReferenceFileId.has_value())
+        {
+            results = catalogDb.findNearDuplicateCandidates(*nearDuplicateReferenceFileId,
+                                                            selectedRootFilterId,
+                                                            200);
+
+            if (!query.empty())
+            {
+                results.erase(std::remove_if(results.begin(), results.end(), [query](const FileRecord &file)
+                                             { return !matchesSearchText(file, query); }),
+                              results.end());
+            }
+        }
+        else if (currentResultsViewMode == ResultsPanel::ViewMode::Recent)
         {
             if (!selectedRootFilterId.has_value())
             {
@@ -1953,7 +2010,7 @@ namespace sw
                               results.end());
             }
         }
-        else
+        else if (currentResultsViewMode == ResultsPanel::ViewMode::Duplicates)
         {
             results = catalogDb.listDuplicateFiles(-1);
 
@@ -1971,6 +2028,10 @@ namespace sw
                                              { return !matchesSearchText(file, query); }),
                               results.end());
             }
+        }
+        else
+        {
+            jassertfalse;
         }
 
         results.erase(std::remove_if(results.begin(), results.end(), [this](const FileRecord &file)
@@ -2370,6 +2431,8 @@ namespace sw
                 currentFacetFilters.format = ResultsPanel::FormatFilter::Rex;
             else if (*savedFormat == "sfz")
                 currentFacetFilters.format = ResultsPanel::FormatFilter::Sfz;
+            else if (*savedFormat == "sf2")
+                currentFacetFilters.format = ResultsPanel::FormatFilter::Sf2;
             else
                 currentFacetFilters.format = ResultsPanel::FormatFilter::Any;
         }
@@ -2474,6 +2537,9 @@ namespace sw
             break;
         case ResultsPanel::FormatFilter::Sfz:
             catalogDb.setAppSetting("results.filter.format", "sfz");
+            break;
+        case ResultsPanel::FormatFilter::Sf2:
+            catalogDb.setAppSetting("results.filter.format", "sf2");
             break;
         case ResultsPanel::FormatFilter::Any:
         default:
@@ -2767,22 +2833,24 @@ namespace sw
         const juce::String previewType = file.extension.empty() ? juce::String("file") : juce::String(file.extension).toUpperCase() + " file";
 
         const bool hasLoopMetadata = hasStoredPreviewLoopMetadata(file);
-        const bool hasValidEmbeddedLoopRegion = hasLoopMetadata && file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
-                                                *file.loopEndSample > *file.loopStartSample;
+        const auto *previewLoop = file.previewLoop();
+        const auto previewLoopEnd = previewLoop != nullptr ? previewLoop->previewEndSampleInclusive() : std::nullopt;
+        const bool hasValidEmbeddedLoopRegion = previewLoop != nullptr && previewLoopEnd.has_value() &&
+                                                *previewLoopEnd > previewLoop->startSample;
         const bool hasSampleLength = file.totalSamples.has_value() && *file.totalSamples > 1;
 
-        audioEngine.setPreviewRootMidiNote(hasStoredPreviewRootMidiNote(file) ? *file.acidRootNote : 60);
+        audioEngine.setPreviewRootMidiNote(hasStoredPreviewRootMidiNote(file) ? *file.rootMidiNote : 60);
 
         if (hasLoopMetadata && hasValidEmbeddedLoopRegion)
         {
-            audioEngine.setPreviewLoopRegionSamples(*file.loopStartSample, *file.loopEndSample);
+            audioEngine.setPreviewLoopRegionSamples(previewLoop->startSample, *previewLoopEnd);
 
             if (!previewPanel.isLoopEnabled() && !previewPanel.isAutoPlayEnabled())
             {
                 previewPanel.setLoopEnabled(true);
             }
         }
-        else if (hasLoopMetadata && hasSampleLength)
+        else if (hasLoopMetadata && file.loopRegions.empty() && hasSampleLength)
         {
             audioEngine.setPreviewLoopRegionSamples(0, *file.totalSamples - 1);
 
@@ -3096,14 +3164,18 @@ namespace sw
         }
 
         const auto &file = *currentSelectedFile;
-        if (hasStoredPreviewLoopMetadata(file) &&
+        const auto *previewLoop = file.previewLoop();
+        const auto previewLoopEnd = previewLoop != nullptr ? previewLoop->previewEndSampleInclusive() : std::nullopt;
+        if (previewLoop != nullptr && previewLoopEnd.has_value() &&
             file.totalSamples.has_value() && *file.totalSamples > 1 &&
-            file.loopStartSample.has_value() && file.loopEndSample.has_value() &&
-            *file.loopEndSample > *file.loopStartSample)
+            *previewLoopEnd > previewLoop->startSample)
         {
             const double length = static_cast<double>(*file.totalSamples);
-            const float loopStartNorm = static_cast<float>(juce::jlimit(0.0, 1.0, static_cast<double>(*file.loopStartSample) / length));
-            const float loopEndNorm = static_cast<float>(juce::jlimit(0.0, 1.0, static_cast<double>(*file.loopEndSample) / length));
+            const double loopEndBoundary = previewLoop->endInclusive
+                                               ? static_cast<double>(previewLoop->endSample) + 1.0
+                                               : static_cast<double>(previewLoop->endSample);
+            const float loopStartNorm = static_cast<float>(juce::jlimit(0.0, 1.0, static_cast<double>(previewLoop->startSample) / length));
+            const float loopEndNorm = static_cast<float>(juce::jlimit(0.0, 1.0, loopEndBoundary / length));
 
             if (loopEndNorm > loopStartNorm)
             {
@@ -3112,7 +3184,7 @@ namespace sw
             }
         }
 
-        if (hasStoredPreviewLoopMetadata(file) &&
+        if (hasStoredPreviewLoopMetadata(file) && file.loopRegions.empty() &&
             file.totalSamples.has_value() && *file.totalSamples > 1)
         {
             waveformPanel.setLoopRegionNormalized(0.0f, 1.0f);
@@ -3358,9 +3430,9 @@ namespace sw
                     if ((scannedFilesCount % 25) == 0)
                         refreshResults(); });
             },
-            [this, onCompleted, rootDisplayName]()
+            [this, onCompleted, rootDisplayName, rootId]()
             {
-                juce::MessageManager::callAsync([this, onCompleted, rootDisplayName]
+                juce::MessageManager::callAsync([this, onCompleted, rootDisplayName, rootId]
                                                 {
                     scanInProgress = false;
                     const auto now = std::chrono::steady_clock::now();
@@ -3375,6 +3447,7 @@ namespace sw
                     refreshResults();
                     resultsPanel.selectFirstRowIfNoneSelected();
 
+                    analyzer.analyzeRoot(rootId);
                     if (onCompleted)
                         onCompleted(); });
             });

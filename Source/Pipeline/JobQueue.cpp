@@ -38,7 +38,12 @@ namespace sw
 
     void JobQueue::shutdown()
     {
-        stopping.store(true);
+        {
+            // Publish under the mutex so a worker between its predicate check and
+            // blocking cannot miss the wakeup (which would hang join()).
+            std::lock_guard lock(mutex);
+            stopping.store(true);
+        }
         cancelGeneration.fetch_add(1, std::memory_order_relaxed);
         cv.notify_all();
 

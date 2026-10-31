@@ -211,6 +211,17 @@ namespace sw
         updatePitchValueFieldText();
     }
 
+    void PreviewPanel::nudgePitchSemitones(double deltaSemitones)
+    {
+        // Notifies onPitchChanged so the engine and persisted setting stay in sync.
+        pitchSlider.setValue(pitchSlider.getValue() + deltaSemitones, juce::sendNotificationSync);
+    }
+
+    void PreviewPanel::resetPitch()
+    {
+        pitchSlider.setValue(0.0, juce::sendNotificationSync);
+    }
+
     void PreviewPanel::setOutputDeviceControlsEnabled(bool enabled)
     {
         outputDeviceTypeCombo.setEnabled(enabled);

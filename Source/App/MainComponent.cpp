@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Catalog/SearchText.h"
 #include "Pipeline/AcpPresetReader.h"
 #include "Pipeline/WaveformPeak.h"
 #include "Util/Logging.h"
@@ -76,18 +77,18 @@ namespace sw
             return juce::String(value / (1024.0 * 1024.0 * 1024.0), 1) + " GB";
         }
 
-        bool matchesSearchText(const FileRecord &file, const std::string &query)
+        // Mirrors the catalog FTS query: every word must match within the file's
+        // name/path or within a single preset program name (not pooled across them).
+        bool matchesSearchText(const FileRecord &file, const std::vector<std::string> &queryTokens)
         {
-            if (query.empty())
+            if (queryTokens.empty())
                 return true;
 
-            const juce::String needle(query);
-            if (juce::String(file.filename).containsIgnoreCase(needle) ||
-                juce::String(file.relativePath).containsIgnoreCase(needle))
+            if (searchTokensMatchFields(queryTokens, {file.filename, file.relativePath}))
                 return true;
 
-            return std::any_of(file.presetPrograms.begin(), file.presetPrograms.end(), [&needle](const PresetProgramRecord &program)
-                               { return juce::String(program.name).containsIgnoreCase(needle); });
+            return std::any_of(file.presetPrograms.begin(), file.presetPrograms.end(), [&queryTokens](const PresetProgramRecord &program)
+                               { return searchTokensMatchFields(queryTokens, {program.name}); });
         }
 
         bool hasLoopMetadata(const FileRecord &file)
@@ -170,11 +171,50 @@ namespace sw
             return true;
         }
 
+        bool matchesBpmFilter(const FileRecord &file, ResultsPanel::BpmFilter filter)
+        {
+            if (filter == ResultsPanel::BpmFilter::Any)
+                return true;
+
+            const auto bpm = file.effectiveBpm();
+            if (!bpm.has_value() || *bpm <= 0.0)
+                return false;
+
+            switch (filter)
+            {
+            case ResultsPanel::BpmFilter::Below90:
+                return *bpm < 90.0;
+            case ResultsPanel::BpmFilter::From90To110:
+                return *bpm >= 90.0 && *bpm < 110.0;
+            case ResultsPanel::BpmFilter::From110To130:
+                return *bpm >= 110.0 && *bpm < 130.0;
+            case ResultsPanel::BpmFilter::From130To150:
+                return *bpm >= 130.0 && *bpm < 150.0;
+            case ResultsPanel::BpmFilter::From150Up:
+                return *bpm >= 150.0;
+            case ResultsPanel::BpmFilter::HasTempo:
+            case ResultsPanel::BpmFilter::Any:
+            default:
+                return true;
+            }
+        }
+
+        bool matchesKeyFilter(const FileRecord &file, const std::optional<int> &pitchClass)
+        {
+            if (!pitchClass.has_value())
+                return true;
+
+            const auto &keyText = file.effectiveKey();
+            return keyText.has_value() && keyPitchClass(*keyText) == pitchClass;
+        }
+
         bool matchesFacetFilters(const FileRecord &file, const ResultsPanel::FacetFilters &filters)
         {
             return matchesFormatFilter(file, filters.format) &&
                    matchesChannelsFilter(file, filters.channels) &&
-                   matchesLoopFilter(file, filters.loop);
+                   matchesLoopFilter(file, filters.loop) &&
+                   matchesBpmFilter(file, filters.bpm) &&
+                   matchesKeyFilter(file, filters.keyPitchClass);
         }
 
         std::pair<int64_t, int64_t> buildStatsForResults(const std::vector<FileRecord> &results)
@@ -1298,6 +1338,21 @@ namespace sw
             handleRenameSourceClicked();
         };
 
+        browserPanel.onRescanSelectedRootRequested = [this]()
+        {
+            handleRescanSelectedClicked();
+        };
+
+        browserPanel.onRevealSelectedRootRequested = [this]()
+        {
+            handleOpenSourceInExplorerClicked();
+        };
+
+        browserPanel.onRemapSelectedRootRequested = [this]()
+        {
+            handleRemapSourceClicked();
+        };
+
         addRootToolbarButton.setImages(createFolderIcon(juce::Colours::white).release(),
                                        createFolderIcon(juce::Colours::lightgrey).release(),
                                        createFolderIcon(juce::Colour(0xff9ec4e6)).release());
@@ -1418,6 +1473,7 @@ namespace sw
         resultsPanel.onViewModeChanged = [this](ResultsPanel::ViewMode mode)
         {
             nearDuplicateReferenceFileId.reset();
+            nearDuplicateReferenceName.clear();
             currentResultsViewMode = mode;
             persistResultsViewMode(mode);
             refreshResults(currentSearchQuery);
@@ -1441,12 +1497,49 @@ namespace sw
             persistSelectedFileUserData(isFavorite);
         };
 
-        resultsPanel.onFindSimilarRequested = [this](const FileRecord &file)
+        resultsPanel.onNearDuplicatesRequested = [this](const FileRecord &file)
         {
             nearDuplicateReferenceFileId = file.id;
-            refreshResults(currentSearchQuery);
-            if (resultsPanel.getResultCount() == 0)
-                showToolbarToast("No near-duplicate candidates match the current filters.");
+            nearDuplicateReferenceName = juce::String(file.filename);
+            refreshResults();
+        };
+
+        resultsPanel.onExitNearDuplicatesRequested = [this]
+        {
+            exitNearDuplicateMode();
+        };
+
+        resultsPanel.onEmptyStateActionRequested = [this](ResultsPanel::EmptyStateAction action)
+        {
+            switch (action)
+            {
+            case ResultsPanel::EmptyStateAction::AddSource:
+                handleAddRootClicked();
+                break;
+            case ResultsPanel::EmptyStateAction::ClearSearch:
+                resultsPanel.setSearchQuery({});
+                refreshResults({});
+                break;
+            case ResultsPanel::EmptyStateAction::ClearFilters:
+                currentFacetFilters = {};
+                resultsPanel.setFacetFilters(currentFacetFilters);
+                persistResultsFacetFilters(currentFacetFilters);
+                refreshResults();
+                break;
+            case ResultsPanel::EmptyStateAction::ShowAllFiles:
+                nearDuplicateReferenceFileId.reset();
+                currentResultsViewMode = ResultsPanel::ViewMode::Recent;
+                resultsPanel.setViewMode(currentResultsViewMode);
+                persistResultsViewMode(currentResultsViewMode);
+                refreshResults();
+                break;
+            case ResultsPanel::EmptyStateAction::ExitNearDuplicates:
+                exitNearDuplicateMode();
+                break;
+            case ResultsPanel::EmptyStateAction::None:
+            default:
+                break;
+            }
         };
 
         resultsPanel.onRevealFileRequested = [this](const FileRecord &file)
@@ -1670,6 +1763,83 @@ namespace sw
 
     bool MainComponent::keyPressed(const juce::KeyPress &key)
     {
+        // Keys reach here only when the focused child did not consume them
+        // (e.g. text typed into the search box never triggers these).
+        const auto mods = key.getModifiers();
+        const auto textChar = key.getTextCharacter();
+
+        if (key == juce::KeyPress('f', juce::ModifierKeys::commandModifier, 0))
+        {
+            resultsPanel.focusSearchBox();
+            return true;
+        }
+
+        if (key == juce::KeyPress('r', juce::ModifierKeys::commandModifier, 0))
+        {
+            if (const auto *file = resultsPanel.getResultAt(resultsPanel.getSelectedRow());
+                file != nullptr && resultsPanel.onRevealFileRequested)
+                resultsPanel.onRevealFileRequested(*file);
+            return true;
+        }
+
+        if (key == juce::KeyPress::escapeKey)
+        {
+            if (nearDuplicateReferenceFileId.has_value())
+            {
+                exitNearDuplicateMode();
+                return true;
+            }
+
+            if (!currentSearchQuery.empty())
+            {
+                resultsPanel.setSearchQuery({});
+                refreshResults({});
+                return true;
+            }
+
+            return false;
+        }
+
+        if (key == juce::KeyPress::upKey || key == juce::KeyPress::downKey)
+        {
+            moveResultSelection(key == juce::KeyPress::upKey ? -1 : 1);
+            return true;
+        }
+
+        if (key == juce::KeyPress::returnKey)
+        {
+            if (const auto *file = resultsPanel.getResultAt(resultsPanel.getSelectedRow()); file != nullptr)
+                handleFileSelected(*file, true, true);
+            return true;
+        }
+
+        if (!mods.isCommandDown() && !mods.isAltDown())
+        {
+            if (textChar == 'f' || textChar == 'F')
+            {
+                toggleSelectedFileFavorite();
+                return true;
+            }
+
+            if (textChar == '+' || textChar == '=')
+            {
+                previewPanel.nudgePitchSemitones(1.0);
+                return true;
+            }
+
+            if (textChar == '-' || textChar == '_')
+            {
+                previewPanel.nudgePitchSemitones(-1.0);
+                return true;
+            }
+
+            if (textChar == '0')
+            {
+                previewPanel.resetPitch();
+                return true;
+            }
+        }
+
         if (key == juce::KeyPress::spaceKey)
         {
             if (audioEngine.isPreviewPlaying())
@@ -1716,7 +1886,10 @@ namespace sw
         g.setColour(scanInProgress ? (darkModeEnabled ? juce::Colour(0xff8fe3a8) : juce::Colour(0xff1c6a3c))
                                    : (darkModeEnabled ? juce::Colour(0xff95a89b) : juce::Colour(0xff62756a)));
         g.setFont(16.0f);
-        g.drawFittedText("Scan: " + scanStatusText,
+        juce::String scanLine = "Scan: " + scanStatusText;
+        if (lastAnalysisPendingCount > 0)
+            scanLine += "   |   Analyzing: " + juce::String(lastAnalysisPendingCount) + " queued";
+        g.drawFittedText(scanLine,
                          leftStatusArea,
                          juce::Justification::centredLeft,
                          1);
@@ -1944,106 +2117,174 @@ namespace sw
         updateToolbarScanState(scanInProgress);
     }
 
+    void MainComponent::refreshResults()
+    {
+        refreshResults(currentSearchQuery);
+    }
+
     void MainComponent::refreshResults(const std::string &query)
     {
         currentSearchQuery = query;
 
         std::vector<FileRecord> results;
-        std::pair<int64_t, int64_t> stats{0, 0};
-        const auto statsQuery = query.empty() ? std::string{} : (query + "*");
+        const auto queryTokens = tokenizeSearchText(query);
+        const bool hasTextQuery = !queryTokens.empty();
+        const auto filterInMemory = [&results](const auto &predicate)
+        {
+            results.erase(std::remove_if(results.begin(), results.end(), [&predicate](const FileRecord &file)
+                                         { return !predicate(file); }),
+                          results.end());
+        };
+        const auto filterBySelectedRoot = [this, &filterInMemory]()
+        {
+            if (selectedRootFilterId.has_value())
+                filterInMemory([rootId = *selectedRootFilterId](const FileRecord &file)
+                               { return file.rootId == rootId; });
+        };
+        const auto filterBySearchText = [&queryTokens, hasTextQuery, &filterInMemory]()
+        {
+            if (hasTextQuery)
+                filterInMemory([&queryTokens](const FileRecord &file)
+                               { return matchesSearchText(file, queryTokens); });
+        };
 
         if (nearDuplicateReferenceFileId.has_value())
         {
             results = catalogDb.findNearDuplicateCandidates(*nearDuplicateReferenceFileId,
                                                             selectedRootFilterId,
                                                             200);
-
-            if (!query.empty())
-            {
-                results.erase(std::remove_if(results.begin(), results.end(), [query](const FileRecord &file)
-                                             { return !matchesSearchText(file, query); }),
-                              results.end());
-            }
+            filterBySearchText();
         }
         else if (currentResultsViewMode == ResultsPanel::ViewMode::Recent)
         {
             if (!selectedRootFilterId.has_value())
-            {
-                if (query.empty())
-                {
-                    results = catalogDb.listRecentFiles(-1);
-                }
-                else
-                {
-                    results = catalogDb.searchFiles(statsQuery, -1);
-                }
-            }
+                results = hasTextQuery ? catalogDb.searchFiles(query, -1) : catalogDb.listRecentFiles(-1);
             else
-            {
-                const int64_t rootId = *selectedRootFilterId;
-                if (query.empty())
-                {
-                    results = catalogDb.listRecentFilesByRoot(rootId, -1);
-                }
-                else
-                {
-                    results = catalogDb.searchFilesByRoot(rootId, statsQuery, -1);
-                }
-            }
+                results = hasTextQuery ? catalogDb.searchFilesByRoot(*selectedRootFilterId, query, -1)
+                                       : catalogDb.listRecentFilesByRoot(*selectedRootFilterId, -1);
         }
         else if (currentResultsViewMode == ResultsPanel::ViewMode::Favorites)
         {
             results = catalogDb.listFavoriteFiles(-1);
-
-            if (selectedRootFilterId.has_value())
-            {
-                const auto rootId = *selectedRootFilterId;
-                results.erase(std::remove_if(results.begin(), results.end(), [rootId](const FileRecord &file)
-                                             { return file.rootId != rootId; }),
-                              results.end());
-            }
-
-            if (!query.empty())
-            {
-                results.erase(std::remove_if(results.begin(), results.end(), [query](const FileRecord &file)
-                                             { return !matchesSearchText(file, query); }),
-                              results.end());
-            }
+            filterBySelectedRoot();
+            filterBySearchText();
         }
         else if (currentResultsViewMode == ResultsPanel::ViewMode::Duplicates)
         {
             results = catalogDb.listDuplicateFiles(-1);
-
-            if (selectedRootFilterId.has_value())
-            {
-                const auto rootId = *selectedRootFilterId;
-                results.erase(std::remove_if(results.begin(), results.end(), [rootId](const FileRecord &file)
-                                             { return file.rootId != rootId; }),
-                              results.end());
-            }
-
-            if (!query.empty())
-            {
-                results.erase(std::remove_if(results.begin(), results.end(), [query](const FileRecord &file)
-                                             { return !matchesSearchText(file, query); }),
-                              results.end());
-            }
+            filterBySelectedRoot();
+            filterBySearchText();
         }
         else
         {
             jassertfalse;
         }
 
-        results.erase(std::remove_if(results.begin(), results.end(), [this](const FileRecord &file)
-                                     { return !matchesFacetFilters(file, currentFacetFilters); }),
-                      results.end());
+        filterInMemory([this](const FileRecord &file)
+                       { return matchesFacetFilters(file, currentFacetFilters); });
 
-        stats = buildStatsForResults(results);
+        const auto stats = buildStatsForResults(results);
+        const bool isEmpty = results.empty();
 
+        resultsPanel.setNearDuplicateReference(nearDuplicateReferenceFileId.has_value()
+                                                   ? std::optional<juce::String>(nearDuplicateReferenceName)
+                                                   : std::nullopt);
         resultsPanel.setResults(std::move(results));
+        if (isEmpty)
+            updateResultsEmptyState(!catalogDb.allRoots().empty());
 
         fileStatsStatusText = makeFileStatsStatusText(stats.first, stats.second);
         repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
+    }
+
+    void MainComponent::updateResultsEmptyState(bool hasRoots)
+    {
+        using Action = ResultsPanel::EmptyStateAction;
+        const bool hasTextQuery = !tokenizeSearchText(currentSearchQuery).empty();
+        const bool hasFilters = currentFacetFilters.activeCount() > 0;
+
+        if (!hasRoots)
+        {
+            resultsPanel.setEmptyState("No sample sources yet.\nAdd a folder to start building your library.", Action::AddSource);
+        }
+        else if (nearDuplicateReferenceFileId.has_value())
+        {
+            resultsPanel.setEmptyState("No near-duplicate candidates found.\nCandidates need completed analysis and a similar duration, channel count, and sample rate.",
+                                       hasFilters ? Action::ClearFilters : Action::ExitNearDuplicates);
+        }
+        else if (hasTextQuery)
+        {
+            resultsPanel.setEmptyState("No files match \"" + juce::String(currentSearchQuery).trim() + "\"" +
+                                           (hasFilters ? " with the current filters." : "."),
+                                       hasFilters ? Action::ClearFilters : Action::ClearSearch);
+        }
+        else if (hasFilters)
+        {
+            resultsPanel.setEmptyState("No files match the current filters.", Action::ClearFilters);
+        }
+        else if (currentResultsViewMode == ResultsPanel::ViewMode::Favorites)
+        {
+            resultsPanel.setEmptyState("No favorites yet.\nSelect a file and press F (or tick Favorite) to add it.", Action::ShowAllFiles);
+        }
+        else if (currentResultsViewMode == ResultsPanel::ViewMode::Duplicates)
+        {
+            resultsPanel.setEmptyState("No exact duplicates found.", Action::ShowAllFiles);
+        }
+        else if (scanInProgress)
+        {
+            resultsPanel.setEmptyState("Scanning... files will appear here as they are indexed.", Action::None);
+        }
+        else
+        {
+            resultsPanel.setEmptyState("No indexed files yet.\nRescan the source to index its contents.", Action::None);
+        }
+    }
+
+    void MainComponent::exitNearDuplicateMode()
+    {
+        if (!nearDuplicateReferenceFileId.has_value())
+            return;
+
+        nearDuplicateReferenceFileId.reset();
+        nearDuplicateReferenceName.clear();
+        refreshResults();
+    }
+
+    void MainComponent::toggleSelectedFileFavorite()
+    {
+        const auto *selected = resultsPanel.getResultAt(resultsPanel.getSelectedRow());
+        if (!currentSelectedFile.has_value() || selected == nullptr || selected->id != currentSelectedFile->id)
+            return;
+
+        const bool isFavorite = currentSelectedFileUserData.has_value() && currentSelectedFileUserData->isFavorite;
+        persistSelectedFileUserData(!isFavorite);
+        showToolbarToast(!isFavorite ? "Added to favorites" : "Removed from favorites", 60);
+    }
+
+    void MainComponent::moveResultSelection(int delta)
+    {
+        const int count = resultsPanel.getResultCount();
+        if (count <= 0)
+            return;
+
+        const int current = resultsPanel.getSelectedRow();
+        const int next = current < 0 ? 0 : juce::jlimit(0, count - 1, current + delta);
+        resultsPanel.selectRow(next);
+    }
+
+    void MainComponent::updateAnalysisProgress()
+    {
+        const int pending = analyzer.pendingJobCount();
+        if (pending == lastAnalysisPendingCount)
+            return;
+
+        const bool finished = pending == 0 && lastAnalysisPendingCount > 0;
+        lastAnalysisPendingCount = pending;
+        repaint(0, getHeight() - kStatusBarHeight, getWidth(), kStatusBarHeight);
+
+        // Inferred tempo/key/loop data only appears after a refresh; do it once per batch.
+        if (finished && !scanInProgress)
+            refreshResults();
     }
 
     void MainComponent::rebuildRootWatchers(const std::vector<RootRecord> &roots)
@@ -2407,6 +2648,16 @@ namespace sw
                 currentResultsSortMode = ResultsPanel::SortMode::SizeLargestFirst;
             else if (*savedSortMode == "size.smallest")
                 currentResultsSortMode = ResultsPanel::SortMode::SizeSmallestFirst;
+            else if (*savedSortMode == "duration.shortest")
+                currentResultsSortMode = ResultsPanel::SortMode::DurationShortest;
+            else if (*savedSortMode == "duration.longest")
+                currentResultsSortMode = ResultsPanel::SortMode::DurationLongest;
+            else if (*savedSortMode == "bpm.slowest")
+                currentResultsSortMode = ResultsPanel::SortMode::BpmSlowest;
+            else if (*savedSortMode == "bpm.fastest")
+                currentResultsSortMode = ResultsPanel::SortMode::BpmFastest;
+            else if (*savedSortMode == "key.asc")
+                currentResultsSortMode = ResultsPanel::SortMode::KeyAsc;
             else
                 currentResultsSortMode = ResultsPanel::SortMode::NameAsc;
         }
@@ -2459,6 +2710,37 @@ namespace sw
                 currentFacetFilters.loop = ResultsPanel::LoopFilter::Any;
         }
 
+        if (const auto savedBpm = catalogDb.getAppSetting("results.filter.bpm"))
+        {
+            if (*savedBpm == "has")
+                currentFacetFilters.bpm = ResultsPanel::BpmFilter::HasTempo;
+            else if (*savedBpm == "lt90")
+                currentFacetFilters.bpm = ResultsPanel::BpmFilter::Below90;
+            else if (*savedBpm == "90-110")
+                currentFacetFilters.bpm = ResultsPanel::BpmFilter::From90To110;
+            else if (*savedBpm == "110-130")
+                currentFacetFilters.bpm = ResultsPanel::BpmFilter::From110To130;
+            else if (*savedBpm == "130-150")
+                currentFacetFilters.bpm = ResultsPanel::BpmFilter::From130To150;
+            else if (*savedBpm == "150+")
+                currentFacetFilters.bpm = ResultsPanel::BpmFilter::From150Up;
+            else
+                currentFacetFilters.bpm = ResultsPanel::BpmFilter::Any;
+        }
+
+        if (const auto savedKey = catalogDb.getAppSetting("results.filter.key"))
+        {
+            currentFacetFilters.keyPitchClass.reset();
+            if (!savedKey->empty() && *savedKey != "any")
+            {
+                const int parsed = juce::String(*savedKey).getIntValue();
+                if (parsed >= 0 && parsed <= 11 && juce::String(*savedKey).containsOnly("0123456789"))
+                    currentFacetFilters.keyPitchClass = parsed;
+                else
+                    SW_LOG_WARN("MainComponent: ignoring invalid results.filter.key setting: " << *savedKey);
+            }
+        }
+
         resultsPanel.setViewMode(currentResultsViewMode);
         resultsPanel.setSortMode(currentResultsSortMode);
         resultsPanel.setFacetFilters(currentFacetFilters);
@@ -2499,6 +2781,21 @@ namespace sw
             break;
         case ResultsPanel::SortMode::SizeSmallestFirst:
             catalogDb.setAppSetting("results.sortMode", "size.smallest");
+            break;
+        case ResultsPanel::SortMode::DurationShortest:
+            catalogDb.setAppSetting("results.sortMode", "duration.shortest");
+            break;
+        case ResultsPanel::SortMode::DurationLongest:
+            catalogDb.setAppSetting("results.sortMode", "duration.longest");
+            break;
+        case ResultsPanel::SortMode::BpmSlowest:
+            catalogDb.setAppSetting("results.sortMode", "bpm.slowest");
+            break;
+        case ResultsPanel::SortMode::BpmFastest:
+            catalogDb.setAppSetting("results.sortMode", "bpm.fastest");
+            break;
+        case ResultsPanel::SortMode::KeyAsc:
+            catalogDb.setAppSetting("results.sortMode", "key.asc");
             break;
         case ResultsPanel::SortMode::NameAsc:
         default:
@@ -2577,6 +2874,35 @@ namespace sw
             catalogDb.setAppSetting("results.filter.loop", "any");
             break;
         }
+
+        switch (filters.bpm)
+        {
+        case ResultsPanel::BpmFilter::HasTempo:
+            catalogDb.setAppSetting("results.filter.bpm", "has");
+            break;
+        case ResultsPanel::BpmFilter::Below90:
+            catalogDb.setAppSetting("results.filter.bpm", "lt90");
+            break;
+        case ResultsPanel::BpmFilter::From90To110:
+            catalogDb.setAppSetting("results.filter.bpm", "90-110");
+            break;
+        case ResultsPanel::BpmFilter::From110To130:
+            catalogDb.setAppSetting("results.filter.bpm", "110-130");
+            break;
+        case ResultsPanel::BpmFilter::From130To150:
+            catalogDb.setAppSetting("results.filter.bpm", "130-150");
+            break;
+        case ResultsPanel::BpmFilter::From150Up:
+            catalogDb.setAppSetting("results.filter.bpm", "150+");
+            break;
+        case ResultsPanel::BpmFilter::Any:
+        default:
+            catalogDb.setAppSetting("results.filter.bpm", "any");
+            break;
+        }
+
+        catalogDb.setAppSetting("results.filter.key",
+                                filters.keyPitchClass.has_value() ? std::to_string(*filters.keyPitchClass) : std::string("any"));
     }
 
     void MainComponent::applyThemeMode(bool darkMode, bool persist)
@@ -3197,6 +3523,7 @@ namespace sw
     void MainComponent::timerCallback()
     {
         processPendingRootWatchRescans();
+        updateAnalysisProgress();
 
         ++midiDeviceRefreshCounter;
         if (midiDeviceRefreshCounter >= kMidiDeviceRefreshIntervalTicks)

@@ -32,12 +32,17 @@ namespace sw
         void setDarkMode(bool enabled);
 
         std::function<void(std::optional<int64_t> rootId)> onRootSelected;
+        std::function<void()> onRescanSelectedRootRequested;
+        std::function<void()> onRevealSelectedRootRequested;
         std::function<void()> onRenameSelectedRootRequested;
+        std::function<void()> onRemapSelectedRootRequested;
         std::function<void()> onDeleteSelectedRootRequested;
 
     private:
         void scrollBarMoved(juce::ScrollBar *scrollBarThatHasMoved, double newRangeStart) override;
         void updateScrollBar();
+        /// Row 0 is "All Sources"; row n is roots[n - 1]. Zero when there are no roots.
+        int displayRowCount() const noexcept;
         std::optional<int> rootRowIndexForY(int y) const;
 
         juce::ScrollBar verticalScrollBar{true};

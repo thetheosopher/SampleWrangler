@@ -103,6 +103,8 @@ set(CATALOG_SOURCES
     Source/Catalog/CatalogSchema.cpp
     Source/Catalog/CatalogSchema.h
     Source/Catalog/CatalogModels.h
+    Source/Catalog/SearchText.cpp
+    Source/Catalog/SearchText.h
     Source/Catalog/WaveCacheBlobDb.cpp
     Source/Catalog/WaveCacheBlobDb.h
 )
@@ -450,6 +452,7 @@ add_executable(SampleWranglerCatalogDbTests
     Tests/CatalogDbTests.cpp
     Source/Catalog/CatalogDb.cpp
     Source/Catalog/CatalogSchema.cpp
+    Source/Catalog/SearchText.cpp
 )
 
 target_include_directories(SampleWranglerCatalogDbTests PRIVATE
@@ -468,6 +471,7 @@ add_executable(SampleWranglerAnalyzerTests
     Source/Pipeline/JobQueue.cpp
     Source/Catalog/CatalogDb.cpp
     Source/Catalog/CatalogSchema.cpp
+    Source/Catalog/SearchText.cpp
     Source/Util/Paths.cpp
 )
 
@@ -497,6 +501,7 @@ add_executable(SampleWranglerScannerAppleLoopTests
     Source/Catalog/CatalogDb.cpp
     Source/Catalog/WaveCacheBlobDb.cpp
     Source/Catalog/CatalogSchema.cpp
+    Source/Catalog/SearchText.cpp
     Source/Util/Hashing.cpp
 )
 

@@ -1,10 +1,12 @@
 #include "Catalog/CatalogDb.h"
 #include "Catalog/CatalogSchema.h"
+#include "Catalog/SearchText.h"
 
 #include <algorithm>
 #include <iostream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <sqlite3.h>
 #include <utility>
 #include <vector>
@@ -136,6 +138,97 @@ namespace
                rescannedFile.has_value() && rescannedFile->loopRegions.empty() &&
                rescannedFile->presetPrograms.size() == 1 &&
                rescannedFile->presetPrograms.front().name == "Replacement Program";
+    }
+
+    bool testSearchTextHelpers()
+    {
+        const auto tokens = sw::tokenizeSearchText("  Kick-808 (Live) \"C#\" ");
+        const std::vector<std::string> expectedTokens{"kick", "808", "live", "c"};
+        if (tokens != expectedTokens)
+        {
+            std::cerr << "tokenizeSearchText produced unexpected tokens.\n";
+            return false;
+        }
+
+        if (sw::buildFtsPrefixQuery(tokens) != "\"kick\"* \"808\"* \"live\"* \"c\"*" ||
+            !sw::buildFtsPrefixQuery(sw::tokenizeSearchText("#-()\"")).empty())
+        {
+            std::cerr << "buildFtsPrefixQuery produced an unexpected expression.\n";
+            return false;
+        }
+
+        const std::vector<std::string_view> fields{"Kick_808_Live.wav", "Drums/Kick_808_Live.wav"};
+        if (!sw::searchTokensMatchFields(sw::tokenizeSearchText("kick 80"), fields) ||
+            !sw::searchTokensMatchFields({}, fields) ||
+            sw::searchTokensMatchFields(sw::tokenizeSearchText("ick"), fields) ||
+            sw::searchTokensMatchFields(sw::tokenizeSearchText("kick snare"), fields))
+        {
+            std::cerr << "searchTokensMatchFields produced unexpected matches.\n";
+            return false;
+        }
+
+        if (sw::keyPitchClass("C#4") != std::optional<int>{1} || sw::keyPitchClass("Eb") != std::optional<int>{3} ||
+            sw::keyPitchClass("A minor") != std::optional<int>{9} || sw::keyPitchClass("B major") != std::optional<int>{11} ||
+            sw::keyPitchClass("Cb") != std::optional<int>{11} || sw::keyPitchClass("H").has_value() ||
+            sw::keyPitchClass("").has_value())
+        {
+            std::cerr << "keyPitchClass parsed an unexpected pitch class.\n";
+            return false;
+        }
+
+        return true;
+    }
+
+    bool testPunctuationSearch()
+    {
+        sw::CatalogDb db;
+        if (!db.open(":memory:") || !db.addRoot("C:/PunctuationSamples", "Punctuation"))
+            return false;
+
+        const auto rootId = db.allRoots().front().id;
+        const auto addFile = [&db, rootId](const std::string &relativePath, const std::string &filename)
+        {
+            sw::FileRecord file;
+            file.rootId = rootId;
+            file.relativePath = relativePath;
+            file.filename = filename;
+            file.extension = "wav";
+            file.sizeBytes = 1000;
+            file.modifiedTime = 1700000000;
+            return db.upsertFile(file);
+        };
+
+        if (!addFile("Drums/Kick-808 (Live).wav", "Kick-808 (Live).wav") ||
+            !addFile("Keys/C# Stab.wav", "C# Stab.wav") ||
+            !addFile("Drums/Snare.wav", "Snare.wav"))
+            return false;
+
+        // Each of these used to reach FTS5 MATCH verbatim and fail with a syntax error.
+        for (const auto *query : {"kick-808", "Kick-808 (Live)", "\"kick", "kick*", "808 liv", "(live"})
+        {
+            const auto results = db.searchFiles(query, -1);
+            if (results.size() != 1 || results.front().filename != "Kick-808 (Live).wav")
+            {
+                std::cerr << "searchFiles(\"" << query << "\") returned " << results.size() << " results.\n";
+                return false;
+            }
+        }
+
+        const auto sharpResults = db.searchFilesByRoot(rootId, "C# stab", -1);
+        if (sharpResults.size() != 1 || sharpResults.front().filename != "C# Stab.wav")
+        {
+            std::cerr << "searchFilesByRoot(\"C# stab\") failed.\n";
+            return false;
+        }
+
+        if (!db.searchFiles("#()", -1).empty() || db.fileStatsSearch("snare\"").first != 1 ||
+            db.fileStatsSearchByRoot(rootId, "kick-").first != 1)
+        {
+            std::cerr << "Punctuation-only or stats search returned unexpected counts.\n";
+            return false;
+        }
+
+        return true;
     }
 
     bool testDuplicateFileLookup(sw::CatalogDb &db)
@@ -594,6 +687,18 @@ int main()
     if (!testFiles(db))
     {
         std::cerr << "testFiles failed.\n";
+        return 1;
+    }
+
+    if (!testSearchTextHelpers())
+    {
+        std::cerr << "testSearchTextHelpers failed.\n";
+        return 1;
+    }
+
+    if (!testPunctuationSearch())
+    {
+        std::cerr << "testPunctuationSearch failed.\n";
         return 1;
     }
 

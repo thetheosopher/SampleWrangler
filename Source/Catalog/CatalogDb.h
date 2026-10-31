@@ -50,6 +50,7 @@ namespace sw
                                                               int featureVectorVersion);
         bool upsertAnalysisResult(const AnalysisResultRecord &result);
         std::optional<AnalysisResultRecord> analysisResultByFileId(int64_t fileId);
+        /// `query` is raw user text; every word is prefix-matched (see SearchText.h).
         std::vector<FileRecord> searchFiles(const std::string &query, int limit = 200);
         std::vector<FileRecord> listRecentFiles(int limit = 200);
         std::vector<FileRecord> searchFilesByRoot(int64_t rootId, const std::string &query, int limit = 200);

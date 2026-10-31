@@ -403,10 +403,22 @@ namespace sw
     {
     }
 
+    int Analyzer::pendingJobCount() const noexcept
+    {
+        return progress->pendingJobs.load(std::memory_order_relaxed);
+    }
+
+    std::shared_ptr<void> Analyzer::makePendingJobToken()
+    {
+        progress->pendingJobs.fetch_add(1, std::memory_order_relaxed);
+        return std::shared_ptr<void>(nullptr, [state = progress](void *)
+                                     { state->pendingJobs.fetch_sub(1, std::memory_order_relaxed); });
+    }
+
     void Analyzer::analyzeFile(int64_t fileId)
     {
         jobQueue.enqueue(Job{
-            [this, fileId](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
+            [this, fileId, pendingToken = makePendingJobToken()](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
             {
                 const auto isCancelled = [&cancelGeneration, jobGeneration]()
                 {
@@ -636,7 +648,7 @@ namespace sw
     void Analyzer::analyzeRoot(int64_t rootId)
     {
         jobQueue.enqueue(Job{
-            [this, rootId](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
+            [this, rootId, pendingToken = makePendingJobToken()](const std::atomic<uint64_t> &cancelGeneration, uint64_t jobGeneration)
             {
                 if (cancelGeneration.load(std::memory_order_relaxed) != jobGeneration)
                     return;

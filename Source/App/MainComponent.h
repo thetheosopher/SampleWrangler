@@ -40,7 +40,14 @@ namespace sw
 
     private:
         void refreshRoots();
-        void refreshResults(const std::string &query = "");
+        /// Re-runs the current query (search text, view, root, and filters).
+        void refreshResults();
+        void refreshResults(const std::string &query);
+        void updateResultsEmptyState(bool hasRoots);
+        void exitNearDuplicateMode();
+        void toggleSelectedFileFavorite();
+        void moveResultSelection(int delta);
+        void updateAnalysisProgress();
         void rebuildRootWatchers(const std::vector<RootRecord> &roots);
         void processPendingRootWatchRescans();
         void refreshOutputDeviceTypeList();
@@ -215,6 +222,8 @@ namespace sw
         uint64_t previewLoadingRequestId = 0;
         std::string currentSearchQuery;
         std::optional<int64_t> nearDuplicateReferenceFileId;
+        juce::String nearDuplicateReferenceName;
+        int lastAnalysisPendingCount = 0;
         ResultsPanel::ViewMode currentResultsViewMode = ResultsPanel::ViewMode::Recent;
         ResultsPanel::SortMode currentResultsSortMode = ResultsPanel::SortMode::NameAsc;
         ResultsPanel::FacetFilters currentFacetFilters{};

@@ -1,5 +1,6 @@
 #include "CatalogDb.h"
 #include "CatalogSchema.h"
+#include "SearchText.h"
 #include "Util/Logging.h"
 #include <sqlite3.h>
 #include <algorithm>
@@ -1226,6 +1227,9 @@ namespace sw
         SW_DB_GUARD;
 
         std::vector<FileRecord> results;
+        const auto matchExpression = buildFtsPrefixQuery(tokenizeSearchText(query));
+        if (matchExpression.empty())
+            return results;
 
         // Use FTS5 match for searching
         const char *sql = R"SQL(
@@ -1255,8 +1259,8 @@ namespace sw
             return results;
         }
 
-        sqlite3_bind_text(stmt, 1, query.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 1, matchExpression.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, matchExpression.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 3, limit);
 
         int rc = SQLITE_OK;
@@ -1310,6 +1314,9 @@ namespace sw
         SW_DB_GUARD;
 
         std::vector<FileRecord> results;
+        const auto matchExpression = buildFtsPrefixQuery(tokenizeSearchText(query));
+        if (matchExpression.empty())
+            return results;
 
         const char *sql = R"SQL(
         WITH matching_files(file_id) AS (
@@ -1336,8 +1343,8 @@ namespace sw
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
             return results;
 
-        sqlite3_bind_text(stmt, 1, query.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 1, matchExpression.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, matchExpression.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(stmt, 3, rootId);
         sqlite3_bind_int(stmt, 4, limit);
 
@@ -1644,6 +1651,10 @@ namespace sw
     {
         SW_DB_GUARD;
 
+        const auto matchExpression = buildFtsPrefixQuery(tokenizeSearchText(query));
+        if (matchExpression.empty())
+            return {0, 0};
+
         const char *sql = R"SQL(
         WITH matching_files(file_id) AS (
             SELECT rowid FROM files_fts WHERE files_fts MATCH ?
@@ -1662,8 +1673,8 @@ namespace sw
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
             return {0, 0};
 
-        sqlite3_bind_text(stmt, 1, query.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 1, matchExpression.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, matchExpression.c_str(), -1, SQLITE_TRANSIENT);
 
         std::pair<int64_t, int64_t> stats{0, 0};
         if (sqlite3_step(stmt) == SQLITE_ROW)
@@ -1679,6 +1690,10 @@ namespace sw
     std::pair<int64_t, int64_t> CatalogDb::fileStatsSearchByRoot(int64_t rootId, const std::string &query)
     {
         SW_DB_GUARD;
+
+        const auto matchExpression = buildFtsPrefixQuery(tokenizeSearchText(query));
+        if (matchExpression.empty())
+            return {0, 0};
 
         const char *sql = R"SQL(
         WITH matching_files(file_id) AS (
@@ -1699,8 +1714,8 @@ namespace sw
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
             return {0, 0};
 
-        sqlite3_bind_text(stmt, 1, query.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 1, matchExpression.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, matchExpression.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(stmt, 3, rootId);
 
         std::pair<int64_t, int64_t> stats{0, 0};

@@ -20,6 +20,8 @@ namespace sw
         bool keyPressed(const juce::KeyPress &key) override;
 
         void setPitchSemitones(double semitones);
+        void nudgePitchSemitones(double deltaSemitones);
+        void resetPitch();
         void setDarkMode(bool enabled);
         void setAvailableOutputDeviceTypes(const juce::StringArray &typeNames, const juce::String &currentTypeName);
         void setAvailableOutputDevices(const juce::StringArray &deviceNames, const juce::String &currentDeviceName);

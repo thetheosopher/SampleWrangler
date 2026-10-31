@@ -78,15 +78,17 @@ namespace sw
 
         constexpr int rowHeight = 18;
         const int visibleRows = juce::jmax(1, contentArea.getHeight() / rowHeight);
-        const int totalRows = static_cast<int>(roots.size());
+        const int totalRows = displayRowCount();
         const int clampedStart = juce::jlimit(0, juce::jmax(0, totalRows - visibleRows), firstVisibleRow);
 
         auto rowArea = contentArea;
         for (int row = clampedStart; row < totalRows && rowArea.getHeight() >= rowHeight; ++row)
         {
             auto drawArea = rowArea.removeFromTop(rowHeight);
-            const auto &root = roots[static_cast<size_t>(row)];
-            const bool isSelected = selectedRootId.has_value() && *selectedRootId == root.id;
+            const bool isAllSourcesRow = row == 0;
+            const bool isSelected = isAllSourcesRow
+                                        ? !selectedRootId.has_value()
+                                        : (selectedRootId.has_value() && *selectedRootId == roots[static_cast<size_t>(row - 1)].id);
 
             if (isSelected)
             {
@@ -96,7 +98,10 @@ namespace sw
 
             g.setColour(rowTextColour);
             const auto textArea = drawArea.reduced(2, 0);
-            const juce::String line = ellipsizeToWidth(juce::String(root.label), g.getCurrentFont(), textArea.getWidth());
+            const juce::String label = isAllSourcesRow ? juce::String("All Sources")
+                                                       : juce::String(roots[static_cast<size_t>(row - 1)].label);
+            g.setFont(juce::FontOptions(12.0f, isAllSourcesRow ? juce::Font::bold : juce::Font::plain));
+            const juce::String line = ellipsizeToWidth(label, g.getCurrentFont(), textArea.getWidth());
             g.drawText(line, textArea, juce::Justification::left, false);
         }
     }
@@ -139,21 +144,44 @@ namespace sw
         grabKeyboardFocus();
 
         const auto rowIndex = rootRowIndexForY(event.y);
-        if (!rowIndex.has_value() || *rowIndex >= static_cast<int>(roots.size()))
+        if (!rowIndex.has_value())
             return;
 
-        const auto clickedRootId = roots[static_cast<size_t>(*rowIndex)].id;
+        if (*rowIndex == 0)
+        {
+            selectedRootId.reset();
+            repaint();
+            if (onRootSelected)
+                onRootSelected(selectedRootId);
+            return;
+        }
+
+        const auto clickedRootId = roots[static_cast<size_t>(*rowIndex - 1)].id;
+        const bool selectionChanged = !selectedRootId.has_value() || *selectedRootId != clickedRootId;
+        selectedRootId = clickedRootId;
+        repaint();
+        if (selectionChanged && onRootSelected)
+            onRootSelected(selectedRootId);
 
         if (event.mods.isPopupMenu())
         {
-            selectedRootId = clickedRootId;
-            repaint();
-
-            if (onRootSelected)
-                onRootSelected(selectedRootId);
+            enum MenuId
+            {
+                rescanId = 1,
+                revealId,
+                renameId,
+                remapId,
+                deleteId
+            };
 
             juce::PopupMenu menu;
-            menu.addItem(1, "Rename");
+            menu.addItem(rescanId, "Rescan");
+            menu.addItem(revealId, "Open in Explorer");
+            menu.addSeparator();
+            menu.addItem(renameId, "Rename...");
+            menu.addItem(remapId, "Remap Folder...");
+            menu.addSeparator();
+            menu.addItem(deleteId, "Delete Source...");
 
             auto safeThis = juce::Component::SafePointer<BrowserPanel>(this);
             const auto clickArea = juce::Rectangle<int>(event.getScreenX(), event.getScreenY(), 1, 1);
@@ -163,32 +191,52 @@ namespace sw
                                    if (safeThis == nullptr)
                                        return;
 
-                                   if (selected == 1 && safeThis->onRenameSelectedRootRequested)
-                                       safeThis->onRenameSelectedRootRequested();
+                                   const auto invoke = [](const std::function<void()> &callback)
+                                   {
+                                       if (callback)
+                                           callback();
+                                   };
+
+                                   switch (selected)
+                                   {
+                                   case rescanId:
+                                       invoke(safeThis->onRescanSelectedRootRequested);
+                                       break;
+                                   case revealId:
+                                       invoke(safeThis->onRevealSelectedRootRequested);
+                                       break;
+                                   case renameId:
+                                       invoke(safeThis->onRenameSelectedRootRequested);
+                                       break;
+                                   case remapId:
+                                       invoke(safeThis->onRemapSelectedRootRequested);
+                                       break;
+                                   case deleteId:
+                                       invoke(safeThis->onDeleteSelectedRootRequested);
+                                       break;
+                                   default:
+                                       break;
+                                   }
                                });
-            return;
         }
-
-        if (selectedRootId.has_value() && *selectedRootId == clickedRootId)
-            selectedRootId.reset();
-        else
-            selectedRootId = clickedRootId;
-
-        repaint();
-        if (onRootSelected)
-            onRootSelected(selectedRootId);
     }
 
     void BrowserPanel::mouseMove(const juce::MouseEvent &event)
     {
         const auto rowIndex = rootRowIndexForY(event.y);
-        if (!rowIndex.has_value() || *rowIndex >= static_cast<int>(roots.size()))
+        if (!rowIndex.has_value())
         {
             setTooltip({});
             return;
         }
 
-        const auto &root = roots[static_cast<size_t>(*rowIndex)];
+        if (*rowIndex == 0)
+        {
+            setTooltip("Browse files from every source");
+            return;
+        }
+
+        const auto &root = roots[static_cast<size_t>(*rowIndex - 1)];
         setTooltip("Source: " + juce::String(root.label) + "\nPath: " + juce::String(root.path));
     }
 
@@ -241,10 +289,15 @@ namespace sw
             return std::nullopt;
 
         const int rowIndex = firstVisibleRow + (yOffset / rowHeight);
-        if (rowIndex < 0 || rowIndex >= static_cast<int>(roots.size()))
+        if (rowIndex < 0 || rowIndex >= displayRowCount())
             return std::nullopt;
 
         return rowIndex;
+    }
+
+    int BrowserPanel::displayRowCount() const noexcept
+    {
+        return roots.empty() ? 0 : static_cast<int>(roots.size()) + 1;
     }
 
     void BrowserPanel::scrollBarMoved(juce::ScrollBar *scrollBarThatHasMoved, double newRangeStart)
@@ -267,7 +320,7 @@ namespace sw
         listArea.removeFromRight(scrollBarWidth + 4);
 
         const int visibleRows = juce::jmax(1, listArea.getHeight() / rowHeight);
-        const int totalRows = static_cast<int>(roots.size());
+        const int totalRows = displayRowCount();
         const int maxStart = juce::jmax(0, totalRows - visibleRows);
 
         firstVisibleRow = juce::jlimit(0, maxStart, firstVisibleRow);

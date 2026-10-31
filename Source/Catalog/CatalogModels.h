@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <optional>
 #include <vector>
 
@@ -179,7 +180,51 @@ namespace sw
 
             return nullptr;
         }
+
+        /// Embedded tempo when present, otherwise the current inferred estimate.
+        std::optional<double> effectiveBpm() const noexcept
+        {
+            return bpm.has_value() ? bpm : inferredBpm;
+        }
+
+        /// Embedded key/root note when present, otherwise the current inferred estimate.
+        const std::optional<std::string> &effectiveKey() const noexcept
+        {
+            return key.has_value() ? key : inferredKey;
+        }
     };
+
+    /// Parses the pitch class (0 = C ... 11 = B) from key strings such as
+    /// "C#4", "Eb", or "A minor".
+    inline std::optional<int> keyPitchClass(std::string_view keyText) noexcept
+    {
+        if (keyText.empty())
+            return std::nullopt;
+
+        int pitchClass = 0;
+        switch (keyText.front())
+        {
+        case 'C': case 'c': pitchClass = 0; break;
+        case 'D': case 'd': pitchClass = 2; break;
+        case 'E': case 'e': pitchClass = 4; break;
+        case 'F': case 'f': pitchClass = 5; break;
+        case 'G': case 'g': pitchClass = 7; break;
+        case 'A': case 'a': pitchClass = 9; break;
+        case 'B': case 'b': pitchClass = 11; break;
+        default:
+            return std::nullopt;
+        }
+
+        if (keyText.size() > 1)
+        {
+            if (keyText[1] == '#')
+                pitchClass += 1;
+            else if (keyText[1] == 'b')
+                pitchClass += 11;
+        }
+
+        return pitchClass % 12;
+    }
 
     /// User-authored metadata that should survive rescans.
     struct FileUserDataRecord

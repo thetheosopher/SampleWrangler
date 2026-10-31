@@ -1,6 +1,7 @@
 #include "ResultsPanel.h"
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace
 {
@@ -13,6 +14,11 @@ namespace
     constexpr int kSortOldestId = 4;
     constexpr int kSortSizeLargestId = 5;
     constexpr int kSortSizeSmallestId = 6;
+    constexpr int kSortDurationShortestId = 7;
+    constexpr int kSortDurationLongestId = 8;
+    constexpr int kSortBpmSlowestId = 9;
+    constexpr int kSortBpmFastestId = 10;
+    constexpr int kSortKeyId = 11;
     constexpr int kFormatAnyId = 1;
     constexpr int kFormatAudioOnlyId = 2;
     constexpr int kFormatIndexedPresetId = 3;
@@ -31,7 +37,77 @@ namespace
     constexpr int kLoopAnyId = 1;
     constexpr int kLoopLoopedOnlyId = 2;
     constexpr int kLoopOneShotOnlyId = 3;
+    constexpr int kBpmAnyId = 1;
+    constexpr int kBpmHasTempoId = 2;
+    constexpr int kBpmBelow90Id = 3;
+    constexpr int kBpm90To110Id = 4;
+    constexpr int kBpm110To130Id = 5;
+    constexpr int kBpm130To150Id = 6;
+    constexpr int kBpm150UpId = 7;
+    constexpr int kKeyAnyId = 1;
+    constexpr int kKeyFirstPitchClassId = 2; // C = 2 ... B = 13
     constexpr int kWaveformColumnWidth = 120;
+    constexpr int kSearchDebounceMs = 150;
+    constexpr size_t kMaxCachedWaveformThumbnails = 2048;
+    constexpr const char *kPitchClassNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+
+    int selectorIdForBpmFilter(sw::ResultsPanel::BpmFilter filter)
+    {
+        switch (filter)
+        {
+        case sw::ResultsPanel::BpmFilter::HasTempo:
+            return kBpmHasTempoId;
+        case sw::ResultsPanel::BpmFilter::Below90:
+            return kBpmBelow90Id;
+        case sw::ResultsPanel::BpmFilter::From90To110:
+            return kBpm90To110Id;
+        case sw::ResultsPanel::BpmFilter::From110To130:
+            return kBpm110To130Id;
+        case sw::ResultsPanel::BpmFilter::From130To150:
+            return kBpm130To150Id;
+        case sw::ResultsPanel::BpmFilter::From150Up:
+            return kBpm150UpId;
+        case sw::ResultsPanel::BpmFilter::Any:
+        default:
+            return kBpmAnyId;
+        }
+    }
+
+    sw::ResultsPanel::BpmFilter bpmFilterForSelectorId(int id)
+    {
+        switch (id)
+        {
+        case kBpmHasTempoId:
+            return sw::ResultsPanel::BpmFilter::HasTempo;
+        case kBpmBelow90Id:
+            return sw::ResultsPanel::BpmFilter::Below90;
+        case kBpm90To110Id:
+            return sw::ResultsPanel::BpmFilter::From90To110;
+        case kBpm110To130Id:
+            return sw::ResultsPanel::BpmFilter::From110To130;
+        case kBpm130To150Id:
+            return sw::ResultsPanel::BpmFilter::From130To150;
+        case kBpm150UpId:
+            return sw::ResultsPanel::BpmFilter::From150Up;
+        case kBpmAnyId:
+        default:
+            return sw::ResultsPanel::BpmFilter::Any;
+        }
+    }
+
+    int selectorIdForKeyFilter(const std::optional<int> &pitchClass)
+    {
+        if (!pitchClass.has_value() || *pitchClass < 0 || *pitchClass > 11)
+            return kKeyAnyId;
+        return kKeyFirstPitchClassId + *pitchClass;
+    }
+
+    std::optional<int> keyFilterForSelectorId(int id)
+    {
+        if (id < kKeyFirstPitchClassId || id >= kKeyFirstPitchClassId + 12)
+            return std::nullopt;
+        return id - kKeyFirstPitchClassId;
+    }
 
     int selectorIdForViewMode(sw::ResultsPanel::ViewMode mode)
     {
@@ -75,6 +151,16 @@ namespace
             return kSortSizeLargestId;
         case sw::ResultsPanel::SortMode::SizeSmallestFirst:
             return kSortSizeSmallestId;
+        case sw::ResultsPanel::SortMode::DurationShortest:
+            return kSortDurationShortestId;
+        case sw::ResultsPanel::SortMode::DurationLongest:
+            return kSortDurationLongestId;
+        case sw::ResultsPanel::SortMode::BpmSlowest:
+            return kSortBpmSlowestId;
+        case sw::ResultsPanel::SortMode::BpmFastest:
+            return kSortBpmFastestId;
+        case sw::ResultsPanel::SortMode::KeyAsc:
+            return kSortKeyId;
         case sw::ResultsPanel::SortMode::NameAsc:
         default:
             return kSortNameAscId;
@@ -95,6 +181,16 @@ namespace
             return sw::ResultsPanel::SortMode::SizeLargestFirst;
         case kSortSizeSmallestId:
             return sw::ResultsPanel::SortMode::SizeSmallestFirst;
+        case kSortDurationShortestId:
+            return sw::ResultsPanel::SortMode::DurationShortest;
+        case kSortDurationLongestId:
+            return sw::ResultsPanel::SortMode::DurationLongest;
+        case kSortBpmSlowestId:
+            return sw::ResultsPanel::SortMode::BpmSlowest;
+        case kSortBpmFastestId:
+            return sw::ResultsPanel::SortMode::BpmFastest;
+        case kSortKeyId:
+            return sw::ResultsPanel::SortMode::KeyAsc;
         case kSortNameAscId:
         default:
             return sw::ResultsPanel::SortMode::NameAsc;
@@ -308,45 +404,56 @@ namespace
         std::vector<MetadataToken> tokens;
         tokens.reserve(32);
 
+        // Most browse-relevant details first so they survive truncation in narrow rows.
         if (item.duplicateClusterSize > 0)
             appendMetadataPair(tokens, "Exact cluster: ", juce::String(item.duplicateClusterSize));
         if (item.featureMatchScore.has_value())
             appendMetadataPair(tokens, "Feature-match heuristic: ",
-                               juce::String(*item.featureMatchScore, 0) + "%");
+                               juce::String(juce::roundToInt(*item.featureMatchScore)) + "%");
 
-        const juce::String sampleRate = valueOrDash(item.sampleRate, " Hz");
-        const juce::String channels = valueOrDash(item.channels);
-        const juce::String bitDepth = valueOrDash(item.bitDepth);
-        const juce::String bitrate = valueOrDash(item.bitrateKbps, " kbps");
-        const juce::String totalSamples = item.totalSamples.has_value() ? juce::String(*item.totalSamples) : juce::String("--");
-        const juce::String codec = item.codec.has_value() ? juce::String(*item.codec) : juce::String("--");
-
-        appendMetadataPair(tokens, "SR: ", sampleRate);
-        appendMetadataPair(tokens, "Ch: ", channels);
-        appendMetadataPair(tokens, "Bit Depth: ", bitDepth);
-        appendMetadataPair(tokens, "Bitrate: ", bitrate);
         appendMetadataPair(tokens, "Duration: ", formatDuration(item.durationSec));
         if (item.bpm.has_value())
             appendMetadataPair(tokens, "Tempo: ", juce::String(*item.bpm, 2));
         else if (item.inferredBpm.has_value())
             appendMetadataPair(tokens, "Tempo est.: ",
                                juce::String(*item.inferredBpm, 1) + " BPM (" +
-                                   juce::String(item.inferredBpmConfidence.value_or(0.0) * 100.0, 0) + "%)");
+                                   juce::String(juce::roundToInt(item.inferredBpmConfidence.value_or(0.0) * 100.0)) + "%)");
         if (item.key.has_value())
             appendMetadataPair(tokens, "Key: ", juce::String(*item.key));
         else if (item.inferredKey.has_value())
             appendMetadataPair(tokens, "Key est.: ",
                                juce::String(*item.inferredKey) + " (" +
-                                   juce::String(item.inferredKeyConfidence.value_or(0.0) * 100.0, 0) + "%)");
-        if (item.inferredTransientCount.has_value())
-            appendMetadataPair(tokens, "Transients est.: ", juce::String(*item.inferredTransientCount));
-        if (item.loopRegions.empty() && item.suggestedLoopStartSample && item.suggestedLoopEndSample)
-            appendMetadataPair(tokens, "Loop suggestion: ",
-                               juce::String(*item.suggestedLoopStartSample) + "-" +
-                                   juce::String(*item.suggestedLoopEndSample) + " (" +
-                                   juce::String(item.suggestedLoopConfidence.value_or(0.0) * 100.0, 0) + "%)");
-        appendMetadataPair(tokens, "Samples: ", totalSamples);
-        appendMetadataPair(tokens, "Codec/Enc: ", codec);
+                                   juce::String(juce::roundToInt(item.inferredKeyConfidence.value_or(0.0) * 100.0)) + "%)");
+
+        const sw::LoopRegionRecord *loop = item.previewLoop();
+        if (isAcidizedLoop(item) || isAppleLoop(item))
+            appendMetadataPair(tokens, isAcidizedLoop(item) ? "Acid: " : "Apple Loop: ", "yes");
+        if (item.rootMidiNote.has_value())
+        {
+            juce::String rootPitch = midiNoteToName(*item.rootMidiNote);
+            if (item.rootTuneCents.has_value() && std::abs(*item.rootTuneCents) > 0.001)
+                rootPitch += " " + juce::String::formatted("%+.2fc", *item.rootTuneCents);
+            appendMetadataPair(tokens, "Root: ", rootPitch);
+        }
+        if (isAcidizedLoop(item))
+            appendMetadataPair(tokens, "Beats: ", item.acidBeats.has_value() ? juce::String(*item.acidBeats) : juce::String("--"));
+        if (!item.loopRegions.empty())
+        {
+            appendMetadataPair(tokens, "Loops: ", juce::String(static_cast<int>(item.loopRegions.size())));
+            if (loop != nullptr)
+            {
+                const auto mode = loop->mode == sw::LoopMode::Forward
+                                      ? "forward"
+                                      : (loop->mode == sw::LoopMode::Alternating
+                                             ? "alternating"
+                                             : (loop->mode == sw::LoopMode::Backward ? "backward" : "unknown"));
+                const auto endMarker = loop->endInclusive ? "]" : ")";
+                appendMetadataPair(tokens,
+                                   "Loop: ",
+                                   juce::String(loop->startSample) + "-" + juce::String(loop->endSample) +
+                                       endMarker + " " + mode);
+            }
+        }
 
         if (!item.presetPrograms.empty())
         {
@@ -379,45 +486,34 @@ namespace
         if (item.velocityLow.has_value() || item.velocityHigh.has_value())
             appendMetadataPair(tokens, "Vel: ", formatIntegerRange(item.velocityLow, item.velocityHigh));
 
-        if (isAcidizedLoop(item) || isAppleLoop(item) ||
-            item.rootMidiNote.has_value() || !item.loopRegions.empty())
-        {
-            juce::String rootPitch = item.rootMidiNote.has_value() ? midiNoteToName(*item.rootMidiNote) : juce::String("--");
-            if (item.rootTuneCents.has_value() && std::abs(*item.rootTuneCents) > 0.001)
-                rootPitch += " " + juce::String::formatted("%+.2fc", *item.rootTuneCents);
-            const juce::String acidBeats = item.acidBeats.has_value() ? juce::String(*item.acidBeats) : juce::String("--");
-            if (isAcidizedLoop(item) || isAppleLoop(item))
-                appendMetadataPair(tokens,
-                                   isAcidizedLoop(item) ? "Acid: " : "Apple Loop: ",
-                                   "yes");
-            if (item.rootMidiNote.has_value())
-                appendMetadataPair(tokens, "Root: ", rootPitch);
-            if (isAcidizedLoop(item))
-                appendMetadataPair(tokens, "Beats: ", acidBeats);
-            if (!item.loopRegions.empty())
-            {
-                appendMetadataPair(tokens, "Loops: ", juce::String(static_cast<int>(item.loopRegions.size())));
-                if (const auto *loop = item.previewLoop())
-                {
-                    const auto mode = loop->mode == sw::LoopMode::Forward
-                                          ? "forward"
-                                          : (loop->mode == sw::LoopMode::Alternating
-                                                 ? "alternating"
-                                                 : (loop->mode == sw::LoopMode::Backward ? "backward" : "unknown"));
-                    const auto endMarker = loop->endInclusive ? "]" : ")";
-                    appendMetadataPair(tokens,
-                                       "Loop: ",
-                                       juce::String(loop->startSample) + "-" + juce::String(loop->endSample) +
-                                           endMarker + " " + mode);
-                    if (!loop->source.empty())
-                        appendMetadataPair(tokens, "Loop source: ", juce::String(loop->source));
-                }
-            }
-            if (item.rootPitchSource.has_value())
-                appendMetadataPair(tokens, "Pitch source: ", juce::String(*item.rootPitchSource));
-        }
+        appendMetadataPair(tokens, "SR: ", valueOrDash(item.sampleRate, " Hz"));
+        appendMetadataPair(tokens, "Ch: ", valueOrDash(item.channels));
+        appendMetadataPair(tokens, "Bit Depth: ", valueOrDash(item.bitDepth));
+        appendMetadataPair(tokens, "Bitrate: ", valueOrDash(item.bitrateKbps, " kbps"));
+        appendMetadataPair(tokens, "Samples: ", item.totalSamples.has_value() ? juce::String(*item.totalSamples) : juce::String("--"));
+        appendMetadataPair(tokens, "Codec/Enc: ", item.codec.has_value() ? juce::String(*item.codec) : juce::String("--"));
+
+        if (item.inferredTransientCount.has_value())
+            appendMetadataPair(tokens, "Transients est.: ", juce::String(*item.inferredTransientCount));
+        if (item.loopRegions.empty() && item.suggestedLoopStartSample && item.suggestedLoopEndSample)
+            appendMetadataPair(tokens, "Loop suggestion: ",
+                               juce::String(*item.suggestedLoopStartSample) + "-" +
+                                   juce::String(*item.suggestedLoopEndSample) + " (" +
+                                   juce::String(juce::roundToInt(item.suggestedLoopConfidence.value_or(0.0) * 100.0)) + "%)");
+        if (loop != nullptr && !loop->source.empty())
+            appendMetadataPair(tokens, "Loop source: ", juce::String(loop->source));
+        if (item.rootPitchSource.has_value())
+            appendMetadataPair(tokens, "Pitch source: ", juce::String(*item.rootPitchSource));
 
         return tokens;
+    }
+
+    juce::String metadataTokensToText(const std::vector<MetadataToken> &tokens)
+    {
+        juce::String text;
+        for (const auto &token : tokens)
+            text += token.text;
+        return text;
     }
 
     void drawMetadataTokens(juce::Graphics &g,
@@ -476,13 +572,43 @@ namespace
 namespace sw
 {
 
+    int ResultsPanel::FacetFilters::activeCount() const noexcept
+    {
+        return (format != FormatFilter::Any ? 1 : 0) +
+               (channels != ChannelsFilter::Any ? 1 : 0) +
+               (loop != LoopFilter::Any ? 1 : 0) +
+               (bpm != BpmFilter::Any ? 1 : 0) +
+               (keyPitchClass.has_value() ? 1 : 0);
+    }
+
     ResultsPanel::ResultsPanel()
     {
-        searchBox.setTextToShowWhenEmpty("Search samples...", juce::Colours::grey);
+        searchBox.setTextToShowWhenEmpty("Search samples...  (Ctrl+F)", juce::Colours::grey);
+        searchBox.setTooltip("Every word is matched as a prefix of words in the file name, path, or preset program names.");
         searchBox.onTextChange = [this]
         {
-            if (onSearchQueryChanged)
-                onSearchQueryChanged(searchBox.getText().toStdString());
+            if (suppressControlCallbacks)
+                return;
+            startTimer(kSearchDebounceMs);
+        };
+        searchBox.onReturnKey = [this]
+        {
+            fireSearchQueryChanged();
+            focusResultsList();
+        };
+        searchBox.onEscapeKey = [this]
+        {
+            if (searchBox.getText().isNotEmpty())
+            {
+                suppressControlCallbacks = true;
+                searchBox.clear();
+                suppressControlCallbacks = false;
+                fireSearchQueryChanged();
+            }
+            else if (nearDuplicateBannerVisible && onExitNearDuplicatesRequested)
+            {
+                onExitNearDuplicatesRequested();
+            }
         };
         addAndMakeVisible(searchBox);
 
@@ -490,6 +616,7 @@ namespace sw
         viewSelector.addItem("Favorites", kViewFavoritesId);
         viewSelector.addItem("Duplicates", kViewDuplicatesId);
         viewSelector.setSelectedId(kViewRecentId, juce::dontSendNotification);
+        viewSelector.setTooltip("Choose which files to browse");
         viewSelector.onChange = [this]
         {
             if (suppressControlCallbacks)
@@ -508,33 +635,23 @@ namespace sw
         sortSelector.addItem("Date Oldest", kSortOldestId);
         sortSelector.addItem("Size Largest", kSortSizeLargestId);
         sortSelector.addItem("Size Smallest", kSortSizeSmallestId);
+        sortSelector.addItem("Duration Shortest", kSortDurationShortestId);
+        sortSelector.addItem("Duration Longest", kSortDurationLongestId);
+        sortSelector.addItem("Tempo Slowest", kSortBpmSlowestId);
+        sortSelector.addItem("Tempo Fastest", kSortBpmFastestId);
+        sortSelector.addItem("Key (C to B)", kSortKeyId);
         sortSelector.setSelectedId(kSortNameAscId, juce::dontSendNotification);
+        sortSelector.setTooltip("Sort results. Tempo and key use embedded metadata, falling back to analysis estimates; files without a value sort last.");
         sortSelector.onChange = [this]
         {
             if (suppressControlCallbacks)
                 return;
 
-            const int selectedRow = resultsList.getSelectedRow();
-            const int64_t selectedFileId = (selectedRow >= 0 && selectedRow < static_cast<int>(results.size()))
-                                               ? results[static_cast<size_t>(selectedRow)].id
-                                               : -1;
-
             sortMode = sortModeForSelectorId(sortSelector.getSelectedId());
-            applySort();
-            resultsList.updateContent();
-
-            if (selectedFileId >= 0)
-            {
-                const auto it = std::find_if(results.begin(), results.end(), [selectedFileId](const FileRecord &file)
-                                             { return file.id == selectedFileId; });
-                if (it != results.end())
-                    resultsList.selectRow(static_cast<int>(std::distance(results.begin(), it)));
-            }
+            reapplySortPreservingSelection();
 
             if (onSortModeChanged)
                 onSortModeChanged(sortMode);
-
-            repaint();
         };
         addAndMakeVisible(sortSelector);
 
@@ -546,6 +663,9 @@ namespace sw
             facetFilters.format = formatFilterForSelectorId(formatSelector.getSelectedId());
             facetFilters.channels = channelsFilterForSelectorId(channelsSelector.getSelectedId());
             facetFilters.loop = loopFilterForSelectorId(loopSelector.getSelectedId());
+            facetFilters.bpm = bpmFilterForSelectorId(bpmSelector.getSelectedId());
+            facetFilters.keyPitchClass = keyFilterForSelectorId(keySelector.getSelectedId());
+            updateFilterControlState();
 
             if (onFacetFiltersChanged)
                 onFacetFiltersChanged(facetFilters);
@@ -581,6 +701,36 @@ namespace sw
         loopSelector.onChange = facetChanged;
         addAndMakeVisible(loopSelector);
 
+        bpmSelector.addItem("Tempo: Any", kBpmAnyId);
+        bpmSelector.addItem("Has tempo", kBpmHasTempoId);
+        bpmSelector.addItem("< 90 BPM", kBpmBelow90Id);
+        bpmSelector.addItem("90-110 BPM", kBpm90To110Id);
+        bpmSelector.addItem("110-130 BPM", kBpm110To130Id);
+        bpmSelector.addItem("130-150 BPM", kBpm130To150Id);
+        bpmSelector.addItem("150+ BPM", kBpm150UpId);
+        bpmSelector.setSelectedId(kBpmAnyId, juce::dontSendNotification);
+        bpmSelector.setTooltip("Filter by embedded tempo, falling back to the analysis estimate");
+        bpmSelector.onChange = facetChanged;
+        addAndMakeVisible(bpmSelector);
+
+        keySelector.addItem("Key: Any", kKeyAnyId);
+        for (int pitchClass = 0; pitchClass < 12; ++pitchClass)
+            keySelector.addItem(juce::String("Key: ") + kPitchClassNames[pitchClass], kKeyFirstPitchClassId + pitchClass);
+        keySelector.setSelectedId(kKeyAnyId, juce::dontSendNotification);
+        keySelector.setTooltip("Filter by key or root note pitch class (embedded first, then analysis estimate)");
+        keySelector.onChange = facetChanged;
+        addAndMakeVisible(keySelector);
+
+        clearFiltersButton.setTooltip("Reset all filters to Any");
+        clearFiltersButton.onClick = [this]
+        {
+            setFacetFilters({});
+            if (onFacetFiltersChanged)
+                onFacetFiltersChanged(facetFilters);
+        };
+        addChildComponent(clearFiltersButton);
+
+        favoriteToggle.setTooltip("Mark the selected file as a favorite (F)");
         favoriteToggle.onClick = [this]
         {
             if (suppressControlCallbacks)
@@ -591,14 +741,16 @@ namespace sw
         };
         addAndMakeVisible(favoriteToggle);
 
-        findSimilarButton.setTooltip("Rank candidates by coarse feature similarity; this does not confirm they are duplicates.");
-        findSimilarButton.onClick = [this]
+        nearDuplicatesButton.setTooltip("List near-duplicate candidates for the selected file, ranked by a coarse feature-match heuristic. "
+                                        "This does not confirm they are duplicates.");
+        nearDuplicatesButton.onClick = [this]
         {
-            if (const auto *selectedFile = getResultAt(getSelectedRow()); selectedFile != nullptr && onFindSimilarRequested)
-                onFindSimilarRequested(*selectedFile);
+            if (const auto *selectedFile = getResultAt(getSelectedRow()); selectedFile != nullptr && onNearDuplicatesRequested)
+                onNearDuplicatesRequested(*selectedFile);
         };
-        addAndMakeVisible(findSimilarButton);
+        addAndMakeVisible(nearDuplicatesButton);
 
+        revealButton.setTooltip("Show the selected file in File Explorer (Ctrl+R)");
         revealButton.onClick = [this]
         {
             if (const auto *selectedFile = getResultAt(getSelectedRow()); selectedFile != nullptr && onRevealFileRequested)
@@ -606,59 +758,134 @@ namespace sw
         };
         addAndMakeVisible(revealButton);
 
+        nearDuplicateBannerLabel.setJustificationType(juce::Justification::centredLeft);
+        nearDuplicateBannerLabel.setFont(juce::FontOptions(13.0f));
+        addChildComponent(nearDuplicateBannerLabel);
+
+        exitNearDuplicatesButton.setTooltip("Return to the normal results list (Esc)");
+        exitNearDuplicatesButton.onClick = [this]
+        {
+            if (onExitNearDuplicatesRequested)
+                onExitNearDuplicatesRequested();
+        };
+        addChildComponent(exitNearDuplicatesButton);
+
         resultsList.setModel(this);
         resultsList.setRowHeight(40);
         addAndMakeVisible(resultsList);
 
+        emptyStateLabel.setJustificationType(juce::Justification::centred);
+        emptyStateLabel.setFont(juce::FontOptions(15.0f));
+        emptyStateLabel.setInterceptsMouseClicks(false, false);
+        addChildComponent(emptyStateLabel);
+
+        emptyStateActionButton.onClick = [this]
+        {
+            if (onEmptyStateActionRequested && emptyStateAction != EmptyStateAction::None)
+                onEmptyStateActionRequested(emptyStateAction);
+        };
+        addChildComponent(emptyStateActionButton);
+
         setDarkMode(true);
         updateMetadataControlState();
+        updateFilterControlState();
     }
 
     void ResultsPanel::paint(juce::Graphics &g)
     {
         g.fillAll(darkModeEnabled ? juce::Colour(0xff1e1e1e) : juce::Colour(0xfffafafa));
+
+        if (nearDuplicateBannerVisible)
+        {
+            g.setColour(darkModeEnabled ? juce::Colour(0xff3a3320) : juce::Colour(0xfffff3cd));
+            g.fillRoundedRectangle(nearDuplicateBannerLabel.getBounds().getUnion(exitNearDuplicatesButton.getBounds()).expanded(2).toFloat(), 4.0f);
+        }
     }
 
     void ResultsPanel::resized()
     {
-        auto area = getLocalBounds().reduced(4);
-        auto topRow = area.removeFromTop(28);
-        auto metadataRow = area.removeFromTop(28);
-        constexpr int viewWidth = 110;
-        constexpr int sortWidth = 130;
-        constexpr int formatWidth = 140;
-        constexpr int channelsWidth = 120;
-        constexpr int loopWidth = 120;
-        constexpr int favoriteWidth = 88;
-        constexpr int findSimilarWidth = 100;
-        constexpr int revealWidth = 72;
+        constexpr int rowHeight = 28;
         constexpr int controlGap = 6;
+        constexpr int viewWidth = 110;
+        constexpr int sortWidth = 140;
+        constexpr int favoriteWidth = 88;
+        constexpr int nearDuplicatesWidth = 120;
+        constexpr int revealWidth = 72;
+        constexpr int minSearchWidth = 140;
+
+        auto area = getLocalBounds().reduced(4);
+        auto topRow = area.removeFromTop(rowHeight);
+        area.removeFromTop(4);
+        auto filterRow = area.removeFromTop(rowHeight);
+        area.removeFromTop(4);
 
         viewSelector.setBounds(topRow.removeFromRight(viewWidth));
         topRow.removeFromRight(controlGap);
         sortSelector.setBounds(topRow.removeFromRight(sortWidth));
         topRow.removeFromRight(controlGap);
+
+        // Selection actions share the search row; drop them before squeezing search below its minimum.
+        const int actionsWidth = favoriteWidth + nearDuplicatesWidth + revealWidth + controlGap * 3;
+        const bool showActions = topRow.getWidth() - actionsWidth >= minSearchWidth;
+        favoriteToggle.setVisible(showActions);
+        nearDuplicatesButton.setVisible(showActions);
+        revealButton.setVisible(showActions);
+        if (showActions)
+        {
+            revealButton.setBounds(topRow.removeFromRight(revealWidth));
+            topRow.removeFromRight(controlGap);
+            nearDuplicatesButton.setBounds(topRow.removeFromRight(nearDuplicatesWidth));
+            topRow.removeFromRight(controlGap);
+            favoriteToggle.setBounds(topRow.removeFromRight(favoriteWidth));
+            topRow.removeFromRight(controlGap);
+        }
         searchBox.setBounds(topRow);
 
-        favoriteToggle.setBounds(metadataRow.removeFromRight(favoriteWidth));
-        metadataRow.removeFromRight(controlGap);
-        revealButton.setBounds(metadataRow.removeFromRight(revealWidth));
-        metadataRow.removeFromRight(controlGap);
-        findSimilarButton.setBounds(metadataRow.removeFromRight(findSimilarWidth));
-        metadataRow.removeFromRight(controlGap);
-        loopSelector.setBounds(metadataRow.removeFromLeft(loopWidth));
-        metadataRow.removeFromLeft(controlGap);
-        channelsSelector.setBounds(metadataRow.removeFromLeft(channelsWidth));
-        metadataRow.removeFromLeft(controlGap);
-        formatSelector.setBounds(metadataRow.removeFromLeft(formatWidth));
+        constexpr int clearWidth = 110;
+        if (clearFiltersButton.isVisible())
+        {
+            clearFiltersButton.setBounds(filterRow.removeFromRight(clearWidth));
+            filterRow.removeFromRight(controlGap);
+        }
 
-        area.removeFromTop(4);
+        juce::ComboBox *filterCombos[] = {&formatSelector, &channelsSelector, &loopSelector, &bpmSelector, &keySelector};
+        constexpr int preferredWidths[] = {140, 125, 105, 120, 95};
+        const int comboCount = static_cast<int>(std::size(filterCombos));
+        const int preferredTotal = 140 + 125 + 105 + 120 + 95;
+        const int available = juce::jmax(0, filterRow.getWidth() - controlGap * (comboCount - 1));
+        const float scale = juce::jmin(1.0f, static_cast<float>(available) / static_cast<float>(preferredTotal));
+        for (int i = 0; i < comboCount; ++i)
+        {
+            const int width = static_cast<int>(static_cast<float>(preferredWidths[i]) * scale);
+            filterCombos[i]->setBounds(filterRow.removeFromLeft(width));
+            filterRow.removeFromLeft(controlGap);
+        }
+
+        if (nearDuplicateBannerVisible)
+        {
+            auto bannerRow = area.removeFromTop(rowHeight).reduced(2, 0);
+            area.removeFromTop(4);
+            exitNearDuplicatesButton.setBounds(bannerRow.removeFromRight(130).reduced(0, 2));
+            bannerRow.removeFromRight(controlGap);
+            nearDuplicateBannerLabel.setBounds(bannerRow);
+        }
+
         resultsList.setBounds(area);
+
+        auto emptyArea = area.reduced(24).withSizeKeepingCentre(juce::jmin(area.getWidth() - 48, 520), 110);
+        emptyStateLabel.setBounds(emptyArea.removeFromTop(64));
+        emptyArea.removeFromTop(8);
+        emptyStateActionButton.setBounds(emptyArea.withSizeKeepingCentre(160, 28));
     }
 
     void ResultsPanel::setResults(std::vector<FileRecord> newResults)
     {
-        // Deselect before updating to avoid stale selection indices
+        const auto *previouslySelected = getResultAt(resultsList.getSelectedRow());
+        const int64_t previouslySelectedId = previouslySelected != nullptr ? previouslySelected->id : -1;
+
+        // Rebuilding the list must not look like a new user selection (that would
+        // reload/auto-play the preview), so selection callbacks are suppressed.
+        suppressSelectionCallbacks = true;
         resultsList.deselectAllRows();
         waveformCacheMisses.clear();
 
@@ -668,15 +895,120 @@ namespace sw
         applySort();
 
         resultsList.updateContent();
+
+        bool reselected = false;
+        if (previouslySelectedId >= 0)
+        {
+            const auto it = std::find_if(results.begin(), results.end(), [previouslySelectedId](const FileRecord &file)
+                                         { return file.id == previouslySelectedId; });
+            if (it != results.end())
+            {
+                resultsList.selectRow(static_cast<int>(std::distance(results.begin(), it)));
+                reselected = true;
+            }
+        }
+        suppressSelectionCallbacks = false;
+
+        if (!reselected && previouslySelectedId >= 0)
+            setSelectedFileMetadata(std::nullopt);
+
         updateMetadataControlState();
+        updateEmptyStateVisibility();
         repaint();
     }
 
     void ResultsPanel::setSearchQuery(const std::string &query)
     {
+        stopTimer();
         suppressControlCallbacks = true;
         searchBox.setText(query, juce::dontSendNotification);
         suppressControlCallbacks = false;
+    }
+
+    std::string ResultsPanel::getSearchQuery() const
+    {
+        return searchBox.getText().toStdString();
+    }
+
+    void ResultsPanel::focusSearchBox()
+    {
+        searchBox.grabKeyboardFocus();
+        searchBox.selectAll();
+    }
+
+    void ResultsPanel::focusResultsList()
+    {
+        if (!results.empty() && resultsList.getSelectedRow() < 0)
+            resultsList.selectRow(0);
+        resultsList.grabKeyboardFocus();
+    }
+
+    void ResultsPanel::fireSearchQueryChanged()
+    {
+        stopTimer();
+        if (onSearchQueryChanged)
+            onSearchQueryChanged(searchBox.getText().toStdString());
+    }
+
+    void ResultsPanel::timerCallback()
+    {
+        fireSearchQueryChanged();
+    }
+
+    void ResultsPanel::setNearDuplicateReference(std::optional<juce::String> referenceName)
+    {
+        const bool visible = referenceName.has_value();
+        if (visible)
+            nearDuplicateBannerLabel.setText("Near-duplicate candidates for: " + *referenceName +
+                                                 "   (ranked by feature-match heuristic, not confirmed)",
+                                             juce::dontSendNotification);
+
+        if (visible == nearDuplicateBannerVisible)
+            return;
+
+        nearDuplicateBannerVisible = visible;
+        nearDuplicateBannerLabel.setVisible(visible);
+        exitNearDuplicatesButton.setVisible(visible);
+        resized();
+        repaint();
+    }
+
+    void ResultsPanel::setEmptyState(const juce::String &message, EmptyStateAction action)
+    {
+        emptyStateLabel.setText(message, juce::dontSendNotification);
+        emptyStateAction = action;
+
+        switch (action)
+        {
+        case EmptyStateAction::AddSource:
+            emptyStateActionButton.setButtonText("Add Source Folder");
+            break;
+        case EmptyStateAction::ClearSearch:
+            emptyStateActionButton.setButtonText("Clear Search");
+            break;
+        case EmptyStateAction::ClearFilters:
+            emptyStateActionButton.setButtonText("Clear Filters");
+            break;
+        case EmptyStateAction::ShowAllFiles:
+            emptyStateActionButton.setButtonText("Show All Files");
+            break;
+        case EmptyStateAction::ExitNearDuplicates:
+            emptyStateActionButton.setButtonText("Back to Results");
+            break;
+        case EmptyStateAction::None:
+        default:
+            emptyStateActionButton.setButtonText({});
+            break;
+        }
+
+        updateEmptyStateVisibility();
+    }
+
+    void ResultsPanel::updateEmptyStateVisibility()
+    {
+        const bool showEmptyState = results.empty() && emptyStateLabel.getText().isNotEmpty();
+        emptyStateLabel.setVisible(showEmptyState);
+        emptyStateActionButton.setVisible(showEmptyState && emptyStateAction != EmptyStateAction::None);
     }
 
     void ResultsPanel::setViewMode(ViewMode mode)
@@ -699,8 +1031,25 @@ namespace sw
         suppressControlCallbacks = true;
         sortSelector.setSelectedId(selectorIdForSortMode(mode), juce::dontSendNotification);
         suppressControlCallbacks = false;
+        reapplySortPreservingSelection();
+    }
+
+    void ResultsPanel::reapplySortPreservingSelection()
+    {
+        const auto *selected = getResultAt(resultsList.getSelectedRow());
+        const int64_t selectedId = selected != nullptr ? selected->id : -1;
+
+        suppressSelectionCallbacks = true;
         applySort();
         resultsList.updateContent();
+        if (selectedId >= 0)
+        {
+            const auto it = std::find_if(results.begin(), results.end(), [selectedId](const FileRecord &file)
+                                         { return file.id == selectedId; });
+            if (it != results.end())
+                resultsList.selectRow(static_cast<int>(std::distance(results.begin(), it)));
+        }
+        suppressSelectionCallbacks = false;
         repaint();
     }
 
@@ -716,12 +1065,34 @@ namespace sw
         formatSelector.setSelectedId(selectorIdForFormatFilter(facetFilters.format), juce::dontSendNotification);
         channelsSelector.setSelectedId(selectorIdForChannelsFilter(facetFilters.channels), juce::dontSendNotification);
         loopSelector.setSelectedId(selectorIdForLoopFilter(facetFilters.loop), juce::dontSendNotification);
+        bpmSelector.setSelectedId(selectorIdForBpmFilter(facetFilters.bpm), juce::dontSendNotification);
+        keySelector.setSelectedId(selectorIdForKeyFilter(facetFilters.keyPitchClass), juce::dontSendNotification);
         suppressControlCallbacks = false;
+        updateFilterControlState();
     }
 
     ResultsPanel::FacetFilters ResultsPanel::getFacetFilters() const noexcept
     {
         return facetFilters;
+    }
+
+    void ResultsPanel::updateFilterControlState()
+    {
+        const int active = facetFilters.activeCount();
+        clearFiltersButton.setButtonText("Clear Filters (" + juce::String(active) + ")");
+        const bool wasVisible = clearFiltersButton.isVisible();
+        clearFiltersButton.setVisible(active > 0);
+
+        const auto accent = darkModeEnabled ? juce::Colour(0xff6b9bc8) : juce::Colour(0xff2f6fa8);
+        const auto outline = darkModeEnabled ? juce::Colour(0xff4d4d4d) : juce::Colour(0xffb8b8b8);
+        formatSelector.setColour(juce::ComboBox::outlineColourId, facetFilters.format != FormatFilter::Any ? accent : outline);
+        channelsSelector.setColour(juce::ComboBox::outlineColourId, facetFilters.channels != ChannelsFilter::Any ? accent : outline);
+        loopSelector.setColour(juce::ComboBox::outlineColourId, facetFilters.loop != LoopFilter::Any ? accent : outline);
+        bpmSelector.setColour(juce::ComboBox::outlineColourId, facetFilters.bpm != BpmFilter::Any ? accent : outline);
+        keySelector.setColour(juce::ComboBox::outlineColourId, facetFilters.keyPitchClass.has_value() ? accent : outline);
+
+        if (wasVisible != clearFiltersButton.isVisible())
+            resized();
     }
 
     void ResultsPanel::setSelectedFileMetadata(std::optional<FileUserDataRecord> userData)
@@ -788,6 +1159,35 @@ namespace sw
             return compareNameAsc(a, b);
         };
 
+        // Files missing the sort value always go last, regardless of direction.
+        const auto compareOptional = [compareNameAsc](const auto &aValue, const auto &bValue, bool ascending,
+                                                      const FileRecord &a, const FileRecord &b)
+        {
+            if (aValue.has_value() != bValue.has_value())
+                return aValue.has_value();
+            if (aValue.has_value() && *aValue != *bValue)
+                return ascending ? (*aValue < *bValue) : (*aValue > *bValue);
+            return compareNameAsc(a, b);
+        };
+
+        auto compareDurationShortest = [compareOptional](const FileRecord &a, const FileRecord &b)
+        { return compareOptional(a.durationSec, b.durationSec, true, a, b); };
+        auto compareDurationLongest = [compareOptional](const FileRecord &a, const FileRecord &b)
+        { return compareOptional(a.durationSec, b.durationSec, false, a, b); };
+        auto compareBpmSlowest = [compareOptional](const FileRecord &a, const FileRecord &b)
+        { return compareOptional(a.effectiveBpm(), b.effectiveBpm(), true, a, b); };
+        auto compareBpmFastest = [compareOptional](const FileRecord &a, const FileRecord &b)
+        { return compareOptional(a.effectiveBpm(), b.effectiveBpm(), false, a, b); };
+        auto compareKey = [compareOptional](const FileRecord &a, const FileRecord &b)
+        {
+            const auto pitchClassOf = [](const FileRecord &file) -> std::optional<int>
+            {
+                const auto &keyText = file.effectiveKey();
+                return keyText.has_value() ? keyPitchClass(*keyText) : std::nullopt;
+            };
+            return compareOptional(pitchClassOf(a), pitchClassOf(b), true, a, b);
+        };
+
         if (nearDuplicateResultsActive)
         {
             std::stable_sort(results.begin(), results.end(), [compareNameAsc](const FileRecord &a, const FileRecord &b)
@@ -826,6 +1226,21 @@ namespace sw
         case SortMode::SizeSmallestFirst:
             sortWithDuplicateGroups(compareSizeSmallestFirst);
             break;
+        case SortMode::DurationShortest:
+            sortWithDuplicateGroups(compareDurationShortest);
+            break;
+        case SortMode::DurationLongest:
+            sortWithDuplicateGroups(compareDurationLongest);
+            break;
+        case SortMode::BpmSlowest:
+            sortWithDuplicateGroups(compareBpmSlowest);
+            break;
+        case SortMode::BpmFastest:
+            sortWithDuplicateGroups(compareBpmFastest);
+            break;
+        case SortMode::KeyAsc:
+            sortWithDuplicateGroups(compareKey);
+            break;
         case SortMode::NameAsc:
         default:
             sortWithDuplicateGroups(compareNameAsc);
@@ -845,8 +1260,14 @@ namespace sw
         {
             if (const auto resolved = onResolveWaveformCachePeaksForFile(file); resolved.has_value() && !resolved->empty())
             {
-                waveformPeaksByFileId[file.id] = *resolved;
-                return &waveformPeaksByFileId[file.id];
+                if (waveformPeaksByFileId.size() >= kMaxCachedWaveformThumbnails && !waveformPeaksInsertionOrder.empty())
+                {
+                    waveformPeaksByFileId.erase(waveformPeaksInsertionOrder.front());
+                    waveformPeaksInsertionOrder.pop_front();
+                }
+
+                waveformPeaksInsertionOrder.push_back(file.id);
+                return &(waveformPeaksByFileId[file.id] = *resolved);
             }
         }
 
@@ -965,7 +1386,7 @@ namespace sw
         searchBox.setColour(juce::TextEditor::backgroundColourId, editorBg);
         searchBox.setColour(juce::TextEditor::outlineColourId, outline);
         searchBox.setColour(juce::TextEditor::focusedOutlineColourId, darkModeEnabled ? juce::Colour(0xff6b9bc8) : juce::Colour(0xff2f6fa8));
-        searchBox.setTextToShowWhenEmpty("Search samples...", placeholder);
+        searchBox.setTextToShowWhenEmpty("Search samples...  (Ctrl+F)", placeholder);
 
         viewSelector.setColour(juce::ComboBox::textColourId, textColour);
         viewSelector.setColour(juce::ComboBox::backgroundColourId, comboBg);
@@ -992,10 +1413,21 @@ namespace sw
         loopSelector.setColour(juce::ComboBox::outlineColourId, outline);
         loopSelector.setColour(juce::ComboBox::arrowColourId, textColour);
 
+        for (auto *combo : {&bpmSelector, &keySelector})
+        {
+            combo->setColour(juce::ComboBox::textColourId, textColour);
+            combo->setColour(juce::ComboBox::backgroundColourId, comboBg);
+            combo->setColour(juce::ComboBox::outlineColourId, outline);
+            combo->setColour(juce::ComboBox::arrowColourId, textColour);
+        }
+
         favoriteToggle.setColour(juce::ToggleButton::textColourId, textColour);
+        nearDuplicateBannerLabel.setColour(juce::Label::textColourId, darkModeEnabled ? juce::Colour(0xfff1d98a) : juce::Colour(0xff6b4e00));
+        emptyStateLabel.setColour(juce::Label::textColourId, darkModeEnabled ? juce::Colour(0xffa8b3bf) : juce::Colour(0xff5a6570));
 
         resultsList.setColour(juce::ListBox::backgroundColourId, darkModeEnabled ? juce::Colour(0xff1e1e1e) : juce::Colour(0xfffafafa));
 
+        updateFilterControlState();
         repaint();
     }
 
@@ -1003,7 +1435,7 @@ namespace sw
     {
         const bool hasSelectedFile = getSelectedRow() >= 0;
         favoriteToggle.setEnabled(hasSelectedFile);
-        findSimilarButton.setEnabled(hasSelectedFile);
+        nearDuplicatesButton.setEnabled(hasSelectedFile);
         revealButton.setEnabled(hasSelectedFile);
     }
 
@@ -1107,6 +1539,9 @@ namespace sw
 
     void ResultsPanel::selectedRowsChanged(int lastRowSelected)
     {
+        if (suppressSelectionCallbacks)
+            return;
+
         const auto *selectedFile = getResultAt(lastRowSelected);
         if (selectedFile == nullptr)
         {
@@ -1128,6 +1563,22 @@ namespace sw
 
         if (onFileActivated)
             onFileActivated(*selectedFile);
+    }
+
+    void ResultsPanel::returnKeyPressed(int lastRowSelected)
+    {
+        if (const auto *selectedFile = getResultAt(lastRowSelected); selectedFile != nullptr && onFileActivated)
+            onFileActivated(*selectedFile);
+    }
+
+    juce::String ResultsPanel::getTooltipForRow(int row)
+    {
+        const auto *item = getResultAt(row);
+        if (item == nullptr)
+            return {};
+
+        return juce::String(item->relativePath) + (item->indexOnly ? "  [index-only]" : "") + "\n" +
+               metadataTokensToText(buildMetadataTokens(*item));
     }
 
 } // namespace sw

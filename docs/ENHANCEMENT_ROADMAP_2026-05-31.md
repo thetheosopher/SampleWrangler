@@ -5,25 +5,27 @@ Codebase: SampleWrangler (Windows JUCE audio sample librarian)
 
 # SampleWrangler — Enhancement Roadmap
 
+> Status updated 2026-10-31. Live priorities are tracked in `ROADMAP_TRACKER.md` ("Suggested Next Session Order").
+
 Companion to `CODE_REVIEW_2026-05-31.md`. This is the actionable handoff document.
 
 ## Summary Table
 
-| # | Item | Category | Perspective | Effort | Impact | Area |
-|---|------|----------|-------------|--------|--------|------|
-| QW1 | Targeted analysis query (stop fetching whole catalog) | Performance | Engineering | S | High | Pipeline/Catalog |
-| QW2 | Log swallowed setting-parse failures | Reliability | Engineering | XS | Medium | App |
-| QW3 | Log skipped/un-analyzable files | Observability | Engineering | XS | Medium | Pipeline |
-| QW4 | Root-path cache for jobs | Performance | Engineering | S | Medium | Pipeline/Catalog |
-| QW5 | Batch scanner upserts in transactions | Performance | Engineering | S | Medium | Pipeline/Catalog |
-| MP1 | Sortable results (name/duration/BPM/key/date) | Feature/UX | Both | M | High | UI/Catalog |
-| MP2 | Lightweight facet filters | Feature/UX | Both | M | High | UI/Catalog |
-| MP3 | Duplicate browser (uses existing data) | Feature | Both | M | High | UI/Catalog |
-| MP4 | "Recently Added" view | Feature | Product | S | Medium | UI/Catalog |
-| MP5 | Keyboard shortcuts + empty/loading states | UX | Both | M | Medium | UI |
-| SI1 | Sprint D analysis substrate + BPM/key inference | Feature | Both | L | High | Pipeline/Catalog/UI |
-| SI2 | Similarity / near-duplicate search | Feature | Both | XL | High | Pipeline/Catalog/UI |
-| SI3 | Audiocity "Open in" bridge (Sprint E) | Feature | Product | M | High | App/UI |
+| # | Item | Category | Perspective | Effort | Impact | Area | Status |
+|---|------|----------|-------------|--------|--------|------|--------|
+| QW1 | Targeted analysis query (stop fetching whole catalog) | Performance | Engineering | S | High | Pipeline/Catalog | Done (1.2.0) |
+| QW2 | Log swallowed setting-parse failures | Reliability | Engineering | XS | Medium | App | Done (1.2.0) |
+| QW3 | Log skipped/un-analyzable files | Observability | Engineering | XS | Medium | Pipeline | Done (1.2.0) |
+| QW4 | Root-path cache for jobs | Performance | Engineering | S | Medium | Pipeline/Catalog | Open |
+| QW5 | Batch scanner upserts in transactions | Performance | Engineering | S | Medium | Pipeline/Catalog | Done |
+| MP1 | Sortable results (name/duration/BPM/key/date) | Feature/UX | Both | M | High | UI/Catalog | Done (duration/tempo/key sorts added Oct 2026; still in-memory, not SQL) |
+| MP2 | Lightweight facet filters | Feature/UX | Both | M | High | UI/Catalog | Done (tempo/key added Oct 2026) |
+| MP3 | Duplicate browser (uses existing data) | Feature | Both | M | High | UI/Catalog | Done (1.3.0) |
+| MP4 | "Recently Added" view | Feature | Product | S | Medium | UI/Catalog | Open (partly covered by Date Newest sort) |
+| MP5 | Keyboard shortcuts + empty/loading states | UX | Both | M | Medium | UI | Done (Oct 2026 usability pass) |
+| SI1 | Sprint D analysis substrate + BPM/key inference | Feature | Both | L | High | Pipeline/Catalog/UI | Done (Sprint D slices 1-3) |
+| SI2 | Similarity / near-duplicate search | Feature | Both | XL | High | Pipeline/Catalog/UI | Partial (near-duplicates done; similarity search open) |
+| SI3 | Audiocity "Open in" bridge (Sprint E) | Feature | Product | M | High | App/UI | Open (Sprint E) |
 
 ---
 

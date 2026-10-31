@@ -54,7 +54,7 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
 
 - Reuse the exact-duplicate foundation already present in `CatalogDb::listDuplicateFiles()`.
 - Group exact duplicate rows by hash and show each cluster's size while preserving root, text, sort, and facet filtering.
-- Provide `Find Similar` and `Reveal` actions for selected files.
+- Provide `Near Duplicates` (originally labeled `Find Similar`) and `Reveal` actions for selected files.
 - Require current, complete analysis with matching file modification time and content fingerprint before returning near-duplicate candidates.
 - Use a bounded SQL prefilter: same channel count and loop-presence classification, sample rate within 10%, and duration within `max(0.25 seconds, 2%)`. Rank at most 500 coarse candidates using the v1 duration/RMS/peak/zero-crossing feature vector and return at most 200.
 - Label the result as a feature-match heuristic, not a probability or confirmation of duplication. This is an initial discovery workflow, not semantic similarity search.
@@ -94,7 +94,7 @@ Turn SampleWrangler into a practical discovery tool by adding offline audio inte
   - onset density / transient count
   - loop-confidence score
 - Rank candidates on a worker thread with a straightforward cosine or weighted-distance search.
-- Add a simple entry point such as `Find Similar` on the selected file and surface results as a dedicated result mode or temporary query state.
+- Add a `Find Similar` entry point on the selected file, separate from the shipped `Near Duplicates` action. Surface results with the same banner-and-exit pattern near-duplicate mode uses.
 - Defer approximate-nearest-neighbor indexing until brute-force ranking over persisted features proves too slow on real libraries.
 
 ### 5. ML-Assisted Classification

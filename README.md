@@ -46,6 +46,16 @@ If you find SampleWrangler useful and want to support continued development, you
 
 ## Version History
 
+### Unreleased
+
+- Added background audio analysis: tempo, key, transient, and loop-suggestion estimates. They are shown separately from embedded metadata and never overwrite it.
+- Added near-duplicate candidates for a selected file (feature-match heuristic, shown with a banner and an exit button) and cluster-aware exact-duplicate browsing.
+- Added Duration, Tempo, and Key sort modes, plus Tempo-range and Key filters.
+- Search now accepts any text, including `#`, `-`, parentheses, and quotes, and matches each word as a prefix consistently in every view.
+- Added keyboard shortcuts, explanatory empty states with one-click fixes, a Clear Filters button, an "All Sources" row, and a fuller source context menu.
+- The results list keeps your selection across refreshes and updates automatically when background analysis finishes.
+- Fixed an intermittent hang when background workers shut down.
+
 ### 1.3.0
 
 - Added sortable results in the browser UI with name, date, and size sort modes.
@@ -77,9 +87,11 @@ If you find SampleWrangler useful and want to support continued development, you
 ### Library and Catalog
 
 - Local-only SQLite catalog with FTS5 full-text search over file names and paths.
+- Search matches every word as a prefix of words in file names, paths, and preset program names. Punctuation is ignored, so `C# stab` or `kick-808` work as expected.
 - Results workflow includes `All Files`, `Favorites`, and `Duplicates`, with per-root browsing from the source tree.
-- Sortable results with name/date/size ordering.
-- Lightweight facet filters for format, channels, and loop presence.
+- Sortable results by name, date, size, duration, tempo, and key.
+- Facet filters for format, channels, loop presence, tempo range, and key.
+- Near-duplicate candidates for a selected file, ranked by a coarse feature-match heuristic.
 - Source folder management: add, rename, remap, delete, rescan, and reveal in Explorer.
 - File identity based on source root + relative path, making source-folder relocation practical.
 - Duplicate browsing based on sampled content-hash grouping.
@@ -87,6 +99,7 @@ If you find SampleWrangler useful and want to support continued development, you
 
 ### Scanning and Metadata Extraction
 
+- Background analysis estimates tempo, key, transients, and loop points for playable audio. Estimates are labeled with their confidence, and embedded metadata always wins.
 - Recursive background scanning with cancellation support and transaction-batched DB updates.
 - Rich metadata: file size, duration, sample rate, channels, bit depth, bitrate, codec, BPM, key, loop markers, and REX slice count.
 - ACID WAV metadata parsing (BPM, root note, beats, loop points).
@@ -119,6 +132,22 @@ If you find SampleWrangler useful and want to support continued development, you
 - Drag-and-drop files out of the application to Explorer or other programs.
 - Persisted app state: theme, audio device, MIDI input, preview settings, layout, and last selection.
 - Persisted browser state: results view mode, sort mode, and facet filters.
+- Empty results explain why and offer a one-click fix (add a source, clear search, clear filters).
+
+### Keyboard Shortcuts
+
+| Key | Action |
+| --- | ------ |
+| `Ctrl+F` | Focus the search box |
+| `Enter` (in search) | Run the search now and move to the results list |
+| `Esc` | Clear the search, or leave near-duplicate mode |
+| `Up` / `Down` | Move the result selection |
+| `Enter` | Play the selected file |
+| `Space` | Play / stop |
+| `F` | Toggle favorite on the selected file |
+| `Ctrl+R` | Reveal the selected file in File Explorer |
+| `+` / `-` | Transpose preview by one semitone |
+| `0` | Reset transpose |
 
 ---
 
@@ -240,7 +269,8 @@ The repository includes lightweight native tests for catalog, scanning, waveform
 
 | Test Target                             | Coverage                                                   |
 | --------------------------------------- | ---------------------------------------------------------- |
-| `SampleWranglerCatalogDbTests`          | SQLite catalog queries, schema migrations, and favorites   |
+| `SampleWranglerCatalogDbTests`          | SQLite catalog queries, search parsing, migrations, favorites |
+| `SampleWranglerAnalyzerTests`           | Background analysis features and tempo/key/loop inference  |
 | `SampleWranglerScannerAppleLoopTests`   | Apple Loop parsing plus indexed preset-format ingestion    |
 | `SampleWranglerWaveformPeakTests`       | Waveform peak generation                                   |
 | `SampleWranglerAcpPresetReaderTests`    | Audiocity `.acp` preset parsing and sample-path resolution |

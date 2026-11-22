@@ -314,11 +314,27 @@ install(FILES
     COMPONENT Runtime
 )
 
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/LICENSE.md"
+    DESTINATION licenses RENAME JUCE-LICENSE.md COMPONENT Runtime
+)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/modules/juce_audio_devices/native/asio/LICENSE.txt"
+    DESTINATION licenses RENAME ASIO-LICENSE.txt COMPONENT Runtime
+)
+
 if(SW_HAVE_REX)
     install(FILES
         "${REX_SDK_DIR}/Win/x64/Deployment/REX Shared Library.dll"
         DESTINATION .
         COMPONENT Runtime
+    )
+    install(FILES "${REX_SDK_DIR}/General License Agreement.txt"
+        DESTINATION licenses RENAME REX-LICENSE.txt COMPONENT Runtime
+    )
+endif()
+
+if(SW_HAVE_RUBBERBAND)
+    install(FILES "${RUBBERBAND_SOURCE_PATH}/COPYING"
+        DESTINATION licenses RENAME RubberBand-COPYING.txt COMPONENT Runtime
     )
 endif()
 

@@ -9,6 +9,8 @@ A fast Windows desktop audio sample librarian and preview tool built with JUCE, 
 
 Add source folders, scan them into a searchable catalog, inspect waveform and metadata, and audition files with low-latency ASIO playback, looping, and MIDI-driven pitch preview — all from a single lightweight application.
 
+**Download 1.4.0 for Windows 10+ (x64):** [Installer](https://github.com/thetheosopher/SampleWrangler/releases/download/v1.4.0/SampleWrangler-1.4.0-win64-setup.exe) · [Portable ZIP](https://github.com/thetheosopher/SampleWrangler/releases/download/v1.4.0/SampleWrangler-1.4.0-win64-portable.zip) · [Release notes](https://github.com/thetheosopher/SampleWrangler/releases/tag/v1.4.0)
+
 ## Screenshot
 
 ![SampleWrangler main window](docs/MainWindow.png)
@@ -260,6 +262,8 @@ cmake --build --preset vs2026-release-portable-zip
 ```
 
 Release artifacts are statically linked where possible. The only unavoidable external runtime dependency currently shipped beside the executable is the REX SDK DLL when REX support is enabled.
+
+Third-party license notices are included in the `licenses` directory of the installer and portable ZIP.
 
 ---
 

@@ -46,7 +46,7 @@ If you find SampleWrangler useful and want to support continued development, you
 
 ## Version History
 
-### Unreleased
+### 1.4.0
 
 - Added background audio analysis: tempo, key, transient, and loop-suggestion estimates. They are shown separately from embedded metadata and never overwrite it.
 - Added near-duplicate candidates for a selected file (feature-match heuristic, shown with a banner and an exit button) and cluster-aware exact-duplicate browsing.
@@ -245,10 +245,10 @@ cmake --build --preset vs2026-release-artifacts
 
 This produces:
 
-- `build/vs2026-release/packages/SampleWrangler-1.3.0-win64-setup.exe`
-- `build/vs2026-release/packages/SampleWrangler-1.3.0-win64-portable.zip`
+- `build/vs2026-release/packages/SampleWrangler-1.4.0-win64-setup.exe`
+- `build/vs2026-release/packages/SampleWrangler-1.4.0-win64-portable.zip`
 
-The app executable, installer, and portable artifact are versioned as `1.3.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
+The app executable, installer, and portable artifact are versioned as `1.4.0`. Windows version metadata is stamped into the app executable, and both the app metadata and installer carry the current build-year copyright for Michael A. McCloskey.
 
 The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php) and supports per-user or per-machine installs, Add/Remove Programs registration, and optional Start Menu/Desktop shortcuts.
 

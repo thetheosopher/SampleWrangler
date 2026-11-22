@@ -134,6 +134,13 @@ Status: Partially started through `.acp` preview support
 - Index all Audiocity-importable formats even when preview is index-only
 - Broaden `.acp` compatibility if more external path keys or embedded encodings are found
 
+#### First handoff release
+
+- **Open in Audiocity** sends one local WAV or AIFF file to Audiocity Standalone. It does not target VST3 or convert presets.
+- If Audiocity is closed, launch it and import the sample after startup. If it is already open, reuse the existing window and ask before replacing the current sound. Canceling leaves the current sound untouched; a failed import must also leave it playable.
+- Report a missing or incompatible Audiocity installation, a missing sample, and an unsupported format separately. Allow the user to locate a portable installation rather than require an installer.
+- Verify cold launch, warm accept/cancel, failed import, and paths with spaces and Unicode before exposing the action. Add opt-in library-folder discovery only after the handoff is verified.
+
 ## Usability Pass (October 2026)
 
 Landed after the roadmap review:

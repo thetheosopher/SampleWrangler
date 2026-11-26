@@ -12,7 +12,7 @@
 #include <numeric>
 #include <string>
 #include <vector>
-#include <JuceHeader.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 
 namespace sw
 {
